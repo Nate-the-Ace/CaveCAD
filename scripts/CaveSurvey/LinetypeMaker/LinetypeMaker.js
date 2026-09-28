@@ -548,6 +548,7 @@ LinetypeMaker.readForm = function(custom) {
         if (s.text !== "") {
             var had = prev.text !== "";
             s.shape = had && prev.shape === true;
+            s.fitWidth = had ? prev.fitWidth : undefined;
             // a row that just gained text gets the defaults
             s.style = had && prev.style ? prev.style : "standard";
             s.anchor = had && prev.anchor ? prev.anchor : CsLinetype.DEFAULT_ANCHOR;
@@ -574,6 +575,8 @@ LinetypeMaker.readForm = function(custom) {
 LinetypeMaker.finish = function(keepRows) {
     var segs = LinetypeMaker.w.model.segments;
     for (var i = 0; i < segs.length; i++) {
+        // the gap first: the anchor is placed within it
+        CsLinetypeStore.fitText(segs[i]);
         CsLinetypeStore.anchorize(segs[i]);
     }
     LinetypeMaker.load(LinetypeMaker.w.model, keepRows);

@@ -273,6 +273,28 @@ CsLinetype.anchorOffset = function(anchor, box, rowLength) {
     return { x: refX - boxX, y: -boxY };
 };
 
+/** Clearance each side of a text, as a fraction of its height. */
+CsLinetype.TEXT_PAD = 0.25;
+
+/**
+ * Makes a text row the gap its text needs. The row keeps the clearance it
+ * had: when the text gets wider (size, font, wording, rotation) the row
+ * grows by the same amount, and narrower shrinks it. It never goes below
+ * the text's width plus TEXT_PAD x height each side, and it is always a
+ * gap -- a text drawn over a dash is unreadable.
+ *
+ * width: the text's measured width now; prevWidth: at the last fit, or
+ * undefined the first time (then only the minimum applies).
+ */
+CsLinetype.fitTextRow = function(seg, width, prevWidth) {
+    var len = Math.abs(Number(seg.length) || 0);
+    if (typeof prevWidth === "number" && isFinite(prevWidth)) {
+        len += width - prevWidth;
+    }
+    var minimum = width + 2 * CsLinetype.TEXT_PAD * (Number(seg.scale) || 0);
+    seg.length = -Math.max(len, minimum);
+};
+
 /** Which anchor a segment's offsets match, or "custom". */
 CsLinetype.anchorOf = function(seg, box) {
     var tol = 1e-4 * Math.max(1, Math.abs(box.maxX - box.minX), Math.abs(seg.length));

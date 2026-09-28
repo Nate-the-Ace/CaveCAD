@@ -32987,6 +32987,45 @@ ok(typeof CsGhost !== "undefined", "CsGhost loaded");
     eqs(lay.glyphs[0].index, 1, "layout: glyph names its segment");
     eqs(CsLinetype.layout({ segments: [] }, 5).dashes.length, 0,
         "layout: empty pattern draws nothing");
+
+    // Anchoring: a 0.3-wide, 0.1-tall text in a 0.5 row.
+    var box = { minX: 0, minY: 0, maxX: 0.3, maxY: 0.1 };
+    var mc = CsLinetype.anchorOffset("MC", box, -0.5);
+    near(mc.x, -0.4, 1e-12, "anchor MC: centred in its row (-0.25 - 0.15)");
+    near(mc.y, -0.05, 1e-12, "anchor MC: centred on the line");
+    var bl = CsLinetype.anchorOffset("BL", box, -0.5);
+    near(bl.x, -0.5, 1e-12, "anchor BL: starts at the row's start");
+    near(bl.y, 0, 1e-12, "anchor BL: sits on the line");
+    var tr = CsLinetype.anchorOffset("TR", box, -0.5);
+    near(tr.x, -0.3, 1e-12, "anchor TR: ends at the row's end");
+    near(tr.y, -0.1, 1e-12, "anchor TR: hangs below the line");
+    var seg = CsLinetype.segment(-0.5);
+    seg.x = mc.x;
+    seg.y = mc.y;
+    eqs(CsLinetype.anchorOf(seg, box), "MC", "anchorOf reads MC back");
+    seg.y = 0.2;
+    eqs(CsLinetype.anchorOf(seg, box), "custom", "anchorOf: hand offsets are custom");
+    eqs(CsLinetype.DEFAULT_ANCHOR, "MC", "default anchor is middle center");
+
+    // A text row is a gap that follows its text.
+    var ft = CsLinetype.segment(-0.5);
+    ft.text = "W";
+    ft.scale = 0.1;
+    CsLinetype.fitTextRow(ft, 0.3, undefined);
+    near(ft.length, -0.5, 1e-12, "fit: a roomy row is left alone on first measure");
+    CsLinetype.fitTextRow(ft, 0.6, 0.3);
+    near(ft.length, -0.8, 1e-12, "fit: text 0.3 wider -> row 0.3 longer (clearance kept)");
+    CsLinetype.fitTextRow(ft, 0.3, 0.6);
+    near(ft.length, -0.5, 1e-12, "fit: text narrower -> row shorter by the same");
+    ft.length = -0.1;
+    CsLinetype.fitTextRow(ft, 0.3, 0.3);
+    near(ft.length, -(0.3 + 2 * CsLinetype.TEXT_PAD * 0.1), 1e-12,
+        "fit: never shorter than the text plus clearance");
+    var onDash = CsLinetype.segment(0.5);
+    onDash.text = "W";
+    onDash.scale = 0.1;
+    CsLinetype.fitTextRow(onDash, 0.3, undefined);
+    ok(onDash.length < 0, "fit: a text row is always a gap, never drawn over a dash");
 }());
 
 // ---------------------------------------------------------------------

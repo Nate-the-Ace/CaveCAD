@@ -125,6 +125,55 @@ for (var j = 0; j < fromDxf.linetypes.length; j++) {
 check(got !== null, "DXF import did not list CSDXF");
 check(got.segments[1].text === "DXF", "DXF import lost the text");
 
+// ---- fonts and anchoring --------------------------------------------------
+var fonts = CsLinetypeStore.fontNames();
+check(fonts.length > 5, "font list: " + fonts.length);
+var hasStandard = false;
+for (var fn = 0; fn < fonts.length; fn++) {
+    check(!/shp$/i.test(fonts[fn]), "shape font offered as a text font: " + fonts[fn]);
+    if (fonts[fn].toLowerCase() === "standard") {
+        hasStandard = true;
+    }
+}
+check(hasStandard, "standard font missing from the list");
+
+var aseg = CsLinetype.segment(-0.5);
+aseg.text = "W";
+aseg.style = "standard";
+aseg.scale = 0.1;
+aseg.anchor = "MC";
+var abox = CsLinetypeStore.textBox(aseg);
+check(abox !== null && abox.maxX > abox.minX && abox.maxY > abox.minY,
+    "text box not measured: " + JSON.stringify(abox));
+CsLinetypeStore.anchorize(aseg);
+var centreX = aseg.x + (abox.minX + abox.maxX) / 2;
+var centreY = aseg.y + (abox.minY + abox.maxY) / 2;
+check(Math.abs(centreX + 0.25) < 1e-6, "MC text not centred in its row: " + centreX);
+check(Math.abs(centreY) < 1e-6, "MC text not centred on the line: " + centreY);
+var round = CsLinetypeStore.deriveAnchors({ segments: [
+    CsLinetype.fromPattern(CsLinetype.toPattern({ segments: [CsLinetype.segment(1), aseg] }))
+        .segments[1]] });
+check(round.segments[0].anchor === "MC", "MC not read back after .lin round trip: " +
+    round.segments[0].anchor);
+
+// ---- a text row's gap follows its text ------------------------------------
+var gseg = CsLinetype.segment(-0.5);
+gseg.text = "W";
+gseg.style = "standard";
+gseg.scale = 0.1;
+gseg.anchor = "MC";
+CsLinetypeStore.fitText(gseg);
+var len1 = gseg.length, w1 = gseg.fitWidth;
+check(w1 > 0, "fitText measured nothing");
+gseg.scale = 0.3;
+CsLinetypeStore.fitText(gseg);
+CsLinetypeStore.anchorize(gseg);
+var bigBox = CsLinetypeStore.textBox(gseg);
+check(Math.abs((-gseg.length) - (-len1) - (gseg.fitWidth - w1)) < 1e-9,
+    "gap did not grow with the text: " + len1 + " -> " + gseg.length);
+check(gseg.x + bigBox.minX >= gseg.length - 1e-9 && gseg.x + bigBox.maxX <= 1e-9,
+    "bigger text spills out of its gap: x=" + gseg.x + " len=" + gseg.length);
+
 CsLinetypeStore.pathOverride = null;
 print("### LINETYPE MAKER OK");
 QCoreApplication.exit(0);

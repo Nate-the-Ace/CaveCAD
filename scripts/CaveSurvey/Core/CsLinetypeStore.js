@@ -262,6 +262,25 @@ CsLinetypeStore.anchorize = function(seg) {
     seg.y = o.y;
 };
 
+/**
+ * Sizes a text row's gap to its text (CsLinetype.fitTextRow), from the
+ * engine's measured width. seg.fitWidth remembers the width it was fitted
+ * at, so the next change grows or shrinks the gap by the difference; it
+ * is never written to a .lin or DXF.
+ */
+CsLinetypeStore.fitText = function(seg) {
+    if (seg.text === "" || seg.shape) {
+        return;
+    }
+    var box = CsLinetypeStore.textBox(seg);
+    if (box === null) {
+        return;
+    }
+    var width = box.maxX - box.minX;
+    CsLinetype.fitTextRow(seg, width, seg.fitWidth);
+    seg.fitWidth = width;
+};
+
 /** Fills every text row's anchor from its offsets (loaded linetypes). */
 CsLinetypeStore.deriveAnchors = function(model) {
     for (var i = 0; i < model.segments.length; i++) {
@@ -272,6 +291,9 @@ CsLinetypeStore.deriveAnchors = function(model) {
         }
         var box = CsLinetypeStore.textBox(seg);
         seg.anchor = box === null ? "custom" : CsLinetype.anchorOf(seg, box);
+        // the width it arrived at: the next edit resizes from here, and
+        // opening a linetype never changes it by itself
+        seg.fitWidth = box === null ? undefined : box.maxX - box.minX;
     }
     return model;
 };
