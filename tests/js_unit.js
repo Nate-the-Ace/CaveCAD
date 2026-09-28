@@ -33370,6 +33370,47 @@ ok(tpPlan.totals.minutesAll > tpPlan.totals.minutesIn,
 eqs(tpPlan.gear.packing, "Lights", "build: packing text reaches the gear list");
 
 // ---------------------------------------------------------------------
+// Trip Plan -- packet
+// ---------------------------------------------------------------------
+
+var tpHtml = CsTripPlan.packetHtml(tpPlan, { title: "Test Cave", survey: tpBuildSurvey,
+    resolved: tpResolved, date: "2026-10-01" });
+ok(tpHtml.indexOf("<!doctype html>") === 0, "packet: a full html document");
+ok(tpHtml.indexOf("Test Cave") >= 0, "packet: carries the cave name");
+ok(tpHtml.indexOf("A5") >= 0, "packet: names the stop");
+ok(tpHtml.indexOf("Lights") >= 0, "packet: carries the packing list");
+ok(tpHtml.indexOf("<svg") >= 0, "packet: carries a route map");
+ok(tpHtml.indexOf("follows the survey line") >= 0,
+    "packet: states the route is the survey line, not a guarantee");
+ok(tpHtml.indexOf("<script>") < 0, "packet: no live script");
+ok(CsTripPlan.esc("<b>&\"</b>") === "&lt;b&gt;&amp;&quot;&lt;/b&gt;",
+    "packet: text is escaped");
+ok(!/latitude|longitude|entrance location|\blat\b|\blon\b/i.test(tpHtml),
+    "packet: no coordinates or entrance wording");
+ok(!/>\s*(10|20|30)\s*</.test(tpHtml), "packet: no coordinate numbers as text");
+
+// Every SVG <text> label is a station name, never a coordinate.
+var tpSvgText = tpHtml.match(/<text [^>]*>[^<]*<\/text>/g) || [];
+ok(tpSvgText.length > 0, "packet: the map labels its stops");
+var tpLabelsOk = true;
+for (var tli = 0; tli < tpSvgText.length; tli++) {
+    var tpLabel = tpSvgText[tli].replace(/<[^>]*>/g, "");
+    if (tpResolved.stations[tpLabel] === undefined) { tpLabelsOk = false; }
+}
+ok(tpLabelsOk, "packet: map text is station names only");
+
+// A hostile note reaches the packet through build() and comes out inert.
+var tpEvil = JSON.parse(JSON.stringify(tpBuildSurvey));
+tpEvil.shots[4].notes = "<script>alert(1)</script>";
+var tpEvilPlan = CsTripPlan.build(tpEvil, tpResolved, { start: "A1",
+    targets: ["A5"], unit: "ft", config: {}, packing: "Lights" });
+var tpEvilHtml = CsTripPlan.packetHtml(tpEvilPlan, { title: "Test Cave",
+    survey: tpEvil, resolved: tpResolved, date: "2026-10-01" });
+ok(tpEvilHtml.indexOf("&lt;script&gt;alert(1)&lt;/script&gt;") >= 0,
+    "packet: a script note arrives escaped");
+ok(tpEvilHtml.indexOf("<script>") < 0, "packet: a script note never renders live");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

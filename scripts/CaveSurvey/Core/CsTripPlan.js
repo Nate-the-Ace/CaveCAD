@@ -570,3 +570,193 @@ CsTripPlan.build = function(survey, resolved, opts) {
     }
     return plan;
 };
+
+// ---------------------------------------------------------------------
+// The packet
+// ---------------------------------------------------------------------
+
+/** HTML-escape text. */
+CsTripPlan.esc = function(text) {
+    return String(text === undefined || text === null ? "" : text)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+};
+
+/** "1 h 05 min" for a number of minutes. */
+CsTripPlan.clock = function(minutes) {
+    var m = Math.round(minutes);
+    if (m < 60) { return m + " min"; }
+    var h = Math.floor(m / 60);
+    var r = m % 60;
+    return h + " h " + (r < 10 ? "0" : "") + r + " min";
+};
+
+/**
+ * A plan-view sketch: every leg in grey, the route in red, the stops
+ * as dots with their names. Positions are NORMALISED into the drawing
+ * box and never printed, so the page shows the cave's shape and no
+ * coordinates.
+ */
+CsTripPlan.routeSvg = function(survey, resolved, plan) {
+    var W = 640, H = 420, pad = 24;
+    var pts = resolved.stations;
+    var names = [];
+    var n;
+    for (n in pts) {
+        if (Object.prototype.hasOwnProperty.call(pts, n)) { names.push(n); }
+    }
+    if (names.length === 0) { return ""; }
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < names.length; i++) {
+        var p = pts[names[i]];
+        if (p.x < minX) { minX = p.x; }
+        if (p.x > maxX) { maxX = p.x; }
+        if (p.y < minY) { minY = p.y; }
+        if (p.y > maxY) { maxY = p.y; }
+    }
+    var span = Math.max(maxX - minX, maxY - minY, 1e-9);
+    var scale = Math.min((W - 2 * pad) / span, (H - 2 * pad) / span);
+    var px = function(name) {
+        return Math.round(pad + (pts[name].x - minX) * scale);
+    };
+    // y is flipped: north is up on the page.
+    var py = function(name) {
+        return Math.round(H - pad - (pts[name].y - minY) * scale);
+    };
+    var svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 " + W +
+        " " + H + "\" width=\"100%\" role=\"img\" aria-label=\"Route sketch\">";
+    svg += "<rect width=\"" + W + "\" height=\"" + H + "\" fill=\"#fff\" stroke=\"#ccc\"/>";
+    for (var s = 0; s < survey.shots.length; s++) {
+        var sh = survey.shots[s];
+        if (!CsFrontier.isLeg(sh)) { continue; }
+        var a = CsFrontier.clean(sh.from);
+        var b = CsFrontier.clean(sh.to);
+        if (pts[a] === undefined || pts[b] === undefined) { continue; }
+        svg += "<line x1=\"" + px(a) + "\" y1=\"" + py(a) + "\" x2=\"" + px(b) +
+            "\" y2=\"" + py(b) + "\" stroke=\"#999\" stroke-width=\"1.5\"/>";
+    }
+    var groups = [];
+    for (var st = 0; st < plan.stops.length; st++) {
+        for (var sp = 0; sp < plan.stops[st].steps.length; sp++) {
+            groups.push(plan.stops[st].steps[sp]);
+        }
+    }
+    for (var g = 0; g < groups.length; g++) {
+        for (var e = 0; e < groups[g].edges.length; e++) {
+            var ed = groups[g].edges[e];
+            if (pts[ed.from] === undefined || pts[ed.to] === undefined) { continue; }
+            svg += "<line x1=\"" + px(ed.from) + "\" y1=\"" + py(ed.from) +
+                "\" x2=\"" + px(ed.to) + "\" y2=\"" + py(ed.to) +
+                "\" stroke=\"#c0392b\" stroke-width=\"3\"/>";
+        }
+    }
+    var mark = function(name, fill) {
+        if (pts[name] === undefined) { return ""; }
+        return "<circle cx=\"" + px(name) + "\" cy=\"" + py(name) +
+            "\" r=\"5\" fill=\"" + fill + "\"/><text x=\"" + (px(name) + 8) +
+            "\" y=\"" + (py(name) - 6) + "\" font-size=\"12\" fill=\"#222\">" +
+            CsTripPlan.esc(name) + "</text>";
+    };
+    svg += mark(plan.start, "#2c3e50");
+    for (var k = 0; k < plan.stops.length; k++) {
+        svg += mark(plan.stops[k].station, "#c0392b");
+    }
+    svg += "</svg>";
+    return svg;
+};
+
+/**
+ * The plan as one printable HTML page. No coordinates, no entrance
+ * wording, no basemap: it is meant to be carried by an unguided team.
+ *
+ * \param ctx {title, survey, resolved, date}
+ */
+CsTripPlan.packetHtml = function(plan, ctx) {
+    var esc = CsTripPlan.esc;
+    var unit = plan.unit;
+    var t = plan.totals;
+    var h = [];
+    h.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
+    h.push("<title>" + esc(ctx.title) + " trip plan</title>");
+    h.push("<style>body{font:14px/1.45 -apple-system,Helvetica,Arial,sans-serif;" +
+        "max-width:760px;margin:24px auto;padding:0 16px;color:#222}" +
+        "h1{font-size:22px}h2{font-size:16px;margin-top:22px;border-bottom:1px solid #ccc}" +
+        "li{margin:3px 0}.note{color:#555}.warn{color:#8a4b00}" +
+        "table{border-collapse:collapse}td{padding:2px 12px 2px 0}" +
+        "pre{white-space:pre-wrap;font:inherit}</style></head><body>");
+    h.push("<h1>" + esc(ctx.title) + " &mdash; trip plan</h1>");
+    if (ctx.date) { h.push("<p class=\"note\">" + esc(ctx.date) + "</p>"); }
+    h.push("<p class=\"note\">This route follows the survey line. It is not a " +
+        "guarantee that the way is safe or easy: crawls, water, climbs and " +
+        "loose ground are only known where someone wrote them down.</p>");
+
+    h.push("<h2>Objectives</h2><ol>");
+    for (var i = 0; i < plan.stops.length; i++) {
+        h.push("<li>" + esc(plan.stops[i].station) + "</li>");
+    }
+    h.push("</ol>");
+
+    h.push("<h2>Time budget</h2><table>");
+    h.push("<tr><td>In</td><td>" + CsTripPlan.clock(t.minutesIn) + "</td></tr>");
+    h.push("<tr><td>Work at objectives</td><td>" + CsTripPlan.clock(t.minutesWork) + "</td></tr>");
+    h.push("<tr><td>Out</td><td>" + CsTripPlan.clock(t.minutesOut) + "</td></tr>");
+    h.push("<tr><td><b>Total</b></td><td><b>" + CsTripPlan.clock(t.minutesAll) +
+        "</b></td></tr></table>");
+    h.push("<p class=\"note\">Distance in " + CsTripPlan.dist(t.lengthIn, unit) +
+        ", " + CsTripPlan.dist(t.lengthAll, unit) + " there and back. Timed at a " +
+        "hiking pace on the level; pitches are timed separately.</p>");
+
+    h.push("<h2>Route</h2>");
+    h.push(CsTripPlan.routeSvg(ctx.survey, ctx.resolved, plan));
+
+    h.push("<h2>Directions</h2>");
+    var start = plan.start;
+    for (var s = 0; s < plan.stops.length; s++) {
+        h.push("<h3>To " + esc(plan.stops[s].station) + "</h3><ol>");
+        for (var k = 0; k < plan.stops[s].steps.length; k++) {
+            var step = plan.stops[s].steps[k];
+            h.push("<li>" + esc(step.text) + " <span class=\"note\">(" +
+                CsTripPlan.clock(step.minutes) + ")</span>");
+            for (var n = 0; n < step.notes.length; n++) {
+                h.push("<div class=\"note\">Note &mdash; " + esc(step.notes[n]) + "</div>");
+            }
+            h.push("</li>");
+        }
+        h.push("</ol>");
+    }
+    h.push("<h3>Back to " + esc(start) + "</h3><ol>");
+    for (var b = 0; b < plan.back.steps.length; b++) {
+        h.push("<li>" + esc(plan.back.steps[b].text) + "</li>");
+    }
+    h.push("</ol>");
+
+    if (plan.warnings.length > 0) {
+        h.push("<h2>Watch for</h2><ul>");
+        for (var w = 0; w < plan.warnings.length; w++) {
+            h.push("<li class=\"warn\">" + esc(plan.warnings[w]) + "</li>");
+        }
+        h.push("</ul>");
+    }
+
+    h.push("<h2>Gear</h2>");
+    if (plan.gear.rope.length > 0) {
+        h.push("<h3>Rope and hardware</h3><ul>");
+        for (var r = 0; r < plan.gear.rope.length; r++) {
+            h.push("<li>" + esc(plan.gear.rope[r].text) + "</li>");
+        }
+        for (var q = 0; q < plan.gear.hardware.length; q++) {
+            h.push("<li class=\"warn\">" + esc(plan.gear.hardware[q]) + "</li>");
+        }
+        h.push("</ul>");
+    }
+    h.push("<h3>Personal kit <span class=\"note\">(a starting list &mdash; edit it)</span></h3><ul>");
+    for (var g = 0; g < plan.gear.kit.length; g++) {
+        h.push("<li>" + esc(plan.gear.kit[g]) + "</li>");
+    }
+    h.push("</ul>");
+    if (plan.gear.packing !== "") {
+        h.push("<h3>Team packing list</h3><pre>" + esc(plan.gear.packing) + "</pre>");
+    }
+    h.push("</body></html>");
+    return h.join("\n");
+};
