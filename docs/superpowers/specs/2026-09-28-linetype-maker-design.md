@@ -155,3 +155,26 @@ elements the file is `<shapefile>.shx` and the STYLE flag 1 (shape file) is set.
 - Live over the MCP bridge: dock opens, preview renders, a line drawn with a
   text linetype survives save + reopen.
 - Each phase ends with a 0.9.X patch bump and publish.sh.
+
+## As-built (Phase 1, 0.9.182.0 + engine 0.9.5.0, 2026-09-28)
+
+- **Engine traps found**: dxflib treated group code 9 as a record boundary
+  everywhere, so an LTYPE's own text ended its record; now scoped to non-LTYPE
+  records. R2000 `writeStyle` left code 3 empty (font only in ACAD XDATA);
+  linetype styles now also write `<font>.shx` in code 3. ezdxf reads the
+  output as a complex linetype with a resolving 340.
+- **Script trap**: `doc.queryLinetype(name)` for a missing name returns a
+  live-looking wrapper (`getId()` undefined), not null. Existence is read from
+  `getLinetypeNames()` (`CsLinetypeStore.hasLinetype`).
+- **Side effect of removing the DWG gate**: QCAD's stock complex linetypes
+  (GAS_LINE, HOT_WATER_SUPPLY, ZIGZAG, ...) now parse and draw their text in
+  every drawing; shape ones (ZIGZAG, `ltypeshp.shx`) draw only if that font
+  exists.
+- **Library**: template linetypes are not read; the picker lists the personal
+  library, then the open drawing's own linetypes. The action does not require
+  a document (the library is edited without one); Apply refuses a sheet.
+- **Import dialog**: tick list only; a clash says "(replaces yours)" and
+  ticking replaces. No rename step.
+- **Menu**: 452/45 (`linetypemaker`, `ltm`); 452/50 was Symbol Palette's.
+- **Live-verified** over the MCP bridge: dock built at startup, panel loads a
+  linetype, `CS_WATER` applied to a new cave map draws its W's along a line.
