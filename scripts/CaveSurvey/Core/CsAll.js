@@ -67,6 +67,9 @@ include(includeBasePath + "/CsLrud.js");
 // pitch at all) and beside CsLrud: the vertical in a cave as a thing
 // rather than a list of legs, and the label a map puts beside it.
 include(includeBasePath + "/CsPitch.js");
+// After CsFrontier (open ends) and CsPitch: the table reads the
+// frontier, and the trip plan reads pitches.
+include(includeBasePath + "/CsStationTable.js");
 include(includeBasePath + "/CsGhost.js");
 
 // The 3D passage surface. After CsTraverse and CsLrud, whose splay

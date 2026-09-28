@@ -160,6 +160,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
     "scripts/CaveSurvey/Core/CsPitch.js",
+    "scripts/CaveSurvey/Core/CsStationTable.js",
     "scripts/CaveSurvey/Core/CsGhost.js",
     "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsSection3d.js",
@@ -33057,6 +33058,59 @@ ok(typeof CsGhost !== "undefined", "CsGhost loaded");
     CsLinetype.fitTextRow(onDash, 0.3, undefined);
     ok(onDash.length < 0, "fit: a text row is always a gap, never drawn over a dash");
 }());
+
+// ---------------------------------------------------------------------
+// Station Table -- rows and kinds
+// ---------------------------------------------------------------------
+
+function stRow(rows, name) {
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].station === name) { return rows[i]; }
+    }
+    return null;
+}
+
+var stLead = CsStationTable.leadTest();
+ok(stLead("LEAD W, going") === true, "lead: upper case");
+ok(stLead("Lead?") === true, "lead: punctuation after");
+ok(stLead("a lead") === true, "lead: mid sentence");
+ok(stLead("leader of the group") === false, "lead: leader is not a lead");
+ok(stLead("leads") === false, "lead: leads is not a lead");
+ok(stLead("misled") === false, "lead: misled is not a lead");
+ok(CsStationTable.leadTest("dig")("DIG at floor") === true,
+    "lead: custom keyword");
+
+var stA = frontierSurvey([
+    frontierShot("A1", "A2", 0),
+    frontierShot("A2", "A3", 0),
+    frontierShot("A2", "B1", 0),
+    frontierShot("B1", "B2", 1)
+]);
+stA.shots[1].notes = "LEAD W, going";
+stA.shots[3].notes = "leader of the group";
+stA.startNote = "entrance drip";
+var stSplay = CsModel.newShot();
+stSplay.from = "A3"; stSplay.to = ""; stSplay.splay = true;
+stSplay.notes = "LEAD ghost on a splay";
+stA.shots.push(stSplay);
+
+var stRows = CsStationTable.rows(stA, null, {});
+eqs(stRows.length, 5, "rows: A1 A2 A3 B1 B2");
+eqs(stRow(stRows, "A3").kinds.join(","), "lead,openEnd,noted",
+    "rows: A3 is a lead, an open end and noted");
+eqs(stRow(stRows, "A2").kinds.join(","), "junction",
+    "rows: A2 is a junction only");
+eqs(stRow(stRows, "A1").kinds.join(","), "control,noted",
+    "rows: A1 is control and carries the start note");
+eqs(stRow(stRows, "B2").kinds.join(","), "openEnd,noted",
+    "rows: leader is noted, not a lead");
+eqs(stRow(stRows, "A3").noteText, "LEAD W, going",
+    "rows: a splay note is ignored");
+ok(stRow(stRows, "A3").z === null, "rows: z is null, not 0, when unresolved");
+ok(stRow(stRows, "A3").x === undefined && stRow(stRows, "A3").y === undefined,
+    "rows: no plan coordinates ever");
+eqs(stRow(stRows, "B2").trips.join(","), "1", "rows: trip of B2");
+eqs(stRow(stRows, "A2").trips.join(","), "0", "rows: trip of A2");
 
 // ---------------------------------------------------------------------
 // Report.
