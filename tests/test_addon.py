@@ -1799,6 +1799,7 @@ MENU = {
     "ResetDrawing/ResetDrawing.js":       (450, 41, ["resetdrawing", "rd"]),
     # 451 -- survey data
     "SurveyNotebook/SurveyNotebook.js":   (451, 10, ["surveynotebook", "snb"]),
+    "StationTable/StationTable.js":       (451, 12, ["stationtable", "st"]),
     "ImportCaveSurvey/ImportCaveSurvey.js": (451, 20, ["importcavesurvey", "ics"]),
     "ExportCaveSurvey/ExportCaveSurvey.js": (451, 30, ["exportcavesurvey", "ecs"]),
     "LoopErrors/LoopErrors.js":           (451, 40, ["looperrors", "le"]),
@@ -2132,6 +2133,8 @@ class TestSheetFileGuard(unittest.TestCase):
         "Cave3D": "opens a window onto the survey; draws no entity",
         "Handbook": "reads its own HTML pages; never the drawing",
         "StartHere": "ticks a checklist in the settings; draws nothing",
+        "StationTable": "reads the survey; writes only stations.json "
+                        "beside the drawing",
     }
 
     def guarded(self, folder):

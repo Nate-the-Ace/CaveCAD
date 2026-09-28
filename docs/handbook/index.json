@@ -136,6 +136,17 @@
       "shots": []
     },
     {
+      "id": "station-table",
+      "title": "Station Table",
+      "class": "tool",
+      "file": "station-table.html",
+      "stage": 451,
+      "tools": [
+        "StationTable"
+      ],
+      "shots": []
+    },
+    {
       "id": "3d-view",
       "title": "3D View",
       "class": "tool",

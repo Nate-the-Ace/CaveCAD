@@ -1,0 +1,39 @@
+<h1>Station Table</h1>
+<p>Every station in the cave as one table: filter it down to the leads, mark them, write the team's notes beside them, and jump to any of them on the map. <code>st</code></p>
+<h2>When you reach for it</h2>
+<p>When you are planning the next trip and want to know what is still open — which leads nobody has pushed, which ones somebody already has, and where they are. Or any time you want to find a station by name or by what its note says.</p>
+<h2>Steps</h2>
+<ol>
+<li><b>Cave Survey &gt; Station Table</b>. The panel lists every station the survey has, one row each, with every trip that touched it.</li>
+<li>Tick one or more kinds along the top to narrow the list. Ticking <b>Lead</b> and <b>Open end</b> shows stations that are either. Nothing ticked shows them all.</li>
+<li>Type in the search box to match a station name or any note. Pick a status to see only rows marked that way.</li>
+<li>Double-click a row, or select it and press <b>Go to</b>, to frame the drawing on that station.</li>
+<li>To mark a lead: select its row, pick a status (open, assigned, pushed, done, skip), fill in who has it and what to look at, and press <b>Save row</b>.</li>
+<li><b>Export checklist</b> saves the rows you are looking at as a CSV to print or hand to the trip leader.</li>
+</ol>
+<h2>The kinds</h2>
+<ul>
+<li><b>Lead</b> — a station whose survey note has the word "lead" in it. You add one by writing the note in the survey, not in this table.</li>
+<li><b>Open end</b> — the survey stops here and nothing ties it back in.</li>
+<li><b>Junction</b> — three or more survey legs meet here.</li>
+<li><b>Control</b> — a fixed station, or the station the survey starts from: the rest of the cave hangs from it.</li>
+<li><b>Loop</b> — the station sits on a closed loop, so the adjustment checks it.</li>
+<li><b>Noted</b> — the survey has a note here, of any kind (a lead is noted too).</li>
+<li><b>Flagged</b> — the survey check found something wrong with a shot here. Survey Notebook is where to fix it.</li>
+</ul>
+<p>A lead with no mark reads "open". When a later trip surveyed on from a lead, the table suggests "(looks pushed)", but it never marks anything for you — only a person does that.</p>
+<h2>Where the marks live</h2>
+<p>Nothing in this table is written into the drawing. The kinds are worked out from the survey every time the panel opens or you press <b>Refresh</b>. What the team writes — a status, notes, who has it — is saved in <code>stations.json</code> in the cave's folder, beside the drawing, so Google Drive carries it to everyone who shares the cave. Save the drawing once before marking anything; an unsaved drawing has no folder to keep the file in.</p>
+<h2>When it refuses</h2>
+<ul>
+<li><b>[note changed]</b> in front of a note means the note in the survey was edited after the marks were saved. The marks are still shown, but they are kept against the old words. Select the row and press <b>Re-link</b> to keep them with the new note. <b>Save row</b> will not move them silently.</li>
+<li>"saved marks match no station" at the bottom counts marks whose station is no longer in the survey — renamed, or a lead note removed. Hover the line to see which. Nothing is deleted: put the station or note back and the marks come back with it.</li>
+<li>If <code>stations.json</code> is damaged, the panel says so and will not save, because saving would replace everyone's marks. Look at the file (Drive keeps earlier versions) before carrying on.</li>
+<li>The table follows the drawing it was opened on. After switching to another cave's tab, press <b>Refresh</b>.</li>
+</ul>
+<h2>See also</h2>
+<ul>
+<li><a href="survey-notebook.html">Survey Notebook</a></li>
+<li><a href="loop-errors.html">Loop Errors</a></li>
+<li><a href="check-map.html">Check Map</a></li>
+</ul>
