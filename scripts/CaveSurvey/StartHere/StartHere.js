@@ -272,7 +272,7 @@ StartHere.read = function() {
         return;
     }
     if (typeof(Handbook) === "undefined") {
-        warning(qsTr("This build has no Handbook tool installed, so " +
+        CsTell.warn(qsTr("This build has no Handbook tool installed, so " +
             "the lesson cannot be opened."));
         return;
     }
@@ -315,7 +315,7 @@ StartHere.prototype.beginEvent = function() {
         StartHere.open();
     } catch (e) {
         csStartHereDock = undefined;
-        warning("Start Here: this CaveCAD build refused the docked " +
+        CsTell.warn("Start Here: this CaveCAD build refused the docked " +
             "panel (" + e + ") -- please report this.");
     }
 

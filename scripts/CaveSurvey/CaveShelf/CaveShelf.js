@@ -389,7 +389,7 @@ CaveShelf.commitCell = function(state, table, item, status) {
             status.text = applied.error;
         } catch (eStatus) {
         }
-        warning("Cave Shelf: " + applied.error);
+        CsTell.warn("Cave Shelf: " + applied.error);
     } else {
         CaveShelf.forget(path);
         try {
@@ -1508,7 +1508,7 @@ CaveShelf.runPending = function() {
     try {
         openFiles([path], false);
     } catch (eOpen) {
-        warning("Cave Shelf: could not open " + path + " (" + eOpen + ").");
+        CsTell.warn("Cave Shelf: could not open " + path + " (" + eOpen + ").");
         return;
     }
     EAction.handleUserMessage(qsTr("Cave Shelf: opened this cave. " +

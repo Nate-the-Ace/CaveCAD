@@ -50,7 +50,7 @@ include(includeBasePath + "/../Core/CsAll.js");
  *  why this used to be three separately-worded warning() calls instead
  *  of one shared helper. `reason` carries no trailing period of its own. */
 function generateProfileRefuse(reason) {
-    warning("Generate Profile: " + reason + ".");
+    CsTell.warn("Generate Profile: " + reason + ".");
 }
 
 /**

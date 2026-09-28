@@ -149,7 +149,7 @@ EntranceLocation.summary = function(doc) {
 function entranceLocationRun() {
     var doc = getDocument();
     if (isNull(doc)) {
-        warning(qsTr("Entrance Location: no active drawing document."));
+        CsTell.warn(qsTr("Entrance Location: no active drawing document."));
         return "done";
     }
     // A SHEET IS NOT A DRAWING TO WORK IN: it is rebuilt from the
@@ -269,7 +269,7 @@ function entranceLocationMoveTo(doc, di, clicked) {
     }
     var rec = CsLocationPick.anchorRecord(doc);
     if (rec === null || rec.pos === null) {
-        warning(qsTr("Entrance Location: this drawing's location has "
+        CsTell.warn(qsTr("Entrance Location: this drawing's location has "
             + "gone. Set one before moving the cave onto it."));
         return;
     }
@@ -311,7 +311,7 @@ function entranceLocationMoveTo(doc, di, clicked) {
 
     var moved = CsLocationPick.moveSurvey(doc, di, offset);
     if (moved === 0) {
-        warning(qsTr("Entrance Location: nothing moved. The drawing's "
+        CsTell.warn(qsTr("Entrance Location: nothing moved. The drawing's "
             + "layers may be locked in a way this could not open."));
         return;
     }

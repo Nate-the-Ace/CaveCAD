@@ -556,7 +556,7 @@ CsBackup.beforeWrite = function(path) {
     }
     if (!made && !CsBackup.warnedThisSession) {
         CsBackup.warnedThisSession = true;
-        warning("Cave Survey: could not keep a backup of " + path +
+        CsTell.warn("Cave Survey: could not keep a backup of " + path +
             " in " + CsBackup.backupFolderFor(path) + ". Saving anyway " +
             "-- but there is no previous version to fall back on, so " +
             "check the folder is writable.");

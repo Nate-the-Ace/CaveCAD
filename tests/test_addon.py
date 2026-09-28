@@ -2294,6 +2294,148 @@ class TestPanelsRunInTheApplicationEngine(unittest.TestCase):
                          % unlevelled)
 
 
+class TestUserMessagesAreSeen(unittest.TestCase):
+    """warning() is qWarning: stderr, which a caver never sees.
+
+    Sheet Setup's "save this drawing first" went through it and Build
+    Sheet looked like a dead button (0.9.181.3). Anything a caver's
+    press can reach -- a beginEvent, a connected handler, and what
+    those call in the same file -- says it through CsTell.warn (or the
+    tool's own note line) instead. warning() is left for developer
+    diagnostics: a panel partly refused at startup, a listener that
+    would not attach.
+    """
+
+    WARNING = re.compile(r"(?<![\w.])warning\(")
+
+    # Reachable from a press, and still deliberately warning(): the
+    # caver can do nothing about either, and a box would come up at
+    # every panel build on a broken bridge.
+    DIAGNOSTICS = {
+        ("DrawPanel/DrawPanel.js", "Draw: this CaveCAD build refused "),
+        ("FeatureTrace/FeatureTrace.js",
+         "Feature Trace: this CaveCAD build refused: "),
+        ("FeatureTrace/FeatureTrace.js",
+         "Feature Trace: could not watch the drawing for survey "),
+    }
+
+    @staticmethod
+    def strip_comments(source):
+        source = re.sub(r"/\*.*?\*/", "", source, flags=re.S)
+        return re.sub(r"(?m)(^|[^:\\\"'])//[^\n]*", r"\1", source)
+
+    @staticmethod
+    def block_at(source, brace):
+        """The text from the { at `brace` to its matching }."""
+        depth = 0
+        for i in range(brace, len(source)):
+            if source[i] == "{":
+                depth += 1
+            elif source[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[brace:i + 1]
+        return source[brace:]
+
+    def definitions(self, source):
+        """name -> body, for `Foo.bar = function` and `function foo(`."""
+        found = {}
+        for m in re.finditer(r"(?m)^([A-Za-z_][\w.]*)\s*=\s*function\s*"
+                             r"\([^)]*\)\s*\{|^function\s+(\w+)\s*\("
+                             r"[^)]*\)\s*\{", source):
+            name = m.group(1) or m.group(2)
+            found[name] = self.block_at(source, m.end() - 1)
+        return found
+
+    def reachable(self, source):
+        """The code a press can run: beginEvents and connected handlers,
+        then whatever same-file functions they call, transitively."""
+        defs = self.definitions(source)
+        todo = [body for name, body in defs.items()
+                if name.endswith(".prototype.beginEvent")]
+        for m in re.finditer(r"\.connect\(\s*function\s*\([^)]*\)\s*\{",
+                             source):
+            todo.append(self.block_at(source, m.end() - 1))
+        for m in re.finditer(r"\.connect\(\s*([A-Za-z_][\w.]*)\s*\)",
+                             source):
+            if m.group(1) in defs:
+                todo.append(defs[m.group(1)])
+        seen, bodies = set(), []
+        while todo:
+            body = todo.pop()
+            if body in seen:
+                continue
+            seen.add(body)
+            bodies.append(body)
+            for call in re.findall(r"(?<![\w.])([A-Za-z_][\w.]*)\s*\(",
+                                   body):
+                if call in defs:
+                    todo.append(defs[call])
+        return bodies
+
+    def test_no_press_ends_in_warning(self):
+        offenders = []
+        for folder, _subdirs, files in os.walk(ADDON):
+            for name in sorted(files):
+                if not name.endswith(".js"):
+                    continue
+                path = os.path.join(folder, name)
+                rel = os.path.relpath(path, ADDON).replace(os.sep, "/")
+                with open(path) as handle:
+                    source = self.strip_comments(handle.read())
+                for body in self.reachable(source):
+                    for m in self.WARNING.finditer(body):
+                        said = re.match(r"\s*(?:qsTr\()?\"([^\"]*)",
+                                        body[m.end():])
+                        text = said.group(1) if said else ""
+                        if (rel, text) in self.DIAGNOSTICS:
+                            continue
+                        offenders.append("%s: warning(\"%s...\")"
+                                         % (rel, text[:50]))
+        self.assertEqual(
+            sorted(set(offenders)), [],
+            "a caver's press reaches warning(), which only prints to "
+            "stderr -- use CsTell.warn, or add it to DIAGNOSTICS if the "
+            "caver truly cannot act on it")
+
+    def test_core_never_calls_warning(self):
+        """Core is called from other files' handlers, which the reach
+        above does not follow -- CsPick and CsSheetFile's refusals were
+        both on a press. Only CsTell, the headless fallback, may."""
+        core = os.path.join(ADDON, "Core")
+        offenders = []
+        for name in sorted(os.listdir(core)):
+            if not name.endswith(".js") or name == "CsTell.js":
+                continue
+            with open(os.path.join(core, name)) as handle:
+                if self.WARNING.search(self.strip_comments(handle.read())):
+                    offenders.append(name)
+        self.assertEqual(offenders, [],
+                         "Core files calling warning(); use CsTell.warn")
+
+    def test_the_check_would_have_caught_sheet_setup(self):
+        """The shape that shipped: a connected closure calling a
+        same-file function that refuses through warning()."""
+        source = ("var W = {};\n"
+                  "W.make = function() {\n"
+                  "    b.clicked.connect(function() { W.build(); });\n"
+                  "};\n"
+                  "W.build = function() {\n"
+                  "    warning(\"W: save first\");\n"
+                  "};\n")
+        bodies = self.reachable(self.strip_comments(source))
+        self.assertTrue(any(self.WARNING.search(b) for b in bodies))
+
+    def test_diagnostics_still_exist(self):
+        """A DIAGNOSTICS entry whose warning() is gone is stale."""
+        missing = []
+        for rel, text in sorted(self.DIAGNOSTICS):
+            with open(os.path.join(ADDON, rel)) as handle:
+                if "warning(\"" + text not in handle.read():
+                    missing.append("%s: %s" % (rel, text))
+        self.assertEqual(missing, [], "stale DIAGNOSTICS entries")
+
+
 class TestScanListIsShared(unittest.TestCase):
     """Two panels show the cave's scans; they must say the same things.
 

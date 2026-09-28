@@ -431,7 +431,7 @@ ResetDrawing.caveFolderOf = function(path) {
 function resetDrawingRun() {
     var doc = getDocument();
     if (isNull(doc)) {
-        warning(qsTr("Reset Drawing: no active drawing document."));
+        CsTell.warn(qsTr("Reset Drawing: no active drawing document."));
         return;
     }
     // A SHEET IS NOT A DRAWING TO WORK IN -- it is rebuilt from the

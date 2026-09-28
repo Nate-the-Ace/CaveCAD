@@ -409,7 +409,7 @@ Handbook.prototype.beginEvent = function() {
         Handbook.open(Handbook.HOME);
     } catch (e) {
         csHandbookDock = undefined;
-        warning("Handbook: this CaveCAD build refused the docked panel (" +
+        CsTell.warn("Handbook: this CaveCAD build refused the docked panel (" +
             e + ") -- please report this.");
     }
 

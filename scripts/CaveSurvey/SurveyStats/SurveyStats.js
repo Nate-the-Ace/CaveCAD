@@ -24,7 +24,7 @@ include(includeBasePath + "/../Core/CsAll.js");
 function surveyStatsRun() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Survey Stats: no active drawing document.");
+        CsTell.warn("Survey Stats: no active drawing document.");
         return;
     }
 
@@ -36,7 +36,7 @@ function surveyStatsRun() {
     // real loop (Truitt's F survey, 2026-08-27) counted as zero.
     var asDrawn = CsRevise.resolveAsDrawn(doc);
     if (asDrawn === null) {
-        warning("Survey Stats: no tagged survey stations found.\n" +
+        CsTell.warn("Survey Stats: no tagged survey stations found.\n" +
             "Run Azimuth Traverse, Import Cave Survey or the Survey " +
             "Notebook first.");
         return;

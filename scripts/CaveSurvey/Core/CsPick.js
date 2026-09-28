@@ -83,18 +83,18 @@ CsPick.startPointFromSelection = function(doc, title) {
  */
 CsPick.singleSelected = function(doc, toolName) {
     if (!doc.hasSelection()) {
-        warning(toolName + ": select exactly one entity first.");
+        CsTell.warn(toolName + ": select exactly one entity first.");
         return null;
     }
     var ids = doc.querySelectedEntities();
     if (ids.length !== 1) {
-        warning(toolName + ": select exactly ONE entity (found " +
+        CsTell.warn(toolName + ": select exactly ONE entity (found " +
             ids.length + ").");
         return null;
     }
     var entity = doc.queryEntity(ids[0]);
     if (isNull(entity)) {
-        warning(toolName + ": could not read the selected entity.");
+        CsTell.warn(toolName + ": could not read the selected entity.");
         return null;
     }
     return entity;

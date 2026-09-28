@@ -1142,7 +1142,7 @@ Cave3D.exportAnimation = function() {
         return;
     }
     if (cave3d.exportFrames === undefined) {
-        warning(qsTr("Exporting an animation needs a newer CaveCAD."));
+        CsTell.warn(qsTr("Exporting an animation needs a newer CaveCAD."));
         return;
     }
     var mode = "manual";
@@ -1150,7 +1150,7 @@ Cave3D.exportAnimation = function() {
     if (mode === "manual") {
         // NOTHING IS MOVING, so there is nothing to write. Saying so
         // beats six hundred copies of one frame.
-        warning(qsTr("Turn on Fly or Spin first -- an export writes "
+        CsTell.warn(qsTr("Turn on Fly or Spin first -- an export writes "
             + "whichever the camera is running."));
         return;
     }
@@ -1213,7 +1213,7 @@ Cave3D.exportAnimation = function() {
         written = -1;
     }
     if (written <= 0) {
-        warning(qsTr("No frames could be written to %1.").arg(framesDir));
+        CsTell.warn(qsTr("No frames could be written to %1.").arg(framesDir));
         return;
     }
 
@@ -1250,7 +1250,7 @@ Cave3D.exportAnimation = function() {
     cave3d.setStatus(Cave3D.handle,
         qsTr("Wrote %1 frames to %2 (no film: %3)")
             .arg(written).arg(framesDir).arg(why === "" ? "no encoder" : why));
-    warning(qsTr("The frames are written, but no film could be made: %1."
+    CsTell.warn(qsTr("The frames are written, but no film could be made: %1."
         + "\n\nThey are in %2, with a note beside them saying how to "
         + "turn them into one.").arg(why === "" ? qsTr("no encoder was found")
             : why).arg(framesDir));
@@ -1516,7 +1516,7 @@ function cave3dRun() {
     // would otherwise meet a bare ReferenceError from a menu entry that
     // looks like every other one.
     if (typeof cave3d === "undefined" || isNull(cave3d)) {
-        warning(qsTr("3D View needs a newer CaveCAD.\n" +
+        CsTell.warn(qsTr("3D View needs a newer CaveCAD.\n" +
             "This version of the application has no 3D panel in it. " +
             "Everything else in the Cave Survey suite works as before."));
         return;
@@ -1525,7 +1525,7 @@ function cave3dRun() {
     var doc = getDocument();
     var read = Cave3D.read(doc);
     if (read === null) {
-        warning(qsTr("3D View: no tagged survey stations found.\n" +
+        CsTell.warn(qsTr("3D View: no tagged survey stations found.\n" +
             "Import a survey or type one into the Survey Notebook " +
             "first -- there is no passage to look at without shots."));
         return;

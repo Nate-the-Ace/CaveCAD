@@ -137,7 +137,7 @@ CsSheetFile.blocks = function(doc, toolName) {
         return false;
     }
     try {
-        warning(CsSheetFile.refusal(toolName));
+        CsTell.warn(CsSheetFile.refusal(toolName));
     } catch (eWarn) {
     }
     return true;

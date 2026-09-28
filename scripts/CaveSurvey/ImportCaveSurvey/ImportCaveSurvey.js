@@ -48,7 +48,7 @@ function importCaveSurvey() {
     }
     var di = getDocumentInterface();
     if (doc === undefined || doc === null) {
-        warning("Import Cave Survey: no active drawing document.");
+        CsTell.warn("Import Cave Survey: no active drawing document.");
         return;
     }
 
@@ -64,7 +64,7 @@ function importCaveSurvey() {
 
     var file = new QFile(fileName);
     if (!file.open(QIODevice.ReadOnly | QIODevice.Text)) {
-        warning("Import Cave Survey: could not open\n" + fileName);
+        CsTell.warn("Import Cave Survey: could not open\n" + fileName);
         return;
     }
     var content = new QTextStream(file).readAll();
@@ -93,7 +93,7 @@ function importCaveSurvey() {
     // -- parse ----------------------------------------------------------
     var survey = format.parse(content);
     if (survey.shots.length === 0) {
-        warning("Import Cave Survey: no shots were parsed from this file.\n" +
+        CsTell.warn("Import Cave Survey: no shots were parsed from this file.\n" +
             "Format tried: " + format.label);
         return;
     }

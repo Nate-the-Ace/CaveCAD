@@ -1485,7 +1485,7 @@ CsPanel.helpButton = function(folder, label) {
     }
     button.clicked.connect(function() {
         if (typeof(Handbook) === "undefined") {
-            warning(qsTr("This build has no Handbook tool installed, so " +
+            CsTell.warn(qsTr("This build has no Handbook tool installed, so " +
                 "there is nothing for the ? to open."));
             return;
         }

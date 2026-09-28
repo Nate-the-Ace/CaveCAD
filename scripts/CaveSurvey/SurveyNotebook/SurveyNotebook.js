@@ -4705,7 +4705,7 @@ SurveyNotebook.prototype.beginEvent = function() {
         }
     } catch (e) {
         csNotebookDock = undefined;
-        warning("Survey Notebook: this QCAD build refused the docked " +
+        CsTell.warn("Survey Notebook: this QCAD build refused the docked " +
             "panel (" + e + "). Azimuth Traverse and Import Cave Survey " +
             "cover the same work meanwhile -- please report this.");
     }

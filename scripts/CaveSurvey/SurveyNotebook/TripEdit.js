@@ -257,7 +257,7 @@ TripEdit.deleteTrip = function(doc, di, read, request) {
 TripEdit.open = function(tripId) {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Survey Notebook: no active drawing document.");
+        CsTell.warn("Survey Notebook: no active drawing document.");
         return;
     }
     var di = getDocumentInterface();

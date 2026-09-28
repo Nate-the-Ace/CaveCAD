@@ -104,7 +104,7 @@ function sbFramesPhrase(used) {
 function scatterBreakdownRun() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Scatter Breakdown: no active drawing document.");
+        CsTell.warn("Scatter Breakdown: no active drawing document.");
         return;
     }
     // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
@@ -137,7 +137,7 @@ function scatterBreakdownRun() {
         }
     }
     if (!anyBoundaryLayer) {
-        warning("Scatter Breakdown: draw a closed polyline on the " +
+        CsTell.warn("Scatter Breakdown: draw a closed polyline on the " +
             CsLayers.BREAKDOWN_BOUNDARY + " layer around the breakdown " +
             "area first.");
         return;
@@ -184,7 +184,7 @@ function scatterBreakdownRun() {
     }
 
     if (boundaries.length === 0) {
-        warning("Scatter Breakdown: no closed polylines found on " +
+        CsTell.warn("Scatter Breakdown: no closed polylines found on " +
             CsLayers.BREAKDOWN_BOUNDARY +
             (selectedIds.length > 0 ? " in the selection." : "."));
         return;

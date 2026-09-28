@@ -1986,7 +1986,7 @@ FeatureTrace.prototype.beginEvent = function() {
             // a stale panel must never stop the tool opening
         }
     } catch (e) {
-        warning("Feature Trace: this CaveCAD build refused the Draw " +
+        CsTell.warn("Feature Trace: this CaveCAD build refused the Draw " +
             "panel (" + e + ") -- please report this.");
     }
 

@@ -43,7 +43,7 @@ function surfaceDataRun() {
         return;
     }
     if (isNull(doc)) {
-        warning(qsTr("Surface Data: no active drawing document."));
+        CsTell.warn(qsTr("Surface Data: no active drawing document."));
         return;
     }
     var di = getDocumentInterface();

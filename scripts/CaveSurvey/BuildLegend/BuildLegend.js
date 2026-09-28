@@ -288,7 +288,7 @@ function blText(doc, x, y, height, label, layerId) {
 function buildLegendRun() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Build Legend: no active drawing document.");
+        CsTell.warn("Build Legend: no active drawing document.");
         return;
     }
     // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
@@ -303,7 +303,7 @@ function buildLegendRun() {
     var explain = CsLegend.explaining();
     var rows = CsLegend.rowsFor(CsLegend.usage(doc));
     if (rows.length === 0) {
-        warning("Build Legend: this map has nothing to explain yet.\n" +
+        CsTell.warn("Build Legend: this map has nothing to explain yet.\n" +
             "Trace some walls or place some symbols first -- the " +
             "legend only ever describes what the map actually uses.");
         return;

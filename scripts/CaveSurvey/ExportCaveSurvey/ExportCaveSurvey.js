@@ -71,7 +71,7 @@ function exportControlNames(survey) {
 function exportCaveSurvey() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Export Cave Survey: no active drawing document.");
+        CsTell.warn("Export Cave Survey: no active drawing document.");
         return;
     }
 
@@ -80,7 +80,7 @@ function exportCaveSurvey() {
     // reader that restores trips, splays, flags and notebook order.
     var asDrawn = CsRevise.resolveAsDrawn(doc);
     if (asDrawn === null) {
-        warning("Export Cave Survey: no tagged survey stations found.\n" +
+        CsTell.warn("Export Cave Survey: no tagged survey stations found.\n" +
             "Run Azimuth Traverse, Import Cave Survey or the Survey " +
             "Notebook first.");
         return;
@@ -169,17 +169,17 @@ function exportCaveSurvey() {
     try {
         text = format.write(survey);
     } catch (e) {
-        warning("Export Cave Survey: " + format.label +
+        CsTell.warn("Export Cave Survey: " + format.label +
             " could not express this survey.\n" + e);
         return;
     }
     if (text === null || text === undefined || text === "") {
-        warning("Export Cave Survey: " + format.label +
+        CsTell.warn("Export Cave Survey: " + format.label +
             " produced nothing for this survey.");
         return;
     }
     if (writeTextFile(fileName, text) === false) {
-        warning("Export Cave Survey: could not write\n" + fileName);
+        CsTell.warn("Export Cave Survey: could not write\n" + fileName);
         return;
     }
 

@@ -272,7 +272,7 @@ LoopErrors.draw = function(doc, di, read) {
 function loopErrorsRun() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning(qsTr("Loop Errors: no active drawing document."));
+        CsTell.warn(qsTr("Loop Errors: no active drawing document."));
         return;
     }
     // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
@@ -284,13 +284,13 @@ function loopErrorsRun() {
     }
     var read = LoopErrors.read(doc);
     if (read === null) {
-        warning(qsTr("Loop Errors: no tagged survey stations found.\n" +
+        CsTell.warn(qsTr("Loop Errors: no tagged survey stations found.\n" +
             "Import a survey or type one into the Survey Notebook " +
             "first -- there is no closure without a loop."));
         return;
     }
     if (isNull(read.raw.loops) || read.raw.loops.length === 0) {
-        warning(qsTr("Loop Errors: this survey has no loops.\n" +
+        CsTell.warn(qsTr("Loop Errors: this survey has no loops.\n" +
             "Nothing closes back on itself, so there is no closure " +
             "error to show. That is not a fault -- most caves start " +
             "this way -- but it does mean nothing in the survey is " +

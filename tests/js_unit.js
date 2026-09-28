@@ -138,6 +138,7 @@ function loadRepoScript(scriptPath) {
 // Load order: leaves first.
 var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUuid.js",
+    "scripts/CaveSurvey/Core/CsTell.js",
     "scripts/CaveSurvey/Core/CsUnits.js",
     "scripts/CaveSurvey/Core/CsCave.js",
     "scripts/CaveSurvey/Core/CsFiles.js",

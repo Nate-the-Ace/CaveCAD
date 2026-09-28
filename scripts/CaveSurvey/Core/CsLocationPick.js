@@ -281,7 +281,7 @@ CsLocationPick.ask = function(title, defaultText) {
     }
     var coord = CsAngles.parseLatLon(text);
     if (coord === null) {
-        warning(title + ": couldn't read that coordinate.");
+        CsTell.warn(title + ": couldn't read that coordinate.");
         return null;
     }
     // a declared location is trusted -- share it with every tool

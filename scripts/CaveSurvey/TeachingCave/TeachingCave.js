@@ -436,7 +436,7 @@ function teachingCaveRun() {
             sourceIsTeaching: CsTeach.isTeaching(caveRoot, record.folder)
         });
         if (plan.can !== true) {
-            warning("Teaching Cave: " + plan.reason);
+            CsTell.warn("Teaching Cave: " + plan.reason);
             return;
         }
         if (plan.warning !== "" &&
@@ -447,7 +447,7 @@ function teachingCaveRun() {
         }
         var built = TeachingCave.buildMaster(record, caveRoot, pickedName);
         if (built.ok !== true) {
-            warning("Teaching Cave: " + built.error);
+            CsTell.warn("Teaching Cave: " + built.error);
             return;
         }
         try {
@@ -474,7 +474,7 @@ function teachingCaveRun() {
         caveName: caveName
     });
     if (resetPlan.can !== true) {
-        warning("Teaching Cave: " + resetPlan.reason);
+        CsTell.warn("Teaching Cave: " + resetPlan.reason);
         return;
     }
     if (resetPlan.warning !== "" &&
@@ -485,7 +485,7 @@ function teachingCaveRun() {
     }
     var done = TeachingCave.reset(caveRoot, caveName);
     if (done.ok !== true) {
-        warning("Teaching Cave: " + done.error);
+        CsTell.warn("Teaching Cave: " + done.error);
         return;
     }
     TeachingCave.shelve(caveRoot, caveName);

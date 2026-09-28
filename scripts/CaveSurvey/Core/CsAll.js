@@ -16,6 +16,9 @@
 
 // No dependencies of its own, so first.
 include(includeBasePath + "/CsUuid.js");
+// No dependencies either: how a tool tells the caver something they
+// will see (warning() only reaches stderr).
+include(includeBasePath + "/CsTell.js");
 include(includeBasePath + "/CsUnits.js");
 include(includeBasePath + "/CsCave.js");
 include(includeBasePath + "/CsFiles.js");

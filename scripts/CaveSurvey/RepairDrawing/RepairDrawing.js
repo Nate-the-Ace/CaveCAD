@@ -37,7 +37,7 @@ function repairDrawingRun() {
         return;
     }
     if (isNull(doc)) {
-        warning(qsTr("Repair Drawing: no active drawing document."));
+        CsTell.warn(qsTr("Repair Drawing: no active drawing document."));
         return;
     }
     var di = getDocumentInterface();
