@@ -22,6 +22,22 @@
 <li><b>Flagged</b> — the survey check found something wrong with a shot here. Survey Notebook is where to fix it.</li>
 </ul>
 <p>A lead with no mark reads "open". When a later trip surveyed on from a lead, the table suggests "(looks pushed)", but it never marks anything for you — only a person does that.</p>
+<h2>Plan a trip</h2>
+<p>The <b>Plan</b> tab turns a few stations into a route, a time budget and a gear list, and writes it out as a page the team can print.</p>
+<ol>
+<li>On the <b>Stations</b> tab, select a station you want to reach. Switch to <b>Plan</b> and press <b>Add selected station</b>. Do the same for every stop on the trip. <b>Remove</b> takes the selected stop off the list; <b>Clear</b> empties it. With the list empty, <b>Plan trip</b> plans to the row selected on the Stations tab.</li>
+<li>Press <b>Plan trip</b>. The route starts at the survey's first station, visits every stop in the shortest order it can find, and comes back to where it started. The tab shows the directions leg by leg, the time in, at work and out, the distance, the rope for each pitch, and any warnings.</li>
+<li>Press <b>Save packet</b> to write <code>trip-plan.html</code> in the cave's folder, beside the drawing. Open it in a browser to read or print it. Save the drawing once first: an unsaved drawing has no folder to put it in.</li>
+</ol>
+<p>The packet holds the objectives, the time budget, a sketch of the route over the cave's shape, the directions, what to watch for, the gear list and the team's packing list. It has no coordinates and no entrance location, so it can go to a team that has not been there before.</p>
+<h3>Pace</h3>
+<p>Walking time is worked out at 264 feet a minute, a 3 mph hiking pace, plus time on rope for each pitch and 20 minutes of work at each stop. Cave passage is usually slower than a trail: type your own pace in feet per minute in <b>Walking pace</b> and press <b>Plan trip</b> again. Leave it blank to go back to 264. The pace and the <b>packing list</b> are saved in <code>stations.json</code>, so the whole team plans with the same numbers.</p>
+<h3>What it cannot tell you</h3>
+<ul>
+<li>The route follows the survey line. It is not a guarantee that the way is safe or easy: crawls, water, climbs and loose ground are only known where someone wrote them in the survey notes.</li>
+<li>Rigging is not read from the map yet. Every pitch says "rig not on map, confirm": count the anchors and hangers from what you know of the cave before you pack.</li>
+<li>A stop that cannot be reached along the surveyed line is listed as a warning and left out of the route. A shot whose walls say the passage is under 3 feet high or wide is flagged as tight.</li>
+</ul>
 <h2>Where the marks live</h2>
 <p>Nothing in this table is written into the drawing. The kinds are worked out from the survey every time the panel opens or you press <b>Refresh</b>. What the team writes — a status, notes, who has it — is saved in <code>stations.json</code> in the cave's folder, beside the drawing, so Google Drive carries it to everyone who shares the cave. Save the drawing once before marking anything; an unsaved drawing has no folder to keep the file in.</p>
 <h2>When it refuses</h2>

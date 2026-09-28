@@ -22,6 +22,11 @@
 // And a stations.json that will not parse is never overwritten: the
 // panel says so and refuses to save until a person has looked at it.
 //
+// THE PLAN TAB routes a trip from the survey's first station to the
+// stops picked here and back (Core/CsTripPlan.js), and writes the
+// packet, trip-plan.html, beside the drawing. Pace and the team's
+// packing list are stations.json `settings`, written the same safe way.
+//
 // WIDGETS ARE FOUND BY objectName, never stashed on objects or as
 // expandos (cavecad-tab-engine-panels). The action is forceGlobal, so
 // this all runs in the application engine that init() built the dock in.
@@ -58,7 +63,11 @@ StationTable.ZOOM_FEET = 25.0;
  */
 StationTable.state = { rows: [], shown: [], store: null, orphans: [],
     docPath: "", drawn: null, drawnPos: null, filling: false,
-    loadError: "" };
+    loadError: "",
+    // The Plan tab: the stops picked, the last plan built, and the pace
+    // and packing text last PUT INTO the widgets from stations.json (so
+    // a reload can tell a caver's unsaved typing from what it showed).
+    planStops: [], plan: null, planShown: null };
 
 // ---------------------------------------------------------------------
 // Reading the drawing
@@ -145,8 +154,8 @@ StationTable.readSidecar = function(path) {
     }
 };
 
-/** \return true on success */
-StationTable.writeSidecar = function(path, store) {
+/** Write text to a file as UTF-8, replacing it. \return true on success */
+StationTable.writeText = function(path, text) {
     if (path === "") {
         return false;
     }
@@ -161,13 +170,18 @@ StationTable.writeSidecar = function(path, store) {
             stream.setEncoding(QStringConverter.Utf8);
         } catch (eEnc) {
         }
-        stream.writeString(CsStationStore.serialize(store));
+        stream.writeString(text);
         stream.flush();
         file.close();
         return true;
     } catch (e) {
         return false;
     }
+};
+
+/** \return true on success */
+StationTable.writeSidecar = function(path, store) {
+    return StationTable.writeText(path, CsStationStore.serialize(store));
 };
 
 // ---------------------------------------------------------------------
@@ -310,13 +324,129 @@ StationTable.buildTablePage = function() {
     return page;
 };
 
+/**
+ * The trip-plan page: the stops picked from the table, pace and packing
+ * (kept in stations.json settings), and the plan as text. Rows on the
+ * Stations page select one at a time, so stops are gathered into a list
+ * here; with the list empty, Plan trip uses the selected row.
+ *
+ * The stop list is a one-column QTableWidget, not a QListWidget: this
+ * bridge has no constructor for QListWidget (see CaveShelf.js).
+ */
+StationTable.buildPlanPage = function() {
+    var page = new QWidget();
+    var layout = new QVBoxLayout();
+    layout.setContentsMargins(6, 6, 6, 6);
+    layout.setSpacing(6);
+
+    var stopRow = new QHBoxLayout();
+    var addButton = new QPushButton(qsTr("Add selected station"));
+    addButton.objectName = "StationTablePlanAdd";
+    addButton.toolTip = qsTr("Add the row selected on the Stations tab " +
+        "to this trip's stops.");
+    var removeButton = new QPushButton(qsTr("Remove"));
+    removeButton.objectName = "StationTablePlanRemove";
+    removeButton.toolTip = qsTr("Take the selected stop off the list.");
+    var clearButton = new QPushButton(qsTr("Clear"));
+    clearButton.objectName = "StationTablePlanClear";
+    stopRow.addWidget(addButton, 0, 0);
+    stopRow.addWidget(removeButton, 0, 0);
+    stopRow.addWidget(clearButton, 0, 0);
+    stopRow.addStretch(1);
+    layout.addLayout(stopRow, 0);
+    addButton.clicked.connect(function() { StationTable.addStop(); });
+    removeButton.clicked.connect(function() { StationTable.removeStop(); });
+    clearButton.clicked.connect(function() { StationTable.clearStops(); });
+
+    var stops = new QTableWidget(0, 1);
+    stops.objectName = "StationTablePlanStops";
+    try {
+        stops.horizontalHeader().visible = false;
+        stops.verticalHeader().visible = false;
+        stops.horizontalHeader().stretchLastSection = true;
+        stops.selectionBehavior = QAbstractItemView.SelectRows;
+        stops.selectionMode = QAbstractItemView.SingleSelection;
+        stops.editTriggers = QAbstractItemView.NoEditTriggers;
+    } catch (eStops) {
+    }
+    try {
+        stops.setMinimumHeight(70);
+        stops.setMaximumHeight(120);
+    } catch (eStopsH) {
+    }
+    layout.addWidget(stops, 0, 0);
+
+    // Pace: one line, deliberately (qcad-js-bridge-traps).
+    var paceRow = new QHBoxLayout();
+    var paceLabel = new QLabel(qsTr("Walking pace, ft per minute:"));
+    var pace = new QLineEdit();
+    pace.objectName = "StationTablePace";
+    try {
+        pace.placeholderText = qsTr("264 (a 3 mph hike)");
+    } catch (ePh) {
+    }
+    pace.toolTip = qsTr("Leave blank for the default, 264 ft a minute " +
+        "(3 mph). Saved in stations.json for the whole team.");
+    paceRow.addWidget(paceLabel, 0, 0);
+    paceRow.addWidget(pace, 1, 0);
+    layout.addLayout(paceRow, 0);
+
+    var packing = new QPlainTextEdit();
+    packing.objectName = "StationTablePacking";
+    try {
+        packing.placeholderText = qsTr("Team packing list, one item per line");
+    } catch (ePh2) {
+    }
+    packing.toolTip = qsTr("Printed in the packet as written. Saved in " +
+        "stations.json for the whole team.");
+    try {
+        packing.setMinimumHeight(50);
+        packing.setMaximumHeight(100);
+    } catch (ePackH) {
+    }
+    layout.addWidget(packing, 0, 0);
+
+    var runRow = new QHBoxLayout();
+    var planButton = new QPushButton(qsTr("Plan trip"));
+    planButton.objectName = "StationTablePlanButton";
+    planButton.toolTip = qsTr("Route from the survey's first station to " +
+        "every stop and back. With no stops listed, plans to the row " +
+        "selected on the Stations tab.");
+    var packetButton = new QPushButton(qsTr("Save packet"));
+    packetButton.objectName = "StationTableSavePacket";
+    packetButton.toolTip = qsTr("Write trip-plan.html beside the drawing: " +
+        "route sketch, directions, time and gear. No coordinates.");
+    packetButton.enabled = false;
+    runRow.addWidget(planButton, 0, 0);
+    runRow.addWidget(packetButton, 0, 0);
+    runRow.addStretch(1);
+    layout.addLayout(runRow, 0);
+    planButton.clicked.connect(function() { StationTable.planTrip(); });
+    packetButton.clicked.connect(function() { StationTable.savePacket(); });
+
+    var out = new QPlainTextEdit();
+    out.objectName = "StationTablePlanOut";
+    out.readOnly = true;
+    try {
+        out.setMinimumHeight(120);
+    } catch (eOutH) {
+    }
+    layout.addWidget(out, 1, 0);
+
+    page.setLayout(layout);
+    return page;
+};
+
 StationTable.buildDock = function(appWin) {
     var dock = new QDockWidget(qsTr("Station Table"), appWin);
     // Without an objectName restoreState() cannot identify the dock and
     // silently forgets where it was.
     dock.objectName = StationTable.DOCK_NAME;
-    var body = StationTable.buildTablePage();
-    dock.setWidget(body);
+    var tabs = new QTabWidget();
+    tabs.objectName = "StationTableTabs";
+    tabs.addTab(StationTable.buildTablePage(), qsTr("Stations"));
+    tabs.addTab(StationTable.buildPlanPage(), qsTr("Plan"));
+    dock.setWidget(tabs);
     appWin.addDockWidget(Qt.RightDockWidgetArea, dock);
     CsPanel.attachHelp(dock, "StationTable", qsTr("Station Table"));
     return dock;
@@ -717,12 +847,395 @@ StationTable.exportChecklist = function() {
     }
 };
 
+// ---------------------------------------------------------------------
+// The Plan tab
+// ---------------------------------------------------------------------
+
+/**
+ * The same-drawing guard for the Plan tab. The one dock serves every
+ * tab, so a stop picked on one cave must never be routed on another.
+ * \return true when it is safe to act
+ */
+StationTable.planGuard = function() {
+    if (StationTable.sameDrawing()) {
+        return true;
+    }
+    StationTable.reload();
+    CsTell.warn(qsTr("Station Table: the drawing changed under the " +
+        "table, so it has been read again and the trip's stops cleared. " +
+        "Pick them again."));
+    return false;
+};
+
+/** Repaint the stop list from state.planStops. */
+StationTable.fillStops = function() {
+    var list = StationTable.child("StationTablePlanStops");
+    if (list === null) {
+        return;
+    }
+    var stops = StationTable.state.planStops;
+    list.setRowCount(0);
+    list.setRowCount(stops.length);
+    for (var i = 0; i < stops.length; i++) {
+        list.setItem(i, 0, new QTableWidgetItem(String(stops[i])));
+    }
+};
+
+/** Add the Stations tab's selected row to the stops. */
+StationTable.addStop = function() {
+    if (!StationTable.planGuard()) {
+        return;
+    }
+    var row = StationTable.selectedRow();
+    if (row === null) {
+        CsTell.warn(qsTr("Station Table: select a row on the Stations tab " +
+            "first, then add it here."));
+        return;
+    }
+    var stops = StationTable.state.planStops;
+    if (stops.indexOf(row.station) < 0) {
+        stops.push(row.station);
+    }
+    StationTable.fillStops();
+};
+
+/** Take the selected stop off the list. */
+StationTable.removeStop = function() {
+    var list = StationTable.child("StationTablePlanStops");
+    if (list === null) {
+        return;
+    }
+    var idx = -1;
+    try {
+        var sel = list.selectionModel().selectedRows();
+        if (sel.length > 0) {
+            idx = sel[0].row();
+        }
+    } catch (eSel) {
+        idx = -1;
+    }
+    if (idx < 0) {
+        try {
+            idx = list.currentRow();
+        } catch (eCur) {
+            idx = -1;
+        }
+    }
+    var stops = StationTable.state.planStops;
+    if (typeof idx === "number" && idx >= 0 && idx < stops.length) {
+        stops.splice(idx, 1);
+        StationTable.fillStops();
+    }
+};
+
+StationTable.clearStops = function() {
+    StationTable.state.planStops = [];
+    StationTable.fillStops();
+};
+
+/**
+ * The pace field read: null when blank (the default applies), a number
+ * of ft/min when valid, NaN when it cannot be used.
+ */
+StationTable.paceTyped = function() {
+    var edit = StationTable.child("StationTablePace");
+    var text = edit === null ? "" : String(edit.text).replace(/^\s+|\s+$/g, "");
+    if (text === "") {
+        return null;
+    }
+    var v = Number(text);
+    return (isFinite(v) && v > 0) ? v : NaN;
+};
+
+StationTable.packingTyped = function() {
+    var edit = StationTable.child("StationTablePacking");
+    return edit === null ? "" : String(edit.toPlainText());
+};
+
+/**
+ * The stored pace block with the typed pace laid over it. Other keys a
+ * team set by hand in stations.json (descent rate, rig time...) are
+ * kept: the panel only owns paceFtPerMin.
+ */
+StationTable.paceBlock = function(stored, typed) {
+    var out = {};
+    var src = (stored !== null && typeof stored === "object") ? stored : {};
+    for (var key in src) {
+        if (Object.prototype.hasOwnProperty.call(src, key)) {
+            out[key] = src[key];
+        }
+    }
+    if (typed === null) {
+        delete out.paceFtPerMin;
+    } else {
+        out.paceFtPerMin = typed;
+    }
+    return out;
+};
+
+/**
+ * Put pace and packing into stations.json settings, re-reading the file
+ * first like every other write here. Unchanged values write nothing.
+ * \return "" when saved or nothing to save, else why not
+ */
+StationTable.savePlanSettings = function(pace, packing) {
+    var s = StationTable.state;
+    var path = StationTable.sidecarPath(s.docPath);
+    if (path === "") {
+        return qsTr("pace and packing not saved: save the drawing first");
+    }
+    var side = StationTable.readSidecar(path);
+    if (side.error !== "") {
+        s.loadError = side.error;
+        StationTable.updateSummary((s.shown || []).length);
+        return qsTr("pace and packing not saved: stations.json could not " +
+            "be read") + " (" + side.error + ")";
+    }
+    var st = side.store.settings;
+    var block = StationTable.paceBlock(st.pace, pace);
+    var was = st.pace === null || typeof st.pace !== "object" ? undefined :
+        st.pace.paceFtPerMin;
+    var shown = { pace: pace === null ? "" : String(pace), packing: packing };
+    if (st.packing === packing && was === block.paceFtPerMin) {
+        if (s.store !== null) {
+            s.store.settings = st;
+        }
+        s.planShown = shown;
+        return "";
+    }
+    st.packing = packing;
+    st.pace = block;
+    if (!StationTable.writeSidecar(path, side.store)) {
+        return qsTr("pace and packing not saved: could not write stations.json");
+    }
+    if (s.store !== null) {
+        s.store.settings = st;
+    }
+    s.planShown = shown;
+    return "";
+};
+
+/**
+ * Show the stored pace and packing in the widgets. Only overwrites what
+ * the caver has not edited since it was last shown (or when the drawing
+ * changed), so a Refresh never eats unsaved typing.
+ */
+StationTable.showPlanSettings = function(force) {
+    var s = StationTable.state;
+    var paceEdit = StationTable.child("StationTablePace");
+    var packEdit = StationTable.child("StationTablePacking");
+    if (paceEdit === null || packEdit === null || s.store === null) {
+        return;
+    }
+    var st = s.store.settings || {};
+    var pv = (st.pace !== null && typeof st.pace === "object") ?
+        st.pace.paceFtPerMin : undefined;
+    var want = { pace: (typeof pv === "number" && isFinite(pv) && pv > 0) ?
+        String(pv) : "", packing: String(st.packing || "") };
+    var shown = s.planShown;
+    var untouched = shown === null ||
+        (String(paceEdit.text) === shown.pace &&
+         String(packEdit.toPlainText()) === shown.packing);
+    if (force === true || untouched) {
+        paceEdit.text = want.pace;
+        packEdit.setPlainText(want.packing);
+        s.planShown = want;
+    }
+};
+
+/** The survey's distance unit: the first trip's, "m" or "ft". */
+StationTable.unitOf = function(survey) {
+    var u = "";
+    if (!isNull(survey.trips) && survey.trips.length > 0 &&
+            !isNull(survey.trips[0])) {
+        u = survey.trips[0].distanceUnit;
+    }
+    if (u !== "m" && u !== "ft") {
+        u = survey.distanceUnit;
+    }
+    return u === "m" ? "m" : "ft";
+};
+
+/** The plan as the text the tab shows. */
+StationTable.planText = function(p, paceUsed) {
+    var unit = p.unit;
+    var len = function(v) { return String(Math.round(v)) + " " + unit; };
+    var lines = [];
+    lines.push(qsTr("From %1, %2 stop(s), walking %3 ft/min.")
+        .arg(p.start).arg(p.stops.length).arg(paceUsed));
+    for (var w = 0; w < p.warnings.length; w++) {
+        lines.push("WARNING: " + p.warnings[w]);
+    }
+    for (var i = 0; i < p.stops.length; i++) {
+        lines.push("");
+        lines.push("To " + p.stops[i].station + "  (" +
+            CsTripPlan.clock(p.stops[i].minutesIn) + ")");
+        for (var k = 0; k < p.stops[i].steps.length; k++) {
+            lines.push("  " + p.stops[i].steps[k].text);
+        }
+    }
+    if (p.stops.length > 0) {
+        lines.push("");
+        lines.push("Back to " + p.start + "  (" +
+            CsTripPlan.clock(p.back.minutes) + ")");
+        for (var b = 0; b < p.back.steps.length; b++) {
+            lines.push("  " + p.back.steps[b].text);
+        }
+    }
+    var t = p.totals;
+    lines.push("");
+    lines.push("Total " + CsTripPlan.clock(t.minutesAll) + "  (in " +
+        CsTripPlan.clock(t.minutesIn) + ", work " +
+        CsTripPlan.clock(t.minutesWork) + ", out " +
+        CsTripPlan.clock(t.minutesOut) + ")");
+    lines.push("Distance " + len(t.lengthIn) + " in, " + len(t.lengthAll) +
+        " round trip");
+    for (var r = 0; r < p.gear.rope.length; r++) {
+        lines.push("Rope: " + p.gear.rope[r].text);
+    }
+    for (var h = 0; h < p.gear.hardware.length; h++) {
+        lines.push("Rigging: " + p.gear.hardware[h]);
+    }
+    lines.push("");
+    lines.push(qsTr("The route follows the survey line. It is not a " +
+        "guarantee that the way is safe or easy."));
+    return lines.join("\n");
+};
+
+/**
+ * Build the plan from the stop list (or, with it empty, the selected
+ * row) and show it. Saves pace and packing to stations.json first.
+ * \return the plan, or null when nothing was planned
+ */
+StationTable.planTrip = function() {
+    var s = StationTable.state;
+    var out = StationTable.child("StationTablePlanOut");
+    var packetButton = StationTable.child("StationTableSavePacket");
+    if (!StationTable.planGuard()) {
+        return null;
+    }
+    var d = s.drawn;
+    if (d === null) {
+        CsTell.warn(qsTr("Station Table: this drawing holds no survey to plan on."));
+        return null;
+    }
+    var targets = s.planStops.slice(0);
+    if (targets.length === 0) {
+        var row = StationTable.selectedRow();
+        if (row !== null) {
+            targets = [row.station];
+        }
+    }
+    if (targets.length === 0) {
+        CsTell.warn(qsTr("Station Table: add stops to the trip, or select " +
+            "a row on the Stations tab, first."));
+        return null;
+    }
+    var pace = StationTable.paceTyped();
+    if (pace !== null && isNaN(pace)) {
+        CsTell.warn(qsTr("Station Table: the walking pace must be a number " +
+            "of feet per minute above 0, or blank for the default 264."));
+        return null;
+    }
+    var packing = StationTable.packingTyped();
+    var why = StationTable.savePlanSettings(pace, packing);
+    var config = StationTable.paceBlock(
+        s.store === null ? {} : s.store.settings.pace, pace);
+    s.plan = CsTripPlan.build(d.survey, d.resolved, { targets: targets,
+        unit: StationTable.unitOf(d.survey), config: config,
+        packing: packing });
+    var text = StationTable.planText(s.plan,
+        CsTripPlan.config(config).paceFtPerMin);
+    if (why !== "") {
+        text += "\n(" + why + ")";
+    }
+    if (out !== null) {
+        out.setPlainText(text);
+    }
+    if (packetButton !== null) {
+        packetButton.enabled = s.plan.stops.length > 0;
+    }
+    return s.plan;
+};
+
+/** Today as YYYY-MM-DD (JS Date: the bridge has no QDate). */
+StationTable.today = function() {
+    var d = new Date();
+    var two = function(n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + two(d.getMonth() + 1) + "-" + two(d.getDate());
+};
+
+/**
+ * Write trip-plan.html beside the drawing. Re-plans first, so the packet
+ * is always what the tab shows for the stops, pace and packing now.
+ * \return the path written, or ""
+ */
+StationTable.savePacket = function() {
+    var s = StationTable.state;
+    if (!StationTable.planGuard()) {
+        return "";
+    }
+    if (s.docPath === "" || CsCave.folderOf(s.docPath) === null) {
+        CsTell.warn(qsTr("Station Table: save the drawing first. The " +
+            "packet is written beside it."));
+        return "";
+    }
+    var plan = StationTable.planTrip();
+    if (plan === null || plan.stops.length === 0) {
+        return "";
+    }
+    var html = CsTripPlan.packetHtml(plan, {
+        title: CsCave.nameOf(s.docPath) || qsTr("Cave"),
+        survey: s.drawn.survey, resolved: s.drawn.resolved,
+        date: StationTable.today() });
+    var path = CsCave.folderOf(s.docPath) + "/trip-plan.html";
+    if (!StationTable.writeText(path, html)) {
+        CsTell.warn(qsTr("Station Table: could not write trip-plan.html " +
+            "beside the drawing."));
+        return "";
+    }
+    var out = StationTable.child("StationTablePlanOut");
+    if (out !== null) {
+        out.setPlainText(String(out.toPlainText()) + "\n\n" +
+            qsTr("Packet saved: %1").arg(path));
+    }
+    try {
+        EAction.handleUserMessage(qsTr("Station Table: packet saved as %1")
+            .arg(path));
+    } catch (eMsg) {
+    }
+    return path;
+};
+
+/** Forget the Plan tab's stops and plan (the drawing changed). */
+StationTable.resetPlan = function() {
+    var s = StationTable.state;
+    s.planStops = [];
+    s.plan = null;
+    s.planShown = null;
+    StationTable.fillStops();
+    var out = StationTable.child("StationTablePlanOut");
+    if (out !== null) {
+        out.setPlainText("");
+    }
+    var packetButton = StationTable.child("StationTableSavePacket");
+    if (packetButton !== null) {
+        packetButton.enabled = false;
+    }
+};
+
 /** Re-read the drawing and the sidecar, then repaint. */
 StationTable.reload = function() {
     var s = StationTable.state;
     var doc = StationTable.document();
+    var before = s.docPath;
     s.docPath = StationTable.pathOf(doc);
     s.drawnPos = null;
+    // Another drawing: its stops, plan and pace belong to the old one.
+    var changed = s.docPath !== before;
+    if (changed) {
+        StationTable.resetPlan();
+    }
     var drawn = null;
     try {
         drawn = StationTable.readDrawing(doc);
@@ -734,6 +1247,7 @@ StationTable.reload = function() {
     var side = StationTable.readSidecar(StationTable.sidecarPath(s.docPath));
     s.store = side.store;
     s.loadError = side.error;
+    StationTable.showPlanSettings(changed);
     if (drawn === null) {
         s.rows = [];
         s.orphans = [];
