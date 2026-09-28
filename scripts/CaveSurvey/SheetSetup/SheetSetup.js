@@ -204,6 +204,31 @@ var csSheetSetupDock;
 // sentence here is drawn clipped -- measured live, 2026-09-14, with the
 // first line cut in half. The rest of the explanation is the
 // handbook's job.
+/**
+ * How SheetSetup.tell says each kind of thing (Nathan, 2026-09-27: "the
+ * red text made me think something bad happened"). Green is done;
+ * yellow is nothing broke but you have to act first; red is something
+ * failed. Plain status -- the fit, the spill-free page -- stays in the
+ * label's own colour. Mid-tones, so each reads on light and dark.
+ */
+SheetSetup.DONE = "done";
+SheetSetup.WARNING = "warning";
+SheetSetup.ERROR = "error";
+SheetSetup.LEVELS = {
+    done:    { colour: "#2e9e4f", box: false },
+    warning: { colour: "#c99a06", box: true },
+    error:   { colour: "#d9463b", box: true }
+};
+
+/** Text made safe to sit inside the command line's rich text. */
+SheetSetup.escapeHtml = function(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+};
+
+/** The files the last Build Sheet wrote; empty when it wrote none. */
+SheetSetup.lastWritten = [];
+
 SheetSetup.HINT = qsTr("Drag a piece to arrange the page. Edges and " +
     "middles snap.");
 
@@ -731,6 +756,7 @@ SheetSetup.repaint = function() {
     }
     if (w.state.ok !== true) {
         w.fitLabel.text = w.state.why;
+        w.note.setStyleSheet("");
         w.note.text = "";
         w.buildButton.enabled = false;
         return;
@@ -796,6 +822,10 @@ SheetSetup.repaint = function() {
     // THE SPILL IS THE POINT OF THE PICTURE. Everything else the panel
     // says could be worked out; this is the one thing a caver would
     // otherwise learn by building the file and looking at it.
+    // Off the paper is a WARNING -- the build would still run, but the
+    // plot would lose part of the cave. Fitting is plain status.
+    w.note.setStyleSheet(spill.fits ? "" :
+        "color:" + SheetSetup.LEVELS[SheetSetup.WARNING].colour + ";");
     w.note.text = spill.fits ?
         qsTr("Everything sits on the paper.") :
         qsTr("Off the paper: %1. Try a smaller scale or bigger paper.")
@@ -826,7 +856,7 @@ SheetSetup.build = function() {
     if (isNull(w.state) || w.state.ok !== true) {
         SheetSetup.tell(isNull(w.state) || isNull(w.state.why) ?
             qsTr("Sheet Setup could not read this drawing.") :
-            String(w.state.why));
+            String(w.state.why), SheetSetup.WARNING);
         return;
     }
     var doc = null;
@@ -848,7 +878,7 @@ SheetSetup.build = function() {
             doc.isModified() === true) {
         SheetSetup.tell(qsTr("Save this drawing first. The sheet is " +
             "built from the FILE on disk, so anything not yet saved " +
-            "would be missing from it."), true);
+            "would be missing from it."), SheetSetup.WARNING);
         return;
     }
     if (w.state.rebuilding === true) {
@@ -875,37 +905,43 @@ SheetSetup.build = function() {
         elevation: w.cbElevation.checked === true,
         offsets: w.offsets
     });
-    // Every failure intoCopy reports opens with the panel's name; a
-    // success is the sentence that describes the sheet.
-    SheetSetup.tell(said, String(said).indexOf("Sheet Setup:") === 0);
+    // Judged by what intoCopy WROTE, not by its words: its success
+    // sentence opens with "Sheet Setup:" too, and read as a failure the
+    // first time this was tried live.
+    SheetSetup.tell(said, SheetSetup.lastWritten.length === 0 ?
+        SheetSetup.ERROR : SheetSetup.DONE);
 };
 
 /**
  * Say something the caver will actually see: on the panel's own note
- * line, on the command line, and -- when it is a refusal or a failure
- * -- in a box, because a note under a preview is easy to miss when the
- * thing you expected was a new tab.
+ * line, coloured by level, and on the command line in the same colour.
+ * A warning or an error also comes up in a box, because a note under a
+ * preview is easy to miss when the thing you expected was a new tab.
  *
  * Never warning(): that is qWarning, which only reaches stderr.
+ *
+ * \param level SheetSetup.DONE, WARNING or ERROR -- see LEVELS.
  */
-SheetSetup.tell = function(text, problem) {
+SheetSetup.tell = function(text, level) {
     text = String(text);
+    var look = SheetSetup.LEVELS[level] || SheetSetup.LEVELS[SheetSetup.DONE];
     try {
         var w = SheetSetup.widgets;
         if (!isNull(w) && !isNull(w.note)) {
             w.note.text = text;
+            w.note.setStyleSheet("color:" + look.colour + ";");
         }
     } catch (eNote) {
     }
     try {
-        if (problem === true) {
-            EAction.handleUserWarning(text);
-        } else {
-            EAction.handleUserMessage(text);
-        }
+        // Unescaped so the span colours it, which means the text has to
+        // be escaped here instead. Not handleUserWarning: that is always
+        // red, and a warning is not a failure.
+        EAction.handleUserMessage("<span style='color:" + look.colour +
+            ";'>" + SheetSetup.escapeHtml(text) + "</span>", false);
     } catch (eLine) {
     }
-    if (problem === true) {
+    if (look.box === true) {
         try {
             QMessageBox.warning(RMainWindowQt.getMainWindow(),
                 qsTr("Sheet Setup"), text);
@@ -1047,6 +1083,7 @@ SheetSetup.ensureDock = function() {
  * \return the sentence the caver is told.
  */
 SheetSetup.intoCopy = function(recordPath, opts) {
+    SheetSetup.lastWritten = [];
     var folder = CsCave.folderOf(recordPath);
     var caveName = CsCave.nameOf(recordPath);
     if (isNull(folder) || folder === "") {
@@ -1070,6 +1107,10 @@ SheetSetup.intoCopy = function(recordPath, opts) {
     }
 
     var written = [];
+    // Every file this run finished writing, read by build() to tell a
+    // failure from a success. Reset first so an early return reads as
+    // "nothing written".
+    SheetSetup.lastWritten = written;
     var said = "";
     for (var k = 0; k < kinds.length; k++) {
         var target = CsSheetSetup.sheetPathFor(folder, caveName, kinds[k]);
@@ -1209,7 +1250,7 @@ SheetSetup.openPending = function() {
         openFiles([path], false);
     } catch (eOpen) {
         SheetSetup.tell(qsTr("Sheet Setup: the sheet was written but " +
-            "would not open (") + eOpen + "). " + path, true);
+            "would not open (") + eOpen + "). " + path, SheetSetup.ERROR);
     }
 };
 

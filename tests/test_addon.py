@@ -2281,6 +2281,18 @@ class TestPanelsRunInTheApplicationEngine(unittest.TestCase):
                           "SheetSetup.tell so the caver sees it")
         self.assertIn("SheetSetup.tell(", code)
 
+    def test_sheet_setup_says_how_serious_each_message_is(self):
+        """Green done, yellow warning, red error -- a success once came
+        out red and read as a failure. Every call names its level."""
+        source = self.source("SheetSetup")
+        calls = re.findall(r"SheetSetup\.tell\((.*?)\);\n", source, re.S)
+        unlevelled = [c[:60] for c in calls
+                      if not re.search(r"SheetSetup\.(DONE|WARNING|ERROR)", c)]
+        self.assertTrue(calls)
+        self.assertEqual(unlevelled, [],
+                         "SheetSetup.tell calls without a level: %s"
+                         % unlevelled)
+
 
 class TestScanListIsShared(unittest.TestCase):
     """Two panels show the cave's scans; they must say the same things.
