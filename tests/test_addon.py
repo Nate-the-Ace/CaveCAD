@@ -2509,6 +2509,38 @@ class TestSectionBayPanelBelongsToTheApplication(unittest.TestCase):
         self.assertIn("deleteLater()", retire)
 
 
+class TestCave3dStatusSaysEachThingOnce(unittest.TestCase):
+    """The 3D view's cover reason and terrain reason both come from
+    surfaceContext, so a cave with no surface grid printed "no surface:
+    run Surface Data..." twice side by side -- and the doubled line held
+    the dock too wide to shrink (2026-09-27)."""
+
+    def test_repeated_parts_are_said_once(self):
+        with open(os.path.join(ADDON, "Cave3D", "Cave3D.js")) as handle:
+            source = handle.read()
+        match = re.search(r"\nCave3D\.joinStatus = function\(parts\) \{.*?\n\};",
+                          source, re.S)
+        self.assertIsNotNone(match, "Cave3D.joinStatus is gone")
+        script = ("var Cave3D = {}; function isNull(v) { return v === null "
+                  "|| v === undefined; }" + match.group(0) +
+                  "; console.log(Cave3D.joinStatus(['Depth', 'no surface', "
+                  "'', null, 'no surface']));")
+        out = subprocess.run(["node", "-e", script], capture_output=True,
+                             text=True, check=True).stdout.strip()
+        self.assertEqual(out, "Depth  --  no surface")
+
+    def test_both_status_writers_use_it(self):
+        with open(os.path.join(ADDON, "Cave3D", "Cave3D.js")) as handle:
+            source = handle.read()
+        writes = re.findall(r"cave3d\.setStatus\(Cave3D\.handle,(.*?)\);",
+                            source, re.S)
+        combined = [w for w in writes if "Why" in w]
+        self.assertEqual(len(combined), 2,
+                         "expected the build and recolour status writes")
+        self.assertEqual([w for w in combined if "joinStatus" not in w], [])
+
+
+
 class TestScanListIsShared(unittest.TestCase):
     """Two panels show the cave's scans; they must say the same things.
 
