@@ -123,6 +123,15 @@ Handbook.buildDock = function(appWin) {
         Handbook.followLink(url);
     });
 
+    // A dock shown by restoreState() or the window menu's panel toggle
+    // never passes through open(), so it came up blank. The first time it
+    // is seen with nothing read yet, it lands on the home page.
+    dock.visibilityChanged.connect(function(shown) {
+        if (shown && Handbook.widgets.history.length === 0) {
+            Handbook.open(Handbook.HOME);
+        }
+    });
+
     appWin.addDockWidget(Qt.RightDockWidgetArea, dock);
     return dock;
 };
