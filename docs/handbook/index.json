@@ -527,6 +527,13 @@
       "shots": []
     },
     {
+      "id": "privacy",
+      "title": "Privacy",
+      "class": "process",
+      "file": "privacy.html",
+      "shots": []
+    },
+    {
       "id": "set-up-a-student",
       "title": "Set a student up on the teaching cave",
       "class": "task",
