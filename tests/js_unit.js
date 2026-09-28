@@ -161,6 +161,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsLrud.js",
     "scripts/CaveSurvey/Core/CsPitch.js",
     "scripts/CaveSurvey/Core/CsStationTable.js",
+    "scripts/CaveSurvey/Core/CsStationStore.js",
     "scripts/CaveSurvey/Core/CsGhost.js",
     "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsSection3d.js",
@@ -33154,6 +33155,78 @@ ok(stCsv.split("\n")[0].indexOf("Station") === 0, "csv: header row first");
 ok(!/\bx\b|\by\b|lat|lon/i.test(stCsv.split("\n")[0]),
     "csv: header names no coordinates");
 
+
+// ---------------------------------------------------------------------
+// Station Store -- marks, notes, relink
+// ---------------------------------------------------------------------
+
+var ssBad = CsStationStore.parse("{not json");
+eqs(ssBad.store.entries.length, 0, "store: bad json gives an empty store");
+ok(typeof ssBad.error === "string" && ssBad.error !== "",
+    "store: bad json reports an error");
+eqs(CsStationStore.parse("").store.entries.length, 0,
+    "store: empty text is an empty store, quietly");
+ok(CsStationStore.parse("").error === "", "store: empty text is no error");
+
+var ssRows = function() {
+    return CsStationTable.rows(stA, null, {});
+};
+var ss = CsStationStore.empty();
+var ssR = CsStationStore.reconcile(ssRows(), ss).rows;
+var ssA3 = stRow(ssR, "A3");
+CsStationStore.setEntry(ss, ssA3, { status: "assigned", team: "check the floor",
+    who: "Sam" });
+eqs(ss.entries.length, 1, "store: one entry written");
+
+var ssBack = CsStationStore.parse(CsStationStore.serialize(ss)).store;
+eqs(ssBack.entries[0].who, "Sam", "store: round trip keeps who");
+eqs(CsStationStore.serialize(ssBack), CsStationStore.serialize(ss),
+    "store: serialize is stable");
+
+var ssRec = CsStationStore.reconcile(ssRows(), ssBack);
+eqs(stRow(ssRec.rows, "A3").status, "assigned", "reconcile: mark attaches");
+eqs(stRow(ssRec.rows, "A3").link, "ok", "reconcile: link ok");
+eqs(stRow(ssRec.rows, "A2").link, "", "reconcile: unmarked row has no link");
+
+// A case or spacing change in the note must not orphan the marks.
+var stA2 = JSON.parse(JSON.stringify(stA));
+stA2.shots[1].notes = "  lead   w, going ";
+var ssCase = CsStationStore.reconcile(CsStationTable.rows(stA2, null, {}), ssBack);
+eqs(stRow(ssCase.rows, "A3").link, "ok", "reconcile: case/space change still links");
+
+// A real edit of the note -> relink, marks kept.
+var stA3 = JSON.parse(JSON.stringify(stA));
+stA3.shots[1].notes = "LEAD E, going";
+var ssEdit = CsStationStore.reconcile(CsStationTable.rows(stA3, null, {}), ssBack);
+var ssEditRow = stRow(ssEdit.rows, "A3");
+eqs(ssEditRow.link, "relink", "reconcile: edited note asks to re-link");
+eqs(ssEditRow.status, "assigned", "reconcile: relink still shows the marks");
+eqs(ssEditRow.relinkFrom, "LEAD W, going", "reconcile: relink names the old note");
+eqs(ssEdit.orphans.length, 0, "reconcile: a relink is not an orphan");
+
+CsStationStore.setEntry(ssBack, ssEditRow, { status: "assigned" });
+eqs(ssBack.entries.length, 1, "setEntry: relink moves, does not duplicate");
+eqs(ssBack.entries[0].note, "LEAD E, going", "setEntry: relink adopts the new note");
+eqs(ssBack.entries[0].who, "Sam", "setEntry: relink keeps the other fields");
+
+// A station that vanished -> orphan, entry preserved.
+var stGone = frontierSurvey([frontierShot("A1", "A2", 0)]);
+var ssOrph = CsStationStore.reconcile(CsStationTable.rows(stGone, null, {}), ssBack);
+eqs(ssOrph.orphans.length, 1, "reconcile: vanished station is an orphan");
+eqs(ssBack.entries.length, 1, "reconcile: orphan is kept in the store");
+
+// All-empty entries are pruned.
+CsStationStore.setEntry(ssBack, stRow(CsStationStore.reconcile(
+    CsStationTable.rows(stA3, null, {}), ssBack).rows, "A3"),
+    { status: "", team: "", who: "" });
+eqs(ssBack.entries.length, 0, "setEntry: an empty entry is removed");
+
+// Settings and packing ride in the same file.
+var ssSet = CsStationStore.empty();
+ssSet.settings.packing = "First aid kit\nSpare batteries";
+var ssSetBack = CsStationStore.parse(CsStationStore.serialize(ssSet)).store;
+eqs(ssSetBack.settings.packing, "First aid kit\nSpare batteries",
+    "store: packing list round trips");
 
 // ---------------------------------------------------------------------
 // Report.
