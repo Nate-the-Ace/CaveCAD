@@ -2541,6 +2541,44 @@ class TestCave3dStatusSaysEachThingOnce(unittest.TestCase):
 
 
 
+class TestEveryPanelScrolls(unittest.TestCase):
+    """Every panel is freely resizable (Nathan, 2026-09-27: "if buttons
+    and fields need a minimum size, then the resized panel gets
+    scrollbars"). A dock cannot shrink below its widget's minimum, so
+    each one's body goes into a scroll area -- CsPanel.makeScrollable,
+    which CsPanel.attachHelp calls on every path."""
+
+    def test_every_dock_builder_is_wrapped(self):
+        unwrapped = []
+        for root, _dirs, files in os.walk(ADDON):
+            for name in files:
+                if not name.endswith(".js") or name == "CsPanel.js":
+                    continue
+                with open(os.path.join(root, name)) as handle:
+                    source = handle.read()
+                if "new QDockWidget" not in source:
+                    continue
+                if ("CsPanel.attachHelp(" not in source and
+                        "CsPanel.makeScrollable(" not in source):
+                    unwrapped.append(name)
+        self.assertEqual(
+            unwrapped, [],
+            "these build a dock that cannot shrink below its contents: "
+            "%s -- end buildDock with CsPanel.attachHelp or "
+            "CsPanel.makeScrollable" % unwrapped)
+
+    def test_attach_help_wraps_on_every_path(self):
+        with open(os.path.join(ADDON, "Core", "CsPanel.js")) as handle:
+            source = handle.read()
+        body = re.search(r"\nCsPanel\.attachHelp = function.*?\n\};",
+                         source, re.S).group(0)
+        returns = len(re.findall(r"\breturn\b", body))
+        wraps = body.count("CsPanel.makeScrollable(dock)")
+        self.assertEqual(wraps, returns,
+                         "attachHelp has %d exits but wraps the dock on "
+                         "%d of them" % (returns, wraps))
+
+
 class TestScanListIsShared(unittest.TestCase):
     """Two panels show the cave's scans; they must say the same things.
 

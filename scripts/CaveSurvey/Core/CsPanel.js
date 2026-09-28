@@ -1521,6 +1521,7 @@ CsPanel.helpButton = function(folder, label) {
 CsPanel.attachHelp = function(dock, folder, label) {
     var button = CsPanel.helpButton(folder, label);
     if (button === null) {
+        CsPanel.makeScrollable(dock);
         return null;
     }
     try {
@@ -1544,7 +1545,65 @@ CsPanel.attachHelp = function(dock, folder, label) {
         wrapper.setLayout(stack);
         dock.setWidget(wrapper);
     } catch (e) {
+        CsPanel.makeScrollable(dock);
         return null;
     }
+    CsPanel.makeScrollable(dock);
     return button;
+};
+
+/** The objectName makeScrollable gives its scroll area. */
+CsPanel.SCROLL_NAME = "CsPanelScroll";
+
+/**
+ * Let the panel be ANY size (Nathan, 2026-09-27: "every panel needs to
+ * be freely resizable ... if buttons and fields need a minimum size,
+ * then the resized panel gets scrollbars").
+ *
+ * A dock can never be smaller than its widget's minimum size, and a
+ * panel full of rows adds up to a big one -- Sketch Scans measured 656
+ * x 511, Sheet Setup 432 x 491 -- which held the whole column of docks
+ * that wide. Inside a scroll area the panel's own minimum stops
+ * mattering to the dock: the area shrinks freely and scrolls whatever
+ * no longer fits. widgetResizable keeps the panel filling the area
+ * whenever there IS room, so nothing changes for a panel given space.
+ *
+ * Call it LAST in a buildDock, after dock.setWidget; attachHelp does,
+ * so every panel with a ? gets it for free. Idempotent: a dock already
+ * wrapped is left alone. A bridge without QScrollArea keeps the panel
+ * as it was, which is a panel with a minimum size rather than none.
+ *
+ * \return the scroll area, or null when the dock was left as it was
+ */
+CsPanel.makeScrollable = function(dock) {
+    try {
+        var body = dock.widget();
+        if (isNull(body)) {
+            return null;
+        }
+        if (String(body.objectName) === CsPanel.SCROLL_NAME) {
+            return body;
+        }
+        var area = new QScrollArea(dock);
+        area.objectName = CsPanel.SCROLL_NAME;
+        // METHODS, NOT PROPERTIES: the bridge treats several QScrollArea
+        // properties as read-only (DrawPanel's section scrollers, probed
+        // 2026-09-12).
+        area.setWidgetResizable(true);
+        try {
+            area.setFrameShape(QFrame.NoFrame);
+        } catch (eFrame) {
+            // a frame round the panel is cosmetic
+        }
+        try {
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);
+            area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);
+        } catch (ePolicy) {
+        }
+        area.setWidget(body);
+        dock.setWidget(area);
+        return area;
+    } catch (e) {
+        return null;
+    }
 };

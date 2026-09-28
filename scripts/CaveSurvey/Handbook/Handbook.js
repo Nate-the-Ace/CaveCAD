@@ -105,6 +105,9 @@ Handbook.buildDock = function(appWin) {
 
     body.setLayout(layout);
     dock.setWidget(body);
+    // No ? on the Handbook -- it IS the help -- so it asks for the
+    // scroll area itself rather than getting it through attachHelp.
+    CsPanel.makeScrollable(dock);
     Handbook.widgets = w;
 
     w.backButton.clicked.connect(function() {
