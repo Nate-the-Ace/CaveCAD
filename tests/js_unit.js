@@ -32944,6 +32944,15 @@ ok(typeof CsGhost !== "undefined", "CsGhost loaded");
     near(back.segments[1].y, -0.05, 1e-12, "fromPattern: y");
     eqs(back.segments[2].text, "", "fromPattern: plain gap stays plain");
 
+    var big = CsLinetype.scaled(m, 12);
+    eqs(CsLinetype.toPattern(big),
+        'A,6,-2.4,["CAVE",standard,S=1.2,R=15,X=-1.2,Y=-0.6],-3.6',
+        "scaled: lengths, text size and offsets grow; rotation does not");
+    eqs(CsLinetype.toPattern(m),
+        'A,0.5,-0.2,["CAVE",standard,S=0.1,R=15,X=-0.1,Y=-0.05],-0.3',
+        "scaled: the original model is left alone");
+    eqs(big.name + "|" + big.description, "CSTEXT|Text test", "scaled: keeps name");
+
     eqs(CsLinetype.toPattern({ name: "D", description: "", segments: [
         CsLinetype.segment(0.25), CsLinetype.segment(-0.125)] }),
         "A,0.25,-0.125", "toPattern: plain dashes have no brackets");

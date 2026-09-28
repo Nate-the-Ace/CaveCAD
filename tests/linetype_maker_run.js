@@ -75,9 +75,8 @@ check(found.description === "CSTEXT test", "description lost: " + found.descript
 
 m.segments[0].length = 0.75;
 check(CsLinetypeStore.applyToDocument(doc, di, m) === null, "apply replace");
-var p = doc.queryLinetype("CSTEXT").getPattern();
-check(Math.abs(p.getDashLengthAt(0) - 0.75) < 1e-9, "replace did not take: " +
-    p.getDashLengthAt(0));
+check(Math.abs(drawn(doc, "CSTEXT").dash - 0.75) < 1e-9, "replace did not take: " +
+    drawn(doc, "CSTEXT").dash);
 var count = 0;
 var names = doc.getLinetypeNames();
 for (var n = 0; n < names.length; n++) {
@@ -86,6 +85,45 @@ for (var n = 0; n < names.length; n++) {
     }
 }
 check(count === 1, "replace made a second CSTEXT (" + count + ")");
+
+// ---- lengths are drawing units ---------------------------------------------
+// The engine reads a pattern in inches (imperial) or mm (metric) and
+// converts to the drawing's unit. A caver's 0.5 on a feet drawing must
+// draw half a foot, not half an inch -- a 580 ft wall at half an inch
+// is past the engine's dash threshold and draws solid (Truitt, 2026-09-28).
+function unitDoc(unit, metric) {
+    var d = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+    var i = new RDocumentInterface(d);
+    d.setUnit(unit);
+    d.setMeasurement(metric ? RS.Metric : RS.Imperial);
+    return { doc: d, di: i };
+}
+function drawn(d, name) {
+    var pat = d.queryLinetype(name).getPattern();
+    var f = RUnit.convert(1, pat.isMetric() ? RS.Millimeter : RS.Inch, d.getUnit());
+    return { dash: pat.getDashLengthAt(0) * f, size: pat.getShapeScaleAt(1) * f };
+}
+[[RS.Foot, false], [RS.Inch, false], [RS.Meter, true], [RS.Millimeter, true]]
+        .forEach(function(u) {
+    var ud = unitDoc(u[0], u[1]);
+    check(CsLinetypeStore.applyToDocument(ud.doc, ud.di,
+        model("CSUNIT", 'A,0.5,-0.2,["CAVE",standard,S=0.1],-0.3')) === null,
+        "apply CSUNIT, unit " + u[0]);
+    var got = drawn(ud.doc, "CSUNIT");
+    check(Math.abs(got.dash - 0.5) < 1e-9, "unit " + u[0] +
+        ": a 0.5 dash draws " + got.dash + " drawing units");
+    check(Math.abs(got.size - 0.1) < 1e-9, "unit " + u[0] +
+        ": a 0.1 text draws " + got.size + " drawing units");
+    var back = null, all = CsLinetypeStore.fromDocument(ud.doc);
+    for (var k = 0; k < all.length; k++) {
+        if (all[k].name === "CSUNIT") {
+            back = all[k];
+        }
+    }
+    check(back !== null && CsLinetype.toPattern(back) ===
+        'A,0.5,-0.2,["CAVE",standard,S=0.1],-0.3', "unit " + u[0] +
+        ": read back as " + (back ? CsLinetype.toPattern(back) : "nothing"));
+});
 
 // ---- applyAll: what the template pour does -------------------------------
 var doc2 = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());

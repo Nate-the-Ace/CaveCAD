@@ -202,6 +202,34 @@ CsLinetype.writeLin = function(models) {
     return out;
 };
 
+/**
+ * A copy of the model with every length multiplied by f: dash and gap
+ * lengths, text sizes and text offsets. Rotation is an angle and stays.
+ * The same set RLinetypePattern::scale touches, so converting a model and
+ * converting the engine's pattern agree.
+ */
+CsLinetype.scaled = function(model, f) {
+    var out = { name: model.name, description: model.description,
+                category: model.category, segments: [] };
+    for (var i = 0; i < model.segments.length; i++) {
+        var s = model.segments[i], c = {};
+        for (var k in s) {
+            if (s.hasOwnProperty(k)) {
+                c[k] = s[k];
+            }
+        }
+        c.length = s.length * f;
+        c.scale = s.scale * f;
+        c.x = s.x * f;
+        c.y = s.y * f;
+        if (s.fitWidth !== undefined) {
+            c.fitWidth = s.fitWidth * f;
+        }
+        out.segments.push(c);
+    }
+    return out;
+};
+
 /** \return plain-language problems; empty means it can be saved. */
 CsLinetype.validate = function(model) {
     var out = [];

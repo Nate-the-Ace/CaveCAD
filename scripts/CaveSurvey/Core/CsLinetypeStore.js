@@ -136,9 +136,27 @@ CsLinetypeStore.hasLinetype = function(doc, name) {
     return false;
 };
 
+/**
+ * Drawing units per pattern unit. A Linetype Maker length is in DRAWING
+ * units -- 0.5 on a feet map is half a foot -- but the engine reads a
+ * stored pattern in inches (imperial) or mm (metric) and converts it to
+ * the drawing's unit when it draws (RExporter::getLineTypePatternScale).
+ * Stored = model / factor; model = stored * factor. The call mirrors the
+ * engine's exactly, unit None included, so the two cannot disagree.
+ *
+ * Found on Truitt (feet): a 0.5 dash was stored as half an INCH, and a
+ * 580 ft wall needed ~9000 repeats -- past the engine's DashThreshold of
+ * 1000 -- so it drew solid and the linetype looked broken.
+ */
+CsLinetypeStore.unitFactor = function(doc) {
+    var f = RUnit.convert(1.0, doc.isMetric() ? RS.Millimeter : RS.Inch, doc.getUnit());
+    return f > 0 && isFinite(f) ? f : 1.0;
+};
+
 /** Every linetype in a drawing as a model, built-ins left out. */
 CsLinetypeStore.fromDocument = function(doc) {
     var out = [];
+    var factor = CsLinetypeStore.unitFactor(doc);
     var names = doc.getLinetypeNames();
     for (var i = 0; i < names.length; i++) {
         var name = String(names[i]);
@@ -150,8 +168,8 @@ CsLinetypeStore.fromDocument = function(doc) {
         if (r.errors.length > 0 || r.segments.length === 0) {
             continue;
         }
-        out.push({ name: name, description: String(lt.getDescription()),
-                   segments: r.segments });
+        out.push(CsLinetype.scaled({ name: name, description: String(lt.getDescription()),
+                                     segments: r.segments }, factor));
     }
     return out;
 };
@@ -171,9 +189,11 @@ CsLinetypeStore.applyToDocument = function(doc, di, model) {
     if (problems.length > 0) {
         return problems.join(" ");
     }
+    var stored = CsLinetype.toPattern(
+        CsLinetype.scaled(model, 1.0 / CsLinetypeStore.unitFactor(doc)));
     var pat = new RLinetypePattern(doc.isMetric(), model.name, model.description || "");
-    if (!pat.setPatternString(CsLinetype.toPattern(model))) {
-        return "CaveCAD refused the pattern " + CsLinetype.toPattern(model) + ".";
+    if (!pat.setPatternString(stored)) {
+        return "CaveCAD refused the pattern " + stored + ".";
     }
     var lt;
     if (CsLinetypeStore.hasLinetype(doc, model.name)) {
