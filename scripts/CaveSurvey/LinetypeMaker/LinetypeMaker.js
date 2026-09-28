@@ -550,12 +550,13 @@ LinetypeMaker.importFile = function() {
 
 LinetypeMaker.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
+    // NOT a toggle: somebody who typed "ltm" wants the panel. A toggle
+    // hid a panel that was already open behind another dock, so the
+    // command looked like it did nothing (2026-09-28).
     try {
         var dock = LinetypeMaker.ensureDock();
-        dock.visible = !dock.visible;
-        if (dock.visible) {
-            dock.raise();
-        }
+        dock.visible = true;
+        dock.raise();
     } catch (e) {
         csLinetypeMakerDock = undefined;
         CsTell.warn("Linetype Maker: this CaveCAD build refused the docked panel (" +
