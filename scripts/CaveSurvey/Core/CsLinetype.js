@@ -24,7 +24,7 @@ CsLinetype.TEXT_RE = /^[^\s,"\[\]]+$/;
 
 CsLinetype.segment = function(length) {
     return { length: Number(length), text: "", style: "", shape: false,
-             scale: 1, rotation: 0, x: 0, y: 0 };
+             scale: 1, rotation: 0, x: 0, y: 0, anchor: "" };
 };
 
 CsLinetype.kindOf = function(seg) {
@@ -234,6 +234,55 @@ CsLinetype.validate = function(model) {
         out.push("Too long to save safely -- shorten the texts or the description.");
     }
     return out;
+};
+
+// ---------------------------------------------------------------------
+// Text anchoring.
+//
+// A .lin or DXF linetype stores only an X/Y offset for its text, measured
+// from the END of the row the text belongs to. An anchor is the caver's
+// way of saying where the text should sit instead: horizontally in its
+// own row (Left = starts at the row's start, Center = centred in the row,
+// Right = ends at the row's end) and vertically on the line (Top = hangs
+// below it, Middle = centred on it, Bottom = sits on it). The offsets are
+// computed from the text's measured box, and read back the same way: a
+// linetype whose offsets match an anchor shows that anchor; anything else
+// is "custom". Nothing extra is stored, so it survives any .lin or DXF.
+// ---------------------------------------------------------------------
+
+CsLinetype.ANCHORS = ["TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR"];
+CsLinetype.DEFAULT_ANCHOR = "MC";
+CsLinetype.ANCHOR_LABELS = {
+    TL: "Top left", TC: "Top center", TR: "Top right",
+    ML: "Middle left", MC: "Middle center", MR: "Middle right",
+    BL: "Bottom left", BC: "Bottom center", BR: "Bottom right",
+    custom: "Custom (X/Y)"
+};
+
+/**
+ * The X/Y offset that puts text with this box at this anchor.
+ * box: the text's extent at zero offset, rotation applied
+ *      ({minX, minY, maxX, maxY}, relative to its insertion point).
+ */
+CsLinetype.anchorOffset = function(anchor, box, rowLength) {
+    var span = Math.abs(Number(rowLength) || 0);
+    var v = anchor.charAt(0), h = anchor.charAt(1);
+    var refX = h === "L" ? -span : (h === "C" ? -span / 2 : 0);
+    var boxX = h === "L" ? box.minX : (h === "C" ? (box.minX + box.maxX) / 2 : box.maxX);
+    var boxY = v === "T" ? box.maxY : (v === "M" ? (box.minY + box.maxY) / 2 : box.minY);
+    return { x: refX - boxX, y: -boxY };
+};
+
+/** Which anchor a segment's offsets match, or "custom". */
+CsLinetype.anchorOf = function(seg, box) {
+    var tol = 1e-4 * Math.max(1, Math.abs(box.maxX - box.minX), Math.abs(seg.length));
+    for (var i = 0; i < CsLinetype.ANCHORS.length; i++) {
+        var o = CsLinetype.anchorOffset(CsLinetype.ANCHORS[i], box, seg.length);
+        if (Math.abs(o.x - seg.x) <= tol && Math.abs(o.y - seg.y) <= tol) {
+            return CsLinetype.ANCHORS[i];
+        }
+    }
+    return "custom";
 };
 
 /**

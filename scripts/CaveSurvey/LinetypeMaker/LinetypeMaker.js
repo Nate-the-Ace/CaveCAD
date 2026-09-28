@@ -24,7 +24,22 @@ function LinetypeMaker(guiAction) {
 LinetypeMaker.prototype = new EAction();
 
 /** Table columns, in order. Kind is derived, never typed. */
-LinetypeMaker.COLUMNS = ["Kind", "Length", "Text", "Font", "Size", "Rot°", "X", "Y"];
+LinetypeMaker.COLUMNS = ["Kind", "Length", "Text", "Font", "Size", "Anchor",
+                         "Rot\u00b0", "X", "Y"];
+LinetypeMaker.COL = { KIND: 0, LENGTH: 1, TEXT: 2, FONT: 3, SIZE: 4, ANCHOR: 5,
+                      ROT: 6, X: 7, Y: 8 };
+
+/** The words each font's dropdown entry is drawn with. No spaces: the
+ *  engine's linetype text cannot hold one. */
+LinetypeMaker.FONT_SAMPLE = "AaBbWw123";
+LinetypeMaker.FONT_ICON_W = 120;
+LinetypeMaker.FONT_ICON_H = 20;
+
+/** Drawn font samples, built once per session: {lowercase name: QIcon}. */
+LinetypeMaker.fontIcons = null;
+
+/** New text rows: small enough to sit in a gap of a typical pattern. */
+LinetypeMaker.TEXT_SIZE = 0.1;
 
 LinetypeMaker.PREVIEW_W = 280;
 LinetypeMaker.PREVIEW_H = 56;
@@ -71,7 +86,14 @@ LinetypeMaker.buildDock = function(appWin) {
     w.table = new QTableWidget(0, LinetypeMaker.COLUMNS.length);
     w.table.setHorizontalHeaderLabels(LinetypeMaker.COLUMNS);
     w.table.toolTip = qsTr("One row per dash (positive length), gap (negative) " +
-        "or dot (0). A row with text draws it at the END of that row.");
+        "or dot (0). A text row draws its text in that row, placed by its Anchor.");
+    // Whole rows, several at once: Shift/Cmd-click the row numbers, then a
+    // change to one selected row is made to all of them.
+    try {
+        w.table.selectionBehavior = QAbstractItemView.SelectRows;
+        w.table.selectionMode = QAbstractItemView.ExtendedSelection;
+    } catch (eSel) {
+    }
     try {
         w.table.setMinimumHeight(150);
     } catch (eH) {
@@ -90,6 +112,10 @@ LinetypeMaker.buildDock = function(appWin) {
         rowButtons.addWidget(rb[i], 0, 0);
     }
     layout.addLayout(rowButtons, 0);
+    var hint = new QLabel(qsTr("Shift- or Cmd-click row numbers to pick several rows: " +
+        "a change to one changes them all, and Remove / Up / Down take them all."));
+    hint.wordWrap = true;
+    layout.addWidget(hint, 0, 0);
 
     w.preview = new QLabel("");
     try {
@@ -128,15 +154,15 @@ LinetypeMaker.buildDock = function(appWin) {
     on(w.picker.activated, function(index) { LinetypeMaker.pick(index); });
     on(w.newButton.clicked, function() { LinetypeMaker.load(LinetypeMaker.blank()); });
     on(w.deleteButton.clicked, function() { LinetypeMaker.remove(); });
-    on(w.name.textEdited, function() { LinetypeMaker.readForm(); });
-    on(w.description.textEdited, function() { LinetypeMaker.readForm(); });
-    on(w.table.cellChanged, function() { LinetypeMaker.readForm(); });
+    on(w.name.textEdited, function() { LinetypeMaker.readNames(); });
+    on(w.description.textEdited, function() { LinetypeMaker.readNames(); });
+    on(w.table.cellChanged, function(row, col) { LinetypeMaker.cellEdited(row, col); });
     on(w.addDash.clicked, function() { LinetypeMaker.addRow(0.5, false); });
     on(w.addGap.clicked, function() { LinetypeMaker.addRow(-0.25, false); });
     on(w.addText.clicked, function() { LinetypeMaker.addRow(-0.5, true); });
-    on(w.removeRow.clicked, function() { LinetypeMaker.moveRow(0); });
-    on(w.upRow.clicked, function() { LinetypeMaker.moveRow(-1); });
-    on(w.downRow.clicked, function() { LinetypeMaker.moveRow(1); });
+    on(w.removeRow.clicked, function() { LinetypeMaker.removeRows(); });
+    on(w.upRow.clicked, function() { LinetypeMaker.moveRows(-1); });
+    on(w.downRow.clicked, function() { LinetypeMaker.moveRows(1); });
     on(w.saveButton.clicked, function() { LinetypeMaker.save(); });
     on(w.applyButton.clicked, function() { LinetypeMaker.applyToDrawing(); });
     on(w.importButton.clicked, function() { LinetypeMaker.importFile(); });
@@ -209,26 +235,150 @@ LinetypeMaker.pick = function(index) {
     if (index < 1 || index > w.entries.length) {
         return;
     }
-    LinetypeMaker.load(JSON.parse(JSON.stringify(w.entries[index - 1].model)));
+    var model = JSON.parse(JSON.stringify(w.entries[index - 1].model));
+    LinetypeMaker.load(CsLinetypeStore.deriveAnchors(model));
 };
 
-/** Puts a model into the form. */
-LinetypeMaker.load = function(model) {
+// ---- fonts ------------------------------------------------------------
+
+/**
+ * One font's sample, drawn with the ENGINE's strokes for that font -- the
+ * same paths a text linetype puts on screen and paper -- so the dropdown
+ * shows each font as it will print, not a system font of the same name.
+ */
+LinetypeMaker.fontIcon = function(name) {
+    var W = LinetypeMaker.FONT_ICON_W, H = LinetypeMaker.FONT_ICON_H;
+    var pixmap = new QPixmap(W, H);
+    pixmap.fill(new QColor(0, 0, 0, 0));
+    var paths = CsLinetypeStore.textPaths(LinetypeMaker.FONT_SAMPLE, name, 1, 0);
+    if (paths.length === 0) {
+        return new QIcon(pixmap);
+    }
+    var seg = CsLinetype.segment(1);
+    seg.text = LinetypeMaker.FONT_SAMPLE;
+    seg.style = name;
+    var box = CsLinetypeStore.textBox(seg);
+    var ink = new QColor(40, 40, 40);
+    try {
+        ink = LinetypeMaker.w.table.palette.color(QPalette.Text);
+    } catch (eInk) {
+    }
+    var pad = 2;
+    var f = Math.min((H - 2 * pad) / Math.max(box.maxY - box.minY, 1e-9),
+                     (W - 2 * pad) / Math.max(box.maxX - box.minX, 1e-9));
+    var painter = new QPainter();
+    painter.begin(pixmap);
+    try {
+        painter.setRenderHint(QPainter.Antialiasing, true);
+        var pen = new QPen(ink);
+        pen.setWidth(0);
+        painter.setPen(pen);
+        painter.translate(pad - box.minX * f, H - pad + box.minY * f);
+        painter.scale(f, -f);
+        for (var i = 0; i < paths.length; i++) {
+            painter.drawPath(paths[i]);
+        }
+    } finally {
+        painter.end();
+    }
+    return new QIcon(pixmap);
+};
+
+LinetypeMaker.ensureFontIcons = function() {
+    if (LinetypeMaker.fontIcons !== null) {
+        return;
+    }
+    LinetypeMaker.fontIcons = {};
+    LinetypeMaker.fontList = CsLinetypeStore.fontNames();
+    for (var i = 0; i < LinetypeMaker.fontList.length; i++) {
+        var n = LinetypeMaker.fontList[i];
+        try {
+            LinetypeMaker.fontIcons[n.toLowerCase()] = LinetypeMaker.fontIcon(n);
+        } catch (eIcon) {
+            // a font the engine will not draw still gets a plain entry
+        }
+    }
+};
+
+/** The font dropdown for one text row. */
+LinetypeMaker.fontCombo = function(row, current) {
+    LinetypeMaker.ensureFontIcons();
+    var combo = new QComboBox();
+    try {
+        combo.setIconSize(new QSize(LinetypeMaker.FONT_ICON_W, LinetypeMaker.FONT_ICON_H));
+    } catch (eSize) {
+    }
+    var names = LinetypeMaker.fontList.slice(0);
+    var at = -1;
+    for (var i = 0; i < names.length; i++) {
+        if (names[i].toLowerCase() === String(current).toLowerCase()) {
+            at = i;
+        }
+    }
+    if (at < 0 && String(current) !== "") {
+        // a font this machine lacks (an imported .lin): keep it listed
+        names.unshift(String(current));
+        at = 0;
+    }
+    for (var k = 0; k < names.length; k++) {
+        var icon = LinetypeMaker.fontIcons[names[k].toLowerCase()];
+        if (icon) {
+            combo.addItem(icon, names[k]);
+        } else {
+            combo.addItem(names[k]);
+        }
+    }
+    combo.setCurrentIndex(Math.max(at, 0));
+    combo.toolTip = qsTr("Each font is drawn the way CaveCAD prints it.");
+    combo.activated.connect(function(index) {
+        LinetypeMaker.comboChanged(LinetypeMaker.COL.FONT, row, String(combo.itemText(index)));
+    });
+    return combo;
+};
+
+/** The anchor dropdown for one text row; the index maps to an anchor code. */
+LinetypeMaker.anchorCombo = function(row, current) {
+    var combo = new QComboBox();
+    var codes = CsLinetype.ANCHORS.concat(["custom"]);
+    var at = codes.indexOf(current);
+    for (var i = 0; i < codes.length; i++) {
+        combo.addItem(qsTr(CsLinetype.ANCHOR_LABELS[codes[i]]));
+    }
+    combo.setCurrentIndex(at < 0 ? codes.indexOf("custom") : at);
+    combo.toolTip = qsTr("Where the text sits: Left / Center / Right in its own row, " +
+        "Top / Middle / Bottom against the line. Typing X or Y makes it Custom.");
+    combo.activated.connect(function(index) {
+        LinetypeMaker.comboChanged(LinetypeMaker.COL.ANCHOR, row, codes[index]);
+    });
+    return combo;
+};
+
+// ---- table <-> model ----------------------------------------------------
+
+/** Puts a model into the form, optionally re-selecting rows. */
+LinetypeMaker.load = function(model, selectRows) {
     var w = LinetypeMaker.w;
+    var C = LinetypeMaker.COL;
     w.model = model;
     w.filling = true;
     try {
         w.name.text = model.name;
         w.description.text = model.description || "";
+        // 0 first, so the old rows' dropdowns go with them
+        w.table.setRowCount(0);
         w.table.setRowCount(model.segments.length);
         for (var r = 0; r < model.segments.length; r++) {
             var s = model.segments[r];
+            var isText = s.text !== "";
+            // Font and Anchor are dropdowns on text rows; the cells under
+            // them stay empty or their text shows through.
             var cells = [CsLinetype.kindOf(s), CsLinetype.num(s.length), s.text,
-                s.style, CsLinetype.num(s.scale), CsLinetype.num(s.rotation),
-                CsLinetype.num(s.x), CsLinetype.num(s.y)];
+                "", isText ? CsLinetype.num(s.scale) : "", "",
+                isText ? CsLinetype.num(s.rotation) : "",
+                isText ? CsLinetype.num(s.x) : "", isText ? CsLinetype.num(s.y) : ""];
             for (var c = 0; c < cells.length; c++) {
                 var item = new QTableWidgetItem(String(cells[c]));
-                if (c === 0) {
+                if (c === C.KIND || (!isText && c > C.TEXT)) {
                     try {
                         item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled);
                     } catch (eFlags) {
@@ -236,9 +386,21 @@ LinetypeMaker.load = function(model) {
                 }
                 w.table.setItem(r, c, item);
             }
+            if (isText && !s.shape) {
+                w.table.setCellWidget(r, C.FONT, LinetypeMaker.fontCombo(r, s.style));
+                w.table.setCellWidget(r, C.ANCHOR,
+                    LinetypeMaker.anchorCombo(r, s.anchor || "custom"));
+            }
+        }
+        try {
+            w.table.resizeColumnsToContents();
+        } catch (eResize) {
         }
     } finally {
         w.filling = false;
+    }
+    if (selectRows) {
+        LinetypeMaker.selectRows(selectRows);
     }
     LinetypeMaker.render();
 };
@@ -248,38 +410,173 @@ LinetypeMaker.cell = function(r, c) {
     return isNull(item) ? "" : String(item.text()).trim();
 };
 
-/** Reads the form back into the model; never while load() is filling. */
-LinetypeMaker.readForm = function() {
+/** The rows the caver has selected, ascending -- the selection only,
+ *  no fall-back to the current cell. */
+LinetypeMaker.pickedRows = function() {
+    var out = [];
+    try {
+        var idx = LinetypeMaker.w.table.selectionModel().selectedRows();
+        for (var i = 0; i < idx.length; i++) {
+            if (out.indexOf(idx[i].row()) < 0) {
+                out.push(idx[i].row());
+            }
+        }
+    } catch (eSel) {
+    }
+    out.sort(function(a, b) { return a - b; });
+    return out;
+};
+
+/** The rows the caver has selected, ascending; the current row if none. */
+LinetypeMaker.selectedRows = function() {
     var w = LinetypeMaker.w;
-    if (w.filling) {
+    var out = [];
+    try {
+        var idx = w.table.selectionModel().selectedRows();
+        for (var i = 0; i < idx.length; i++) {
+            var r = idx[i].row();
+            if (out.indexOf(r) < 0) {
+                out.push(r);
+            }
+        }
+    } catch (eSel) {
+    }
+    if (out.length === 0) {
+        var cur = w.table.currentRow();
+        if (cur >= 0) {
+            out.push(cur);
+        }
+    }
+    out.sort(function(a, b) { return a - b; });
+    return out;
+};
+
+LinetypeMaker.selectRows = function(rows) {
+    var w = LinetypeMaker.w;
+    // QTableWidgetSelectionRange is not bound in this build (probed
+    // 2026-09-28); setCurrentCell's selection-command overload is.
+    try {
+        w.table.clearSelection();
+        for (var i = 0; i < rows.length; i++) {
+            w.table.setCurrentCell(rows[i], LinetypeMaker.COL.LENGTH,
+                QItemSelectionModel.Select | QItemSelectionModel.Rows);
+        }
+    } catch (eSel) {
+    }
+};
+
+/**
+ * The rows a change made in `row` applies to: every selected row when
+ * `row` is one of several selected, else just `row`. Text-only settings
+ * skip the rows that have no text.
+ */
+LinetypeMaker.targets = function(row, textOnly) {
+    var sel = LinetypeMaker.selectedRows();
+    var rows = (sel.length > 1 && sel.indexOf(row) >= 0) ? sel : [row];
+    if (!textOnly) {
+        return rows;
+    }
+    var segs = LinetypeMaker.w.model.segments;
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i] < segs.length && segs[rows[i]].text !== "") {
+            out.push(rows[i]);
+        }
+    }
+    return out;
+};
+
+/** A typed cell: copied to the other selected rows, then read back. */
+LinetypeMaker.cellEdited = function(row, col) {
+    var w = LinetypeMaker.w;
+    var C = LinetypeMaker.COL;
+    if (w.filling || col === C.KIND) {
         return;
     }
-    var m = { name: String(w.name.text).trim(),
-              description: String(w.description.text).trim(), segments: [] };
-    // rowCount is a PROPERTY in this bridge; currentRow is a method.
-    for (var r = 0; r < w.table.rowCount; r++) {
-        var s = CsLinetype.segment(Number(LinetypeMaker.cell(r, 1)));
-        s.text = LinetypeMaker.cell(r, 2);
-        s.style = LinetypeMaker.cell(r, 3);
-        s.scale = LinetypeMaker.cell(r, 4) === "" ? 1 : Number(LinetypeMaker.cell(r, 4));
-        s.rotation = Number(LinetypeMaker.cell(r, 5)) || 0;
-        s.x = Number(LinetypeMaker.cell(r, 6)) || 0;
-        s.y = Number(LinetypeMaker.cell(r, 7)) || 0;
-        m.segments.push(s);
-    }
-    w.model = m;
+    var rows = LinetypeMaker.targets(row, col > C.TEXT);
+    var value = LinetypeMaker.cell(row, col);
     w.filling = true;
     try {
-        for (var k = 0; k < m.segments.length; k++) {
-            var kind = w.table.item(k, 0);
-            if (!isNull(kind)) {
-                kind.setText(CsLinetype.kindOf(m.segments[k]));
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i] !== row) {
+                var it = w.table.item(rows[i], col);
+                if (!isNull(it)) {
+                    it.setText(value);
+                }
             }
         }
     } finally {
         w.filling = false;
     }
-    LinetypeMaker.render();
+    // Typed offsets are the caver's own placement: those rows go Custom.
+    LinetypeMaker.readForm((col === C.X || col === C.Y) ? rows : []);
+};
+
+/** A dropdown pick: the same value for every selected text row. */
+LinetypeMaker.comboChanged = function(col, row, value) {
+    var rows = LinetypeMaker.targets(row, true);
+    var segs = LinetypeMaker.w.model.segments;
+    for (var i = 0; i < rows.length; i++) {
+        if (col === LinetypeMaker.COL.FONT) {
+            segs[rows[i]].style = value;
+        } else {
+            segs[rows[i]].anchor = value;
+        }
+    }
+    LinetypeMaker.finish(LinetypeMaker.selectedRows());
+};
+
+/**
+ * Reads the form back into the model; never while load() is filling.
+ * Font and anchor are not read here: their dropdowns write the model
+ * directly. `custom` lists rows whose X/Y were just typed.
+ */
+LinetypeMaker.readForm = function(custom) {
+    var w = LinetypeMaker.w;
+    var C = LinetypeMaker.COL;
+    if (w.filling) {
+        return;
+    }
+    var old = w.model.segments;
+    var m = { name: String(w.name.text).trim(),
+              description: String(w.description.text).trim(), segments: [] };
+    // rowCount is a PROPERTY in this bridge; currentRow is a method.
+    for (var r = 0; r < w.table.rowCount; r++) {
+        var prev = r < old.length ? old[r] : CsLinetype.segment(0);
+        var s = CsLinetype.segment(Number(LinetypeMaker.cell(r, C.LENGTH)));
+        s.text = LinetypeMaker.cell(r, C.TEXT);
+        if (s.text !== "") {
+            var had = prev.text !== "";
+            s.shape = had && prev.shape === true;
+            // a row that just gained text gets the defaults
+            s.style = had && prev.style ? prev.style : "standard";
+            s.anchor = had && prev.anchor ? prev.anchor : CsLinetype.DEFAULT_ANCHOR;
+            var size = LinetypeMaker.cell(r, C.SIZE);
+            s.scale = size === "" ? LinetypeMaker.TEXT_SIZE : Number(size);
+            s.rotation = Number(LinetypeMaker.cell(r, C.ROT)) || 0;
+            s.x = Number(LinetypeMaker.cell(r, C.X)) || 0;
+            s.y = Number(LinetypeMaker.cell(r, C.Y)) || 0;
+            if (custom && custom.indexOf(r) >= 0) {
+                s.anchor = "custom";
+            }
+        }
+        m.segments.push(s);
+    }
+    w.model = m;
+    LinetypeMaker.finish(LinetypeMaker.selectedRows());
+};
+
+/**
+ * Anchored offsets recomputed, then the table redrawn from the model with
+ * the same rows selected -- one path for every edit, so a row that gained
+ * or lost its text always gains or loses its dropdowns.
+ */
+LinetypeMaker.finish = function(keepRows) {
+    var segs = LinetypeMaker.w.model.segments;
+    for (var i = 0; i < segs.length; i++) {
+        CsLinetypeStore.anchorize(segs[i]);
+    }
+    LinetypeMaker.load(LinetypeMaker.w.model, keepRows);
 };
 
 LinetypeMaker.addRow = function(length, withText) {
@@ -288,40 +585,61 @@ LinetypeMaker.addRow = function(length, withText) {
     if (withText) {
         s.text = "TEXT";
         s.style = "standard";
-        s.scale = 0.1;
-        s.y = -0.05;
+        s.scale = LinetypeMaker.TEXT_SIZE;
+        s.anchor = CsLinetype.DEFAULT_ANCHOR;
     }
-    m.segments.push(s);
-    LinetypeMaker.load(m);
+    // Below the selection (its last row), or at the bottom when nothing
+    // is selected. The new row comes up selected, so the next press lands
+    // right after it.
+    var picked = LinetypeMaker.pickedRows();
+    var at = picked.length > 0 ? picked[picked.length - 1] + 1 : m.segments.length;
+    m.segments.splice(at, 0, s);
+    LinetypeMaker.finish([at]);
 };
 
-/** delta 0 removes the current row; -1 / 1 moves it. */
-LinetypeMaker.moveRow = function(delta) {
-    var w = LinetypeMaker.w;
-    var r = w.table.currentRow();
-    var segs = w.model.segments;
-    if (r < 0 || r >= segs.length) {
+/** Removes every selected row. */
+LinetypeMaker.removeRows = function() {
+    var rows = LinetypeMaker.selectedRows();
+    var segs = LinetypeMaker.w.model.segments;
+    for (var i = rows.length - 1; i >= 0; i--) {
+        if (rows[i] < segs.length) {
+            segs.splice(rows[i], 1);
+        }
+    }
+    LinetypeMaker.load(LinetypeMaker.w.model);
+};
+
+/** Moves the selected rows up (-1) or down (1) together. */
+LinetypeMaker.moveRows = function(delta) {
+    var rows = LinetypeMaker.selectedRows();
+    var segs = LinetypeMaker.w.model.segments;
+    if (rows.length === 0) {
         return;
     }
-    if (delta === 0) {
-        segs.splice(r, 1);
-    } else {
-        var to = r + delta;
-        if (to < 0 || to >= segs.length) {
-            return;
-        }
+    if ((delta < 0 && rows[0] === 0) ||
+            (delta > 0 && rows[rows.length - 1] === segs.length - 1)) {
+        return;
+    }
+    var order = delta < 0 ? rows : rows.slice(0).reverse();
+    for (var i = 0; i < order.length; i++) {
+        var r = order[i], to = r + delta;
         var t = segs[r];
         segs[r] = segs[to];
         segs[to] = t;
-        r = to;
     }
-    LinetypeMaker.load(w.model);
-    try {
-        if (segs.length > 0) {
-            w.table.setCurrentCell(Math.min(r, segs.length - 1), 1);
-        }
-    } catch (eCur) {
+    var moved = [];
+    for (var k = 0; k < rows.length; k++) {
+        moved.push(rows[k] + delta);
     }
+    LinetypeMaker.load(LinetypeMaker.w.model, moved);
+};
+
+/** Name and description only: typing them never rebuilds the table. */
+LinetypeMaker.readNames = function() {
+    var w = LinetypeMaker.w;
+    w.model.name = String(w.name.text).trim();
+    w.model.description = String(w.description.text).trim();
+    LinetypeMaker.render();
 };
 
 /** Preview + problems line + which buttons make sense. */

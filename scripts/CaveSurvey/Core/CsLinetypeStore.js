@@ -191,6 +191,92 @@ CsLinetypeStore.applyToDocument = function(doc, di, model) {
 };
 
 /**
+ * The fonts a text linetype can use: every font CaveCAD has, less the
+ * shape fonts (their glyphs are named shapes, not letters).
+ */
+CsLinetypeStore.fontNames = function() {
+    var out = [];
+    var names = RFontList.getNames();
+    for (var i = 0; i < names.length; i++) {
+        var n = String(names[i]);
+        if (/shp$/i.test(n)) {
+            continue;
+        }
+        out.push(n);
+    }
+    return out;
+};
+
+/**
+ * The engine's own glyph paths for a text at zero offset -- the exact
+ * strokes CaveCAD draws and prints. [] when the engine will not draw it.
+ */
+CsLinetypeStore.textPaths = function(text, style, scale, rotation) {
+    try {
+        var p = new RLinetypePattern(true, "CS_MEASURE", "");
+        var seg = CsLinetype.segment(1);
+        seg.text = String(text);
+        seg.style = String(style);
+        seg.scale = Number(scale) > 0 ? Number(scale) : 1;
+        seg.rotation = Number(rotation) || 0;
+        if (!p.setPatternString(CsLinetype.toPattern({ segments: [seg, CsLinetype.segment(-1)] }))) {
+            return [];
+        }
+        var paths = p.getShapeAt(0);
+        return paths.length > 0 ? paths : [];
+    } catch (e) {
+        return [];
+    }
+};
+
+/** A segment's text box at zero offset: {minX,minY,maxX,maxY}, or null. */
+CsLinetypeStore.textBox = function(seg) {
+    var paths = CsLinetypeStore.textPaths(seg.text, seg.style, seg.scale, seg.rotation);
+    var box = null;
+    for (var i = 0; i < paths.length; i++) {
+        var b = paths[i].getBoundingBox();
+        var lo = b.getMinimum(), hi = b.getMaximum();
+        if (box === null) {
+            box = { minX: lo.x, minY: lo.y, maxX: hi.x, maxY: hi.y };
+        } else {
+            box.minX = Math.min(box.minX, lo.x);
+            box.minY = Math.min(box.minY, lo.y);
+            box.maxX = Math.max(box.maxX, hi.x);
+            box.maxY = Math.max(box.maxY, hi.y);
+        }
+    }
+    return box;
+};
+
+/** Sets x/y from the segment's anchor. No-op for plain rows and "custom". */
+CsLinetypeStore.anchorize = function(seg) {
+    if (seg.text === "" || seg.shape || CsLinetype.ANCHORS.indexOf(seg.anchor) < 0) {
+        return;
+    }
+    var box = CsLinetypeStore.textBox(seg);
+    if (box === null) {
+        return;
+    }
+    var o = CsLinetype.anchorOffset(seg.anchor, box, seg.length);
+    seg.x = o.x;
+    seg.y = o.y;
+};
+
+/** Fills every text row's anchor from its offsets (loaded linetypes). */
+CsLinetypeStore.deriveAnchors = function(model) {
+    for (var i = 0; i < model.segments.length; i++) {
+        var seg = model.segments[i];
+        if (seg.text === "" || seg.shape) {
+            seg.anchor = "";
+            continue;
+        }
+        var box = CsLinetypeStore.textBox(seg);
+        seg.anchor = box === null ? "custom" : CsLinetype.anchorOf(seg, box);
+    }
+    return model;
+};
+
+/**
  * Linetypes from a file a caver picked: a .lin read as text, anything
  * else opened as a drawing offscreen and its linetypes read back.
  * \return { linetypes, errors }
