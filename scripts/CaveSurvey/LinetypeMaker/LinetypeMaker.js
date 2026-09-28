@@ -1046,9 +1046,13 @@ LinetypeMaker.importFile = function() {
 // Trace, Symbols and Areas; LinetypeMaker.refresh rebuilds the tiles after
 // every save, delete and import, so the section always shows the library.
 
-LinetypeMaker.TILE_W = 120;
-LinetypeMaker.TILE_H = 22;
-LinetypeMaker.TILE_COLUMNS = 2;
+// A list, one full-width button per linetype -- the Draw panel's rule for
+// anything that shows a line (Nathan, 2026-09-28): the line is read along
+// its length, so it gets the section's width.
+LinetypeMaker.TILE_W = 200;
+LinetypeMaker.TILE_H = 24;
+LinetypeMaker.TILE_BUTTON_H = 52;
+LinetypeMaker.TILE_COLUMNS = 1;
 LinetypeMaker.NO_CATEGORY = "Uncategorized";
 
 /** The section's inner layout, once the Draw panel has built it. */
@@ -1108,6 +1112,7 @@ LinetypeMaker.rebuildTiles = function(models) {
             layout.addWidget(head, 0, 0);
             var grid = new QGridLayout();
             grid.setSpacing(2);
+            grid.setColumnStretch(0, 1);
             for (var k = 0; k < list.length; k++) {
                 grid.addWidget(LinetypeMaker.tile(list[k]),
                     Math.floor(k / LinetypeMaker.TILE_COLUMNS),
@@ -1129,6 +1134,8 @@ LinetypeMaker.tile = function(model) {
         b.setIcon(new QIcon(LinetypeMaker.previewPixmap(model,
             LinetypeMaker.TILE_W, LinetypeMaker.TILE_H)));
         b.setIconSize(new QSize(LinetypeMaker.TILE_W, LinetypeMaker.TILE_H));
+        b.setFixedHeight(LinetypeMaker.TILE_BUTTON_H);
+        b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed);
     } catch (eIcon) {
     }
     b.toolTip = (model.description ? model.description + "\n" : "") +

@@ -367,13 +367,27 @@ FeatureTrace.showCursorFrame = function(frame, layer) {
 // APPENDED to the next free cell: the panel grows a row for every
 // GRID_COLUMNS features rather than for every one, and the shape stays
 // scannable.
-FeatureTrace.GRID_COLUMNS = 2;
+//
+// REVERSED, 2026-09-28 (Nathan): "if a button is showing off a line or
+// linetype, it needs to span the full width of that section ... almost
+// like a button list." A square tile showed a line as a thumbnail; a
+// line is read along its length. So the tiles are ONE column of full-
+// width buttons, each carrying a wide strip of its line
+// (LIST_ICON_W x LIST_ICON_H) with the name and count under it. The
+// Recent strip keeps its compact squares -- it is a row of shortcuts.
+FeatureTrace.GRID_COLUMNS = 1;
 FeatureTrace.CELL_W = 104;
 FeatureTrace.CELL_H = 56;
+// 200, not wider: a Draw section in the handbook-sized dock is ~260 px of
+// content, and a strip wider than that put a sideways scrollbar under
+// Trace (measured 2026-09-28).
+FeatureTrace.LIST_ICON_W = 200;
+FeatureTrace.LIST_ICON_H = 24;
+FeatureTrace.LIST_TILE_H = 64;
 /** Roughly how many characters fit on one line of a tile. Used only to
  *  break the label -- QPushButton renders "\n" but will not wrap for
  *  itself (probed 2026-08-29). */
-FeatureTrace.CELL_CHARS = 12;
+FeatureTrace.CELL_CHARS = 40;
 
 /**
  * A label broken over as many lines as it takes, greedily, on spaces.
@@ -570,10 +584,8 @@ FeatureTrace.buildGroup = function(w, parent, title, header, collapsed) {
     }
 
     try {
-        // Fixed-size tiles in a stretching grid would drift apart as the
-        // dock widens; the stretch goes to a column PAST the last one,
-        // so the tiles stay packed at the left in a steady grid.
-        inner.setColumnStretch(FeatureTrace.GRID_COLUMNS, 1);
+        // One column of list buttons: that column takes the width.
+        inner.setColumnStretch(0, 1);
     } catch (eStretch) {
     }
 
@@ -1040,20 +1052,22 @@ FeatureTrace.tileFor = function(row, checkable, compact) {
     var detail = [];
     if (isNull(row.style)) {
         detail.push(row.layer);
-        icon = FeatureTrace.iconForLayer(row.layer);
+        icon = FeatureTrace.iconForLayer(row.layer, compact !== true);
     } else {
         var spec = CsShapeLine.STYLES[row.style];
         detail.push(isNull(spec) ? "" : spec.decorLayer);
         detail.push(qsTr("Drag along the line, then point at the side " +
             "the ornament goes and click."));
-        icon = FeatureTrace.iconForStyle(row.style);
+        icon = FeatureTrace.iconForStyle(row.style, compact !== true);
     }
     button.toolTip = CsPanel.tipHtml(row.label, CsHelp.forFeature(row),
         detail);
     if (icon !== null) {
         try {
             button.icon = icon;
-            button.iconSize = new QSize(FeatureTrace.ICON, FeatureTrace.ICON);
+            button.iconSize = compact === true ?
+                new QSize(FeatureTrace.ICON, FeatureTrace.ICON) :
+                new QSize(FeatureTrace.LIST_ICON_W, FeatureTrace.LIST_ICON_H);
         } catch (eIcon) {
         }
     }
@@ -1068,10 +1082,10 @@ FeatureTrace.tileFor = function(row, checkable, compact) {
             button.setFixedSize(FeatureTrace.ICON + 14,
                 FeatureTrace.ICON + 14);
         } else {
-            // +38 rather than +24: the tile now carries a third line,
-            // the count, under a label that is often two lines already.
-            button.setFixedSize(FeatureTrace.CELL_W + 20,
-                FeatureTrace.CELL_H + 38);
+            // A LIST BUTTON: the full width of the section, a fixed
+            // height for the line strip plus name and count.
+            button.setFixedHeight(FeatureTrace.LIST_TILE_H);
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed);
         }
     } catch (eSize) {
         // a bridge without setFixedSize gets tiles that stretch; the
@@ -1294,8 +1308,14 @@ FeatureTrace.ICON = 34;
  * colour comes from CsLayers.styleOf, the one place layer appearance is
  * resolved, so a tile cannot quietly disagree with the drawing.
  */
-FeatureTrace.iconForLayer = function(layerName) {
+FeatureTrace.iconForLayer = function(layerName, wide) {
     try {
+        if (wide === true) {
+            // a long, gently waving sample: a line read along its length
+            var strip = CsTileArt.sampleCurve(40, 60, 0.05);
+            return CsTileArt.iconOfClouds([strip], FeatureTrace.LIST_ICON_W,
+                CsTileArt.penForLayer(layerName), FeatureTrace.LIST_ICON_H);
+        }
         var curve = CsTileArt.sampleCurve(10, 20);
         return CsTileArt.iconOfClouds([curve], FeatureTrace.ICON,
             CsTileArt.penForLayer(layerName));
@@ -1313,7 +1333,7 @@ FeatureTrace.iconForLayer = function(layerName) {
  * what the tool does; this is the tool doing it, at tile size. Change
  * the hachure spacing tomorrow and every tile changes with it.
  */
-FeatureTrace.iconForStyle = function(styleKey) {
+FeatureTrace.iconForStyle = function(styleKey, wide) {
     try {
         var spec = CsShapeLine.STYLES[styleKey];
         if (isNull(spec)) {
@@ -1325,11 +1345,16 @@ FeatureTrace.iconForStyle = function(styleKey) {
         // spacing as two lonely hachures and a 2 ft rimstone as a
         // scribble; stretching the line instead of squeezing the
         // ornament keeps the tile an honest picture of the spacing.
-        var feet = Math.max(10, spec.spacingFeet * 4);
-        var pts = spec.close === true ?
-            CsTileArt.sampleRing(feet, 20) : CsTileArt.sampleCurve(feet, 20);
-        var side = spec.close === true ?
-            CsShapeLine.inwardSide(pts) : 1;
+        // A list strip shows ten repeats along a flat, open sample -- a
+        // pit's ring squeezed into a strip would be a speck, and its
+        // hachures read just as well along an open edge.
+        var ring = spec.close === true && wide !== true;
+        var feet = wide === true ? Math.max(30, spec.spacingFeet * 10) :
+            Math.max(10, spec.spacingFeet * 4);
+        var pts = ring ? CsTileArt.sampleRing(feet, 20) :
+            CsTileArt.sampleCurve(feet, wide === true ? 60 : 20,
+                wide === true ? 0.04 : undefined);
+        var side = ring ? CsShapeLine.inwardSide(pts) : 1;
         // Spacing and size are the STYLE's, scaled to the sample: at
         // true cave spacing a 10 ft sample carries three hachures,
         // which is exactly what the tile should show.
@@ -1346,7 +1371,7 @@ FeatureTrace.iconForStyle = function(styleKey) {
             jitterScaleFrac: spec.jitterScaleFrac || 0,
             rand: CsArea.rng(424242)
         } : undefined;
-        var prims = CsShapeLine.prims(pts, spec.close === true, spec,
+        var prims = CsShapeLine.prims(pts, ring, spec,
             side, spec.spacingFeet,
             isNull(spec.sizeFeet) ? 2 : spec.sizeFeet, extra);
         // prims answers { lines, polylines, glyphs }: a line is a PAIR
@@ -1357,7 +1382,7 @@ FeatureTrace.iconForStyle = function(styleKey) {
         // shapes, the same way CsTileArt.iconOfScatter paints an Area
         // Fill tile.
         var clouds = [pts.slice(0)];
-        if (spec.close === true) {
+        if (ring) {
             clouds[0].push(pts[0]);   // close the ring for painting
         }
         var i, j;
@@ -1411,8 +1436,11 @@ FeatureTrace.iconForStyle = function(styleKey) {
                 }
             }
         }
-        return CsTileArt.iconOfClouds(clouds, FeatureTrace.ICON,
-            CsTileArt.penForLayer(spec.decorLayer));
+        return wide === true ?
+            CsTileArt.iconOfClouds(clouds, FeatureTrace.LIST_ICON_W,
+                CsTileArt.penForLayer(spec.decorLayer), FeatureTrace.LIST_ICON_H) :
+            CsTileArt.iconOfClouds(clouds, FeatureTrace.ICON,
+                CsTileArt.penForLayer(spec.decorLayer));
     } catch (e) {
         return null;
     }
@@ -1443,7 +1471,7 @@ FeatureTrace.buildShapedGroup = function(w, parent, collapsed) {
         }
     }
     try {
-        inner.setColumnStretch(FeatureTrace.GRID_COLUMNS, 1);
+        inner.setColumnStretch(0, 1);
     } catch (eStretch) {
     }
     section.host.setLayout(inner);

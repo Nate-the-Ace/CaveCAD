@@ -124,7 +124,25 @@ CsTileArt.fitOf = function(extent, size) {
 };
 
 /**
- * Paints clouds into a square QIcon.
+ * The scale and centre that fit `extent` into a w x h strip -- the
+ * wide picture on a Draw panel list button. Whichever side runs out
+ * first decides; a zero extent on one side is left to the other.
+ */
+CsTileArt.fitRect = function(extent, w, h) {
+    var ex = extent.maxX - extent.minX, ey = extent.maxY - extent.minY;
+    var fx = ex > 0 ? (w - 2 * CsTileArt.MARGIN) / ex : Infinity;
+    var fy = ey > 0 ? (h - 2 * CsTileArt.MARGIN) / ey : Infinity;
+    var factor = Math.min(fx, fy);
+    return {
+        factor: isFinite(factor) ? factor : 1.0,
+        cx: (extent.minX + extent.maxX) / 2,
+        cy: (extent.minY + extent.maxY) / 2
+    };
+};
+
+/**
+ * Paints clouds into a QIcon: square `size`, or `size` wide by `height`
+ * tall when a height is given (a list button's line strip).
  *
  * `pen` is optional: { color, width, dashed }. A dashed pen is how an
  * inferred wall reads as inferred in its own tile -- the tile carries
@@ -136,7 +154,7 @@ CsTileArt.fitOf = function(extent, size) {
  *
  * \return a QIcon, or null when this build's painter refuses.
  */
-CsTileArt.iconOfClouds = function(clouds, size, pen) {
+CsTileArt.iconOfClouds = function(clouds, size, pen, height) {
     if (isNull(clouds) || clouds.length === 0) {
         return null;
     }
@@ -144,9 +162,11 @@ CsTileArt.iconOfClouds = function(clouds, size, pen) {
     if (extent === null) {
         return null;
     }
-    var fit = CsTileArt.fitOf(extent, size);
+    var W = size, H = isNull(height) ? size : height;
+    var fit = isNull(height) ? CsTileArt.fitOf(extent, size) :
+        CsTileArt.fitRect(extent, W, H);
     try {
-        var pixmap = new QPixmap(size, size);
+        var pixmap = new QPixmap(W, H);
         pixmap.fill(new QColor(0, 0, 0, 0));
         var painter = new QPainter();
         painter.begin(pixmap);
@@ -169,10 +189,10 @@ CsTileArt.iconOfClouds = function(clouds, size, pen) {
             for (var j = 0; j < clouds[i].length - 1; j++) {
                 var a = clouds[i][j], b = clouds[i][j + 1];
                 painter.drawLine(
-                    size / 2 + (a.x - fit.cx) * fit.factor,
-                    size / 2 - (a.y - fit.cy) * fit.factor,
-                    size / 2 + (b.x - fit.cx) * fit.factor,
-                    size / 2 - (b.y - fit.cy) * fit.factor);
+                    W / 2 + (a.x - fit.cx) * fit.factor,
+                    H / 2 - (a.y - fit.cy) * fit.factor,
+                    W / 2 + (b.x - fit.cx) * fit.factor,
+                    H / 2 - (b.y - fit.cy) * fit.factor);
             }
         }
         painter.end();
@@ -532,7 +552,7 @@ CsTileArt.iconOfFill = function(entry, size, pen) {
  *
  * Pure.
  */
-CsTileArt.sampleCurve = function(feet, steps) {
+CsTileArt.sampleCurve = function(feet, steps, amplitude) {
     if (isNull(steps) || steps < 2) {
         steps = 24;
     }
@@ -542,7 +562,8 @@ CsTileArt.sampleCurve = function(feet, steps) {
         var t = i / steps;
         out.push({
             x: -half + t * feet,
-            y: Math.sin(t * Math.PI * 1.6) * (feet * 0.16)
+            y: Math.sin(t * Math.PI * 1.6) * (feet *
+                (isNull(amplitude) ? 0.16 : amplitude))
         });
     }
     return out;

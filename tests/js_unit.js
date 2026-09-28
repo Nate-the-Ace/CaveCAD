@@ -18877,8 +18877,10 @@ if (!IS_NODE) {
         ];
         ok(FeatureTrace.reflow(fakeGrid, fakeButtons, 0),
             "FeatureTrace.reflow: re-packs a filtered grid");
-        eqs(placed.join(" "), "a@0,0 c@0,1 d@1,0",
-            "FeatureTrace.reflow: the shown tiles fill the cells in order, " +
+        // One column since the tiles became a full-width button list
+        // (2026-09-28): the shown ones stack, no gap for the hidden.
+        eqs(placed.join(" "), "a@0,0 c@1,0 d@2,0",
+            "FeatureTrace.reflow: the shown tiles fill the rows in order, " +
                 "with no gap where the hidden one was");
 
         // A bridge that refuses removeWidget must not take the filter
@@ -26130,6 +26132,14 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
 
     // A single horizontal stroke has a zero vertical extent: scaling by
     // it would divide by zero and paint an empty tile.
+    var strip = CsTileArt.fitRect({ minX: 0, minY: 0, maxX: 40, maxY: 4 }, 240, 24);
+    near(strip.factor, (24 - 2 * CsTileArt.MARGIN) / 4, 1e-12,
+        "fitRect: a strip's height decides when the sample is tall for it");
+    var long = CsTileArt.fitRect({ minX: 0, minY: 0, maxX: 100, maxY: 1 }, 240, 24);
+    near(long.factor, (240 - 2 * CsTileArt.MARGIN) / 100, 1e-12,
+        "fitRect: the width decides for a long flat sample");
+    var line = CsTileArt.fitRect({ minX: 0, minY: 2, maxX: 10, maxY: 2 }, 240, 24);
+    ok(isFinite(line.factor) && line.factor > 0, "fitRect: a dead-flat line still scales");
     var flat = CsTileArt.fitOf({ minX: 0, minY: 5, maxX: 0, maxY: 5 }, 30);
     eqs(flat.factor, 1.0, "fitOf: a shape with no extent at all is not " +
         "scaled, rather than scaled by zero");
