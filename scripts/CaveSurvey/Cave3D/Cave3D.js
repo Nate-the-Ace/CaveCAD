@@ -822,6 +822,26 @@ Cave3D.coverStatus = function(summary, unit) {
     return text;
 };
 
+/**
+ * The status bar's parts joined into one line, blanks dropped and each
+ * sentence said ONCE. The cover reason and the terrain reason both come
+ * from surfaceContext, so a cave with no surface grid had "no surface:
+ * run Surface Data..." printed twice side by side (Nathan, 2026-09-27).
+ */
+Cave3D.joinStatus = function(parts) {
+    var seen = {};
+    var kept = [];
+    for (var i = 0; i < parts.length; i++) {
+        var part = isNull(parts[i]) ? "" : String(parts[i]);
+        if (part === "" || seen[part] === true) {
+            continue;
+        }
+        seen[part] = true;
+        kept.push(part);
+    }
+    return kept.join("  --  ");
+};
+
 Cave3D.statusText = function(read, mesh) {
     var triangles = mesh.triangles.indices.length / 3;
     var unit = read.survey.distanceUnit === "m" ? "m" : "ft";
@@ -1031,10 +1051,8 @@ Cave3D.refresh = function() {
             coverWhy = cover.why;
         }
     }
-    cave3d.setStatus(Cave3D.handle,
-        Cave3D.statusText(read, mesh) +
-        (coverWhy !== "" ? "  --  " + coverWhy : "") +
-        (terrainWhy !== "" ? "  --  " + terrainWhy : ""));
+    cave3d.setStatus(Cave3D.handle, Cave3D.joinStatus(
+        [Cave3D.statusText(read, mesh), coverWhy, terrainWhy]));
 
     // THE EXPENSIVE HALF, KEPT. See recolour: the sections, the
     // scanned sketches and the ground do not depend on which colour
@@ -1119,10 +1137,8 @@ Cave3D.recolour = function() {
             coverWhy = buffers.cover.why;
         }
     }
-    cave3d.setStatus(Cave3D.handle,
-        Cave3D.statusText(read, mesh) +
-        (coverWhy !== "" ? "  --  " + coverWhy : "") +
-        (buffers.terrainWhy !== "" ? "  --  " + buffers.terrainWhy : ""));
+    cave3d.setStatus(Cave3D.handle, Cave3D.joinStatus(
+        [Cave3D.statusText(read, mesh), coverWhy, buffers.terrainWhy]));
 };
 
 /**
