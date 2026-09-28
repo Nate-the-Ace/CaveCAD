@@ -159,7 +159,7 @@
         {
           "image": "draw-panel.png",
           "depicts": "scripts/CaveSurvey/DrawPanel/DrawPanel.js",
-          "hash": "6dcaa58ea50f4cbab1bf5bec23a6cfca114957cf6b6658a648b95d68a89986b2"
+          "hash": "1073da76d3937042a1a8d3442ea71000bf7c1f74e48539e6c5a5cc2f709ebfb8"
         }
       ]
     },
@@ -253,7 +253,7 @@
         {
           "image": "sketch-scans-panel.png",
           "depicts": "scripts/CaveSurvey/SketchScans/SketchScans.js",
-          "hash": "b79e1879771d6c604f0d32a4bccfcdc4ef42f7845a0593c6989dfcb2a11ce625"
+          "hash": "d57cfb1453bfad03b985e22da06c3e5d0336be25a15876f85f3f842e81c0a3f8"
         }
       ]
     },
@@ -292,7 +292,7 @@
         {
           "image": "sheet-setup-panel.png",
           "depicts": "scripts/CaveSurvey/SheetSetup/SheetSetup.js",
-          "hash": "fcfa69e30821471b81ba2cdb84302f777d05349d76f87ba4d993199398f3d084"
+          "hash": "f7b968dbe2d70862f2c79b9b28ea25c8082ea1d1f3bff80d6e0ca7c7a0e05109"
         }
       ]
     },
@@ -353,7 +353,7 @@
         {
           "image": "check-map-panel.png",
           "depicts": "scripts/CaveSurvey/CheckMap/CheckMap.js",
-          "hash": "566c367cccfd8409e3b2e85dd8f3ba14069a26878765c95ceeef4b10ae910aa5"
+          "hash": "823dd6c703b4d4e8d793447ab313f52b55b3391b0466363bf5f1cbfffc5d53b6"
         }
       ]
     },
