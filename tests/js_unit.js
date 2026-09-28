@@ -33112,6 +33112,49 @@ ok(stRow(stRows, "A3").x === undefined && stRow(stRows, "A3").y === undefined,
 eqs(stRow(stRows, "B2").trips.join(","), "1", "rows: trip of B2");
 eqs(stRow(stRows, "A2").trips.join(","), "0", "rows: trip of A2");
 
+// filter / sort / suggest / csv
+var stF = CsStationTable.filter(stRows, { kinds: ["lead"] });
+eqs(stF.length, 1, "filter: one lead");
+eqs(stF[0].station, "A3", "filter: the lead is A3");
+eqs(CsStationTable.filter(stRows, { kinds: ["lead", "junction"] }).length, 2,
+    "filter: kinds combine as any-of");
+eqs(CsStationTable.filter(stRows, {}).length, 5, "filter: no kinds keeps all");
+eqs(CsStationTable.filter(stRows, { text: "DRIP" }).length, 1,
+    "filter: text search is case-insensitive over notes");
+eqs(CsStationTable.filter(stRows, { text: "b2" })[0].station, "B2",
+    "filter: text search matches the station name");
+
+var stNames = ["A10", "A2", "A1", "B1"];
+var stSorted = CsStationTable.sort(stNames.map(function(n) {
+    return { station: n };
+})).map(function(r) { return r.station; });
+eqs(stSorted.join(","), "A1,A2,A10,B1", "sort: natural order");
+
+var stPushed = frontierSurvey([
+    frontierShot("A1", "A2", 0),
+    frontierShot("A2", "A3", 0),
+    frontierShot("A3", "A4", 1)
+]);
+stPushed.shots[1].notes = "LEAD W";
+var stPRows = CsStationTable.rows(stPushed, null, {});
+eqs(CsStationTable.suggest(stRow(stPRows, "A3")), "pushed",
+    "suggest: a later trip leaves the lead station");
+eqs(CsStationTable.suggest(stRow(stRows, "A3")), "",
+    "suggest: no later trip, no suggestion");
+eqs(CsStationTable.suggest(stRow(stRows, "A2")), "",
+    "suggest: only leads are suggested");
+
+var stCsv = CsStationTable.checklistCsv([{
+    station: "A3", kinds: ["lead"], trips: [0, 1], z: null,
+    noteText: "LEAD \"W\", going\nsecond line", status: "open", team: "", who: ""
+}]);
+ok(stCsv.indexOf("\"LEAD \"\"W\"\", going\nsecond line\"") >= 0,
+    "csv: quotes, commas and newlines are escaped");
+ok(stCsv.split("\n")[0].indexOf("Station") === 0, "csv: header row first");
+ok(!/\bx\b|\by\b|lat|lon/i.test(stCsv.split("\n")[0]),
+    "csv: header names no coordinates");
+
+
 // ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------

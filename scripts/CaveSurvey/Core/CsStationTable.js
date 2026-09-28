@@ -297,3 +297,109 @@ CsStationTable.rows = function(survey, resolved, opts) {
     }
     return out;
 };
+
+/** The status a row shows: its mark, or "open" for an unmarked lead. */
+CsStationTable.effectiveStatus = function(row) {
+    if (row.status !== undefined && row.status !== null && row.status !== "") {
+        return row.status;
+    }
+    return row.kinds.indexOf("lead") >= 0 ? "open" : "";
+};
+
+/**
+ * Rows matching a query.
+ *
+ * \param query {kinds: [kind], text: string, status: string}
+ *   kinds   ANY-of: a station that is a lead OR a junction stays. An
+ *           empty list means every kind.
+ *   text    case-insensitive, over station name and note text
+ *   status  the effective status ("open", "assigned", ...); "" is any
+ */
+CsStationTable.filter = function(rows, query) {
+    var q = query || {};
+    var kinds = Object.prototype.toString.call(q.kinds) === "[object Array]" ?
+        q.kinds : [];
+    var text = (q.text === undefined || q.text === null) ? "" :
+        String(q.text).toLowerCase();
+    var status = (q.status === undefined || q.status === null) ? "" :
+        String(q.status);
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        if (kinds.length > 0) {
+            var hit = false;
+            for (var k = 0; k < kinds.length; k++) {
+                if (row.kinds.indexOf(kinds[k]) >= 0) { hit = true; break; }
+            }
+            if (!hit) { continue; }
+        }
+        if (text !== "") {
+            var hay = (row.station + " " + (row.noteText || "") + " " +
+                (row.team || "") + " " + (row.who || "")).toLowerCase();
+            if (hay.indexOf(text) < 0) { continue; }
+        }
+        if (status !== "" && CsStationTable.effectiveStatus(row) !== status) {
+            continue;
+        }
+        out.push(row);
+    }
+    return out;
+};
+
+/** Rows in natural station order (a new array; the input is untouched). */
+CsStationTable.sort = function(rows) {
+    var copy = rows.slice(0);
+    copy.sort(function(a, b) {
+        return CsStationTable.compareNatural(a.station, b.station);
+    });
+    return copy;
+};
+
+/**
+ * What the table would SUGGEST for a row. Never applied: only a person
+ * sets a mark. Trip indexes run in the order trips were added, so "a
+ * later trip touches this station" means somebody surveyed on from it
+ * after the lead was written.
+ *
+ * \return "pushed" or ""
+ */
+CsStationTable.suggest = function(row) {
+    if (row.kinds.indexOf("lead") < 0 || row.leadNotes.length === 0) {
+        return "";
+    }
+    var first = row.leadNotes[0].trip;
+    for (var i = 1; i < row.leadNotes.length; i++) {
+        if (row.leadNotes[i].trip < first) { first = row.leadNotes[i].trip; }
+    }
+    for (var t = 0; t < row.trips.length; t++) {
+        if (row.trips[t] > first) { return "pushed"; }
+    }
+    return "";
+};
+
+/**
+ * The rows as CSV, for a trip planner's checklist. Columns name no
+ * position: elevation only.
+ */
+CsStationTable.checklistCsv = function(rows) {
+    var cell = function(v) {
+        var s = (v === undefined || v === null) ? "" : String(v);
+        if (/[",\n\r]/.test(s)) { s = "\"" + s.replace(/"/g, "\"\"") + "\""; }
+        return s;
+    };
+    var lines = [["Station", "Kinds", "Trips", "Elevation", "Status", "Note",
+        "Team notes", "Assigned"].join(",")];
+    for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        var labels = [];
+        for (var k = 0; k < r.kinds.length; k++) {
+            labels.push(CsStationTable.LABEL[r.kinds[k]]);
+        }
+        lines.push([cell(r.station), cell(labels.join("; ")),
+            cell((r.trips || []).join(" ")),
+            cell(r.z === null || r.z === undefined ? "" : r.z),
+            cell(CsStationTable.effectiveStatus(r)), cell(r.noteText),
+            cell(r.team), cell(r.who)].join(","));
+    }
+    return lines.join("\n") + "\n";
+};
