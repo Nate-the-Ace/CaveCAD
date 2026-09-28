@@ -33309,6 +33309,67 @@ var tpNoZSteps = CsTripPlan.describe(tpNoZPath, { degree: {}, notes: {},
 ok(!/\b(up|down)\b/.test(tpNoZSteps[0].text), "describe: no vertical wording without z");
 
 // ---------------------------------------------------------------------
+// Trip Plan -- pace, gear, build
+// ---------------------------------------------------------------------
+
+var tpCfg = CsTripPlan.config({});
+eqs(tpCfg.paceFtPerMin, 264, "pace: default is a 3 mph hike");
+eqs(CsTripPlan.config({ paceFtPerMin: 100 }).paceFtPerMin, 100,
+    "pace: a team value overrides the default");
+eqs(CsTripPlan.config({ paceFtPerMin: -5 }).paceFtPerMin, 264,
+    "pace: nonsense falls back to the default");
+
+// 528 ft at 264 ft/min = 2 minutes.
+near(CsTripPlan.walkMinutes(528, "ft", tpCfg), 2, 1e-9, "pace: 528 ft is 2 min");
+near(CsTripPlan.walkMinutes(160.9344, "m", tpCfg), 2, 1e-6, "pace: metres convert");
+
+// Pitch: 60 ft drop, one rebelay: in = rig 10 + 60/30 + 5 = 17.
+var tpPit = { kind: "pitch", vertical: "down", dz: -60, dzKnown: true,
+    length: 60, edges: [{ dz: -30 }, { dz: -30 }] };
+near(CsTripPlan.stepMinutes(tpPit, "ft", tpCfg, true), 17, 1e-9,
+    "pace: pitch in costs rig + descent + rebelay");
+// out: climb 60/10 = 6 + rebelay 5 = 11, no rig.
+var tpPitOut = { kind: "pitch", vertical: "up", dz: 60, dzKnown: true,
+    length: 60, edges: [{ dz: 30 }, { dz: 30 }] };
+near(CsTripPlan.stepMinutes(tpPitOut, "ft", tpCfg, false), 11, 1e-9,
+    "pace: pitch out costs the climb and rebelay, no rigging");
+
+var tpRope = CsTripPlan.ropeLine({ top: "P1", bottom: "P3", drop: 187,
+    segments: [{ from: "P1", to: "P2", drop: 62 }, { from: "P2", to: "P3", drop: 125 }],
+    rebelays: 1 }, "ft", tpCfg);
+// 187 * 1.1 = 205.7 + 10 slack = 215.7 -> 220
+eqs(tpRope.need, 220, "gear: rope rounds up to the step");
+ok(tpRope.text.indexOf("62 + 125") >= 0, "gear: rope names its segments");
+
+var tpGearNone = CsTripPlan.gear([], "ft", tpCfg, "First aid");
+eqs(tpGearNone.rope.length, 0, "gear: no pitch, no rope");
+ok(tpGearNone.kit.join("|").indexOf("Harness") < 0, "gear: no pitch, no harness");
+eqs(tpGearNone.packing, "First aid", "gear: packing text passes through");
+var tpGearV = CsTripPlan.gear([{ top: "P1", bottom: "P3", drop: 187,
+    segments: [{ from: "P1", to: "P2", drop: 62 }, { from: "P2", to: "P3", drop: 125 }],
+    rebelays: 1 }], "ft", tpCfg, "");
+ok(tpGearV.kit.join("|").indexOf("Harness") >= 0, "gear: a pitch adds a harness");
+ok(tpGearV.hardware[0].indexOf("rig not on map, confirm") >= 0,
+    "gear: hardware says confirm, never invents a count");
+
+// build
+var tpBuildSurvey = tpSurvey();
+tpBuildSurvey.shots[4].up = 1.0; tpBuildSurvey.shots[4].down = 1.0;   // A3->A5 tight
+tpBuildSurvey.shots[4].left = 5; tpBuildSurvey.shots[4].right = 5;
+tpBuildSurvey.shots[4].notes = "PITCH, tight start";
+var tpPlan = CsTripPlan.build(tpBuildSurvey, tpResolved, { start: "A1",
+    targets: ["A5", "MISSING"], unit: "ft", config: {}, packing: "Lights" });
+eqs(tpPlan.stops.length, 1, "build: one reachable stop");
+eqs(tpPlan.stops[0].station, "A5", "build: the stop is A5");
+ok(tpPlan.warnings.join("|").indexOf("MISSING") >= 0,
+    "build: an unreachable target is named in the warnings");
+ok(tpPlan.warnings.join("|").indexOf("tight") >= 0,
+    "build: tight LRUD near the pitch is warned");
+ok(tpPlan.totals.minutesAll > tpPlan.totals.minutesIn,
+    "build: the total includes work and the way out");
+eqs(tpPlan.gear.packing, "Lights", "build: packing text reaches the gear list");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
