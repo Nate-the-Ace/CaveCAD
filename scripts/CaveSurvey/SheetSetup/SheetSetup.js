@@ -813,7 +813,20 @@ SheetSetup.repaint = function() {
 /** Builds the file. */
 SheetSetup.build = function() {
     var w = SheetSetup.widgets;
-    if (isNull(w) || isNull(w.state) || w.state.ok !== true) {
+    if (isNull(w)) {
+        return;
+    }
+    // A PANEL NOBODY HAS READ YET. The dock is built hidden at startup
+    // and restoreState() can put it on screen without the menu entry
+    // ever running, so its first press can arrive with no state at all.
+    // Read the drawing now rather than ignore the press.
+    if (isNull(w.state)) {
+        SheetSetup.refresh();
+    }
+    if (isNull(w.state) || w.state.ok !== true) {
+        SheetSetup.tell(isNull(w.state) || isNull(w.state.why) ?
+            qsTr("Sheet Setup could not read this drawing.") :
+            String(w.state.why));
         return;
     }
     var doc = null;
@@ -826,11 +839,16 @@ SheetSetup.build = function() {
     // it is a caver who has drawn on a sheet, which is exactly what
     // this rebuild is about to throw away -- and saying "save first"
     // there would be advice to preserve the thing that cannot be kept.
+    //
+    // SAID IN A BOX, NOT BY warning(). warning() is qWarning: it goes
+    // to the process's stderr, which a caver never sees, so this refusal
+    // used to look exactly like a button that does nothing (Nathan,
+    // 2026-09-27).
     if (w.state.rebuilding !== true && !isNull(doc) &&
             doc.isModified() === true) {
-        warning(qsTr("Sheet Setup: save this drawing first.\n" +
-            "The sheet is built from the FILE on disk, so anything " +
-            "not yet saved would be missing from it."));
+        SheetSetup.tell(qsTr("Save this drawing first. The sheet is " +
+            "built from the FILE on disk, so anything not yet saved " +
+            "would be missing from it."), true);
         return;
     }
     if (w.state.rebuilding === true) {
@@ -847,7 +865,7 @@ SheetSetup.build = function() {
     var scale = CsSheetSetup.SCALES[w.scaleCombo.currentIndex];
     var fit = CsSheetSetup.fit(w.state.caveW, w.state.caveH, sheet,
         w.state.footerInches);
-    EAction.handleUserMessage(SheetSetup.intoCopy(w.state.recordPath, {
+    var said = SheetSetup.intoCopy(w.state.recordPath, {
         caveBox: w.state.caveBox, sheet: sheet, scale: scale,
         turned: fit.turned,
         wants: { border: w.cbBorder.checked, bar: w.cbBar.checked,
@@ -856,7 +874,44 @@ SheetSetup.build = function() {
         resolved: w.state.resolved, chunked: w.state.chunked === true,
         elevation: w.cbElevation.checked === true,
         offsets: w.offsets
-    }));
+    });
+    // Every failure intoCopy reports opens with the panel's name; a
+    // success is the sentence that describes the sheet.
+    SheetSetup.tell(said, String(said).indexOf("Sheet Setup:") === 0);
+};
+
+/**
+ * Say something the caver will actually see: on the panel's own note
+ * line, on the command line, and -- when it is a refusal or a failure
+ * -- in a box, because a note under a preview is easy to miss when the
+ * thing you expected was a new tab.
+ *
+ * Never warning(): that is qWarning, which only reaches stderr.
+ */
+SheetSetup.tell = function(text, problem) {
+    text = String(text);
+    try {
+        var w = SheetSetup.widgets;
+        if (!isNull(w) && !isNull(w.note)) {
+            w.note.text = text;
+        }
+    } catch (eNote) {
+    }
+    try {
+        if (problem === true) {
+            EAction.handleUserWarning(text);
+        } else {
+            EAction.handleUserMessage(text);
+        }
+    } catch (eLine) {
+    }
+    if (problem === true) {
+        try {
+            QMessageBox.warning(RMainWindowQt.getMainWindow(),
+                qsTr("Sheet Setup"), text);
+        } catch (eBox) {
+        }
+    }
 };
 
 /**
@@ -1153,8 +1208,8 @@ SheetSetup.openPending = function() {
         // note where this used mainWindow.openFile and could not.
         openFiles([path], false);
     } catch (eOpen) {
-        warning(qsTr("Sheet Setup: the sheet was written but would " +
-            "not open (") + eOpen + "). " + path);
+        SheetSetup.tell(qsTr("Sheet Setup: the sheet was written but " +
+            "would not open (") + eOpen + "). " + path, true);
     }
 };
 
@@ -1781,8 +1836,13 @@ SheetSetup.prototype.beginEvent = function() {
         dock.visible = true;
         SheetSetup.refresh();
     } catch (e) {
-        csSheetSetupDock = undefined;
-        warning("Sheet Setup: this CaveCAD build refused the docked " +
+        // Forget the dock ONLY if it was never built. Forgetting a live
+        // one because refresh() threw made the next press build a
+        // second panel beside it.
+        if (isNull(dock)) {
+            csSheetSetupDock = undefined;
+        }
+        EAction.handleUserWarning("Sheet Setup: this CaveCAD build refused the docked " +
             "panel (" + e + ") -- please report this.");
     }
 
@@ -1793,6 +1853,14 @@ SheetSetup.init = function(basePath) {
     var action = new RGuiAction(qsTr("Sheet Setup"),
         RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
+    // THE APPLICATION'S SCRIPT ENGINE, NOT THE TAB'S. Without this QCAD
+    // runs beginEvent in the active document's OWN engine, where the dock
+    // globals start empty: opening the panel from a second tab built a
+    // second panel, and closing that tab left one wired to a dead engine
+    // -- buttons that do nothing, and Sheet Setup's preview crashing
+    // CaveCAD on hover (Nathan, 2026-09-27). Stock Print Preview uses the
+    // same flag. tests/test_addon.py enforces it for every panel opener.
+    action.setForceGlobal(true);
     action.setScriptFile(basePath + "/SheetSetup.js");
     action.setIcon(basePath + "/SheetSetup.svg");
     action.setStatusTip(qsTr("Border, scale bar, north arrow and a " +

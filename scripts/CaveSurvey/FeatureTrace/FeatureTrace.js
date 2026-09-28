@@ -1969,7 +1969,7 @@ FeatureTrace.prototype.beginEvent = function() {
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
     // Core/CsSheetFile.js.
-    if (CsSheetFile.blocks(this.getDocument(), "Feature Trace")) {
+    if (CsSheetFile.blocks(EAction.getDocument(), "Feature Trace")) {
         this.terminate();
         return;
     }
@@ -1999,6 +1999,14 @@ FeatureTrace.init = function(basePath) {
     var action = new RGuiAction(qsTr("Feature Trace"),
         RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
+    // THE APPLICATION'S SCRIPT ENGINE, NOT THE TAB'S. Without this QCAD
+    // runs beginEvent in the active document's OWN engine, where the dock
+    // globals start empty: opening the panel from a second tab built a
+    // second panel, and closing that tab left one wired to a dead engine
+    // -- buttons that do nothing, and Sheet Setup's preview crashing
+    // CaveCAD on hover (Nathan, 2026-09-27). Stock Print Preview uses the
+    // same flag. tests/test_addon.py enforces it for every panel opener.
+    action.setForceGlobal(true);
     action.setScriptFile(basePath + "/FeatureTrace.js");
     action.setIcon(basePath + "/FeatureTrace.svg");
     action.setStatusTip(qsTr("Trace cave walls and other features freehand: " +

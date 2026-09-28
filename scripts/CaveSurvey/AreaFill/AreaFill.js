@@ -1215,7 +1215,7 @@ AreaFill.prototype.beginEvent = function() {
     // header; a sheet is rebuilt from the cave's record on every Build
     // Sheet, and a fill drawn on one would go with it, silently, weeks
     // later.
-    if (CsSheetFile.blocks(this.getDocument(), "Area Fill")) {
+    if (CsSheetFile.blocks(EAction.getDocument(), "Area Fill")) {
         this.terminate();
         return;
     }
@@ -1244,6 +1244,14 @@ AreaFill.init = function(basePath) {
     var action = new RGuiAction(qsTr("Area Fill"),
         RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
+    // THE APPLICATION'S SCRIPT ENGINE, NOT THE TAB'S. Without this QCAD
+    // runs beginEvent in the active document's OWN engine, where the dock
+    // globals start empty: opening the panel from a second tab built a
+    // second panel, and closing that tab left one wired to a dead engine
+    // -- buttons that do nothing, and Sheet Setup's preview crashing
+    // CaveCAD on hover (Nathan, 2026-09-27). Stock Print Preview uses the
+    // same flag. tests/test_addon.py enforces it for every panel opener.
+    action.setForceGlobal(true);
     action.setScriptFile(basePath + "/AreaFill.js");
     action.setIcon(basePath + "/AreaFill.svg");
     action.setStatusTip(qsTr("Fill a cave-floor pattern: pick one, then " +

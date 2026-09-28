@@ -86,8 +86,13 @@ function sketchScansRun() {
             }
         }
     } catch (e) {
-        csSketchScansDock = undefined;
-        warning("Sketch Scans: this CaveCAD build refused the docked " +
+        // Forget the dock ONLY if it was never built. Forgetting a live
+        // one because refresh() threw made the next press build a
+        // second panel beside it.
+        if (isNull(dock)) {
+            csSketchScansDock = undefined;
+        }
+        EAction.handleUserWarning("Sketch Scans: this CaveCAD build refused the docked " +
             "panel (" + e + ") -- please report this.");
     }
 }
@@ -3510,7 +3515,7 @@ SketchScans.prototype.beginEvent = function() {
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
     // Core/CsSheetFile.js.
-    if (CsSheetFile.blocks(this.getDocument(), "Sketch Scans")) {
+    if (CsSheetFile.blocks(EAction.getDocument(), "Sketch Scans")) {
         this.terminate();
         return;
     }
@@ -3541,6 +3546,14 @@ SketchScans.init = function(basePath) {
     var action = new RGuiAction(qsTr("Sketch Scans"),
         RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
+    // THE APPLICATION'S SCRIPT ENGINE, NOT THE TAB'S. Without this QCAD
+    // runs beginEvent in the active document's OWN engine, where the dock
+    // globals start empty: opening the panel from a second tab built a
+    // second panel, and closing that tab left one wired to a dead engine
+    // -- buttons that do nothing, and Sheet Setup's preview crashing
+    // CaveCAD on hover (Nathan, 2026-09-27). Stock Print Preview uses the
+    // same flag. tests/test_addon.py enforces it for every panel opener.
+    action.setForceGlobal(true);
     action.setScriptFile(basePath + "/SketchScans.js");
     action.setIcon(basePath + "/SketchScans.svg");
     action.setStatusTip(qsTr("Toggle the Sketch Scans panel: browse the " +

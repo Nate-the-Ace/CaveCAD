@@ -2181,6 +2181,107 @@ class TestSheetFileGuard(unittest.TestCase):
                       "and a marked drawing is a sheet wherever it sits")
 
 
+class TestPanelsRunInTheApplicationEngine(unittest.TestCase):
+    """A docked panel belongs to the application, not to a tab.
+
+    QCAD runs a setRequiresDocument(true) action in the ACTIVE
+    DOCUMENT'S OWN script engine (RGuiAction::slotTrigger ->
+    createActionDocumentLevel), and every engine has its own globals.
+    So a panel opened from a second tab found its `csXDock` empty and
+    built a second panel; closing that tab destroyed the engine the
+    new panel's buttons called into. Measured live 2026-09-27: Build
+    Sheet did nothing, and hovering an orphaned Sheet Setup preview
+    crashed CaveCAD (SIGSEGV in QJSEngine::throwError under
+    RActionAdapter_Base::mouseMoveEvent).
+
+    setForceGlobal(true) -- the flag stock Print Preview uses -- keeps
+    the button greyed without a document but runs the action in the
+    application's engine, where init() built the one and only dock.
+    """
+
+    # Every action whose beginEvent opens a dock. Written out, like
+    # MUST_GUARD above; the derived test below catches one left off.
+    PANEL_OPENERS = [
+        "AreaFill", "CheckMap", "DrawPanel", "FeatureTrace", "SheetSetup",
+        "SketchScans", "SymbolPalette",
+    ]
+
+    # Already application-level: they never require a document at all.
+    NO_DOCUMENT_NEEDED = ["CaveShelf", "Handbook", "StartHere",
+                          "SurveyNotebook"]
+
+    def source(self, folder):
+        with open(os.path.join(ADDON, folder, folder + ".js")) as handle:
+            return handle.read()
+
+    def begin_event(self, folder):
+        match = re.search(r"\.prototype\.beginEvent = function\(\) \{"
+                          r"(.*?)\n\};", self.source(folder), re.S)
+        return match.group(1) if match else ""
+
+    def test_every_panel_opener_runs_in_the_application_engine(self):
+        missing = [name for name in self.PANEL_OPENERS
+                   if "action.setForceGlobal(true)" not in self.source(name)]
+        self.assertEqual(
+            missing, [],
+            "these tools open a docked panel from a document's own "
+            "script engine, so a second tab builds a second panel and "
+            "closing it leaves one wired to a dead engine: %s -- add "
+            "action.setForceGlobal(true) after setRequiresDocument"
+            % missing)
+
+    def test_no_panel_opener_is_left_off_the_list(self):
+        tools = sorted(
+            name for name in os.listdir(ADDON)
+            if os.path.isfile(os.path.join(ADDON, name, name + ".js")))
+        opens = [name for name in tools
+                 if re.search(r"ensureDock\(|DrawPanel\.reveal\(|"
+                              r"sketchScansRun\(",
+                              self.begin_event(name))]
+        undecided = [name for name in opens
+                     if name not in self.PANEL_OPENERS
+                     and name not in self.NO_DOCUMENT_NEEDED]
+        self.assertEqual(
+            undecided, [],
+            "these tools open a panel from beginEvent but are not in "
+            "PANEL_OPENERS: %s" % undecided)
+
+    def test_panel_openers_read_the_document_statically(self):
+        """An application-level action has no document of its own, so
+        this.getDocument() answers null and the sheet guard would wave
+        a sheet through."""
+        uses = [name for name in self.PANEL_OPENERS
+                if "this.getDocument()" in self.begin_event(name)]
+        self.assertEqual(
+            uses, [],
+            "use EAction.getDocument() in these beginEvents: %s" % uses)
+
+    def test_a_live_dock_is_never_forgotten(self):
+        """Forgetting a dock that WAS built, because something after it
+        threw, makes the next press build a second one beside it."""
+        careless = []
+        for name in self.PANEL_OPENERS:
+            if re.search(r"catch \(e\) \{\s*cs\w+Dock = undefined;",
+                         self.source(name)):
+                careless.append(name)
+        self.assertEqual(
+            careless, [],
+            "these forget their dock in a catch without checking it "
+            "was never built: %s" % careless)
+
+    def test_sheet_setup_never_refuses_silently(self):
+        """warning() is qWarning: stderr, which a caver never sees. The
+        "save first" refusal went there and Build Sheet looked dead."""
+        source = self.source("SheetSetup")
+        build = re.search(r"\nSheetSetup\.build = function\(\) \{(.*?)\n\};",
+                          source, re.S).group(1)
+        code = re.sub(r"//[^\n]*", "", build)
+        self.assertIsNone(re.search(r"(?<![\w.])warning\(", code),
+                          "SheetSetup.build calls warning(); use "
+                          "SheetSetup.tell so the caver sees it")
+        self.assertIn("SheetSetup.tell(", code)
+
+
 class TestScanListIsShared(unittest.TestCase):
     """Two panels show the cave's scans; they must say the same things.
 

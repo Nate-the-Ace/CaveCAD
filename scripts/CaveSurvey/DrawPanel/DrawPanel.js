@@ -301,7 +301,7 @@ DrawPanel.prototype.beginEvent = function() {
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
     // Core/CsSheetFile.js.
-    if (CsSheetFile.blocks(this.getDocument(), "Draw")) {
+    if (CsSheetFile.blocks(EAction.getDocument(), "Draw")) {
         this.terminate();
         return;
     }
@@ -316,8 +316,13 @@ DrawPanel.prototype.beginEvent = function() {
             // a stale panel must never stop the tool opening
         }
     } catch (e) {
-        csDrawPanelDock = undefined;
-        warning("Draw: this CaveCAD build refused the docked panel (" +
+        // Forget the dock ONLY if it was never built. Forgetting a live
+        // one because refresh() threw made the next press build a
+        // second panel beside it.
+        if (isNull(dock)) {
+            csDrawPanelDock = undefined;
+        }
+        EAction.handleUserWarning("Draw: this CaveCAD build refused the docked panel (" +
             e + ") -- please report this.");
     }
 
@@ -330,6 +335,14 @@ DrawPanel.init = function(basePath) {
     var action = new RGuiAction(qsTr("Draw"),
         RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
+    // THE APPLICATION'S SCRIPT ENGINE, NOT THE TAB'S. Without this QCAD
+    // runs beginEvent in the active document's OWN engine, where the dock
+    // globals start empty: opening the panel from a second tab built a
+    // second panel, and closing that tab left one wired to a dead engine
+    // -- buttons that do nothing, and Sheet Setup's preview crashing
+    // CaveCAD on hover (Nathan, 2026-09-27). Stock Print Preview uses the
+    // same flag. tests/test_addon.py enforces it for every panel opener.
+    action.setForceGlobal(true);
     action.setScriptFile(basePath + "/DrawPanel.js");
     action.setIcon(basePath + "/DrawPanel.svg");
     action.setStatusTip(qsTr("One panel for putting marks on the map: " +
