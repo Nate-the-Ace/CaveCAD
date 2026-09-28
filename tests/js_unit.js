@@ -290,6 +290,9 @@ for (var ci = 0; ci < CORE_FILES.length; ci++) {
 // testing a library that does not contain it: the decision has to be
 // written down either way. See the harness-traps note.
 var CORE_FILES_NOT_LOADED = [
+    // Reads and writes the caver's .lin library through QFile and adds
+    // linetypes to a real RDocument. Covered by tests/linetype_maker_run.js.
+    "scripts/CaveSurvey/Core/CsLinetypeStore.js",
     // Every function takes a real RDocument and an
     // RDocumentInterface: it writes entities through CsTrace.addCurve,
     // CsShapeLine.dress, CsArea.create and CsSymbols.insert, which is

@@ -18,9 +18,16 @@ function check(cond, msg) {
 function near(a, b, msg) {
     check(Math.abs(a - b) < 1e-6, msg + " (expected " + b + ", got " + a + ")");
 }
-// library.js is not loaded under -autostart, so no isNull here.
-function isNull(v) {
-    return v === null || v === undefined;
+// NOT isNull(doc.queryLinetype(name)): a missing name comes back as a
+// live-looking wrapper whose getId() is undefined. Ask the name list.
+function hasLinetype(doc, name) {
+    var names = doc.getLinetypeNames();
+    for (var i = 0; i < names.length; i++) {
+        if (String(names[i]).toUpperCase() === String(name).toUpperCase()) {
+            return true;
+        }
+    }
+    return false;
 }
 function pair(code, value) { return code + "\n" + value + "\n"; }
 
@@ -67,8 +74,8 @@ var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
 var di = new RDocumentInterface(doc);
 di.importFile(readPath);
 
+check(hasLinetype(doc, "CSTEXT"), "linetype CSTEXT was not imported");
 var lt = doc.queryLinetype("CSTEXT");
-check(!isNull(lt), "linetype CSTEXT was not imported");
 var p = lt.getPattern();
 check(p.getNumDashes() === 3, "CSTEXT has " + p.getNumDashes() + " dashes, expected 3");
 check(p.getShapeTextAt(1) === "CAVE", "text at 1 is '" + p.getShapeTextAt(1) + "'");
@@ -114,8 +121,8 @@ function roundTrip(name, patternString) {
     var back = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
     var bi = new RDocumentInterface(back);
     bi.importFile(path);
+    check(hasLinetype(back, name), name + ": linetype missing after reopen");
     var blt = back.queryLinetype(name);
-    check(!isNull(blt), name + ": linetype missing after reopen");
     var a = pat, b = blt.getPattern();
     check(b.getNumDashes() === a.getNumDashes(), name + ": dash count " +
         b.getNumDashes() + " vs " + a.getNumDashes());
