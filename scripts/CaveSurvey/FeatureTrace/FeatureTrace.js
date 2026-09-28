@@ -384,6 +384,10 @@ FeatureTrace.CELL_H = 56;
 FeatureTrace.LIST_ICON_W = 200;
 FeatureTrace.LIST_ICON_H = 24;
 FeatureTrace.LIST_TILE_H = 64;
+/** A Recent entry: the same full-width strip, no words, just tall enough
+ *  for the line (Nathan, 2026-09-28: "button list, but no text and more
+ *  vertically compact"). The name is on hover. */
+FeatureTrace.RECENT_TILE_H = 30;
 /** Roughly how many characters fit on one line of a tile. Used only to
  *  break the label -- QPushButton renders "\n" but will not wrap for
  *  itself (probed 2026-08-29). */
@@ -1052,35 +1056,30 @@ FeatureTrace.tileFor = function(row, checkable, compact) {
     var detail = [];
     if (isNull(row.style)) {
         detail.push(row.layer);
-        icon = FeatureTrace.iconForLayer(row.layer, compact !== true);
+        icon = FeatureTrace.iconForLayer(row.layer, true);
     } else {
         var spec = CsShapeLine.STYLES[row.style];
         detail.push(isNull(spec) ? "" : spec.decorLayer);
         detail.push(qsTr("Drag along the line, then point at the side " +
             "the ornament goes and click."));
-        icon = FeatureTrace.iconForStyle(row.style, compact !== true);
+        icon = FeatureTrace.iconForStyle(row.style, true);
     }
     button.toolTip = CsPanel.tipHtml(row.label, CsHelp.forFeature(row),
         detail);
     if (icon !== null) {
         try {
             button.icon = icon;
-            button.iconSize = compact === true ?
-                new QSize(FeatureTrace.ICON, FeatureTrace.ICON) :
+            button.iconSize =
                 new QSize(FeatureTrace.LIST_ICON_W, FeatureTrace.LIST_ICON_H);
         } catch (eIcon) {
         }
     }
     try {
         if (compact === true) {
-            // A COMPACT tile is the picture alone. Five full tiles side
-            // by side are twice the width of the dock a caver actually
-            // keeps open, and a Recent row you have to scroll sideways
-            // is not a shortcut. The name is a hover away, and the
-            // pictures are the panel's own claim: a tile is a picture
-            // of the line it draws.
-            button.setFixedSize(FeatureTrace.ICON + 14,
-                FeatureTrace.ICON + 14);
+            // A COMPACT tile is the picture alone: a Recent entry, one
+            // full-width strip per row, as short as the line allows.
+            button.setFixedHeight(FeatureTrace.RECENT_TILE_H);
+            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed);
         } else {
             // A LIST BUTTON: the full width of the section, a fixed
             // height for the line strip plus name and count.
@@ -1157,10 +1156,6 @@ FeatureTrace.rebuildRecent = function() {
         } catch (eTile) {
             // one tile that will not build must not cost the row
         }
-    }
-    try {
-        w.recentRow.addStretch(1);
-    } catch (eStretch) {
     }
     var visible = (shown > 0);
     try {
@@ -1571,10 +1566,11 @@ FeatureTrace.buildBody = function(parent) {
         w.recentLabel = new QLabel(qsTr("Recent"));
         w.recentLabel.visible = false;
         layout.addWidget(w.recentLabel, 0, 0);
-        w.recentRow = new QHBoxLayout();
+        // A column, not a row: Recent is a list of full-width strips.
+        w.recentRow = new QVBoxLayout();
         try {
             w.recentRow.setContentsMargins(4, 0, 4, 2);
-            w.recentRow.setSpacing(4);
+            w.recentRow.setSpacing(2);
         } catch (eMargins) {
         }
         layout.addLayout(w.recentRow, 0);
