@@ -107,8 +107,8 @@ LinetypeMaker.buildDock = function(appWin) {
     w.addGap = new QPushButton(qsTr("+ Gap"));
     w.addText = new QPushButton(qsTr("+ Text"));
     w.removeRow = new QPushButton(qsTr("Remove"));
-    w.upRow = new QPushButton("↑");
-    w.downRow = new QPushButton("↓");
+    w.upRow = new QPushButton("\u2191");
+    w.downRow = new QPushButton("\u2193");
     var rb = [w.addDash, w.addGap, w.addText, w.removeRow, w.upRow, w.downRow];
     for (var i = 0; i < rb.length; i++) {
         rowButtons.addWidget(rb[i], 0, 0);
@@ -135,10 +135,15 @@ LinetypeMaker.buildDock = function(appWin) {
         "Every new cave map gets the whole library.");
     w.applyButton = new QPushButton(qsTr("Apply to Drawing"));
     w.applyButton.toolTip = qsTr("Add it to the open drawing (or update it there).");
-    w.importButton = new QPushButton(qsTr("Import…"));
+    w.testButton = new QPushButton(qsTr("Test"));
+    w.testButton.toolTip = qsTr("Put it in the drawing and start the Line tool with it, " +
+        "so you can draw it straight away. Your previous linetype comes back when " +
+        "the Line tool ends.");
+    w.importButton = new QPushButton(qsTr("Import\u2026"));
     w.importButton.toolTip = qsTr("Read linetypes from an AutoCAD .lin file or another drawing.");
     foot.addWidget(w.saveButton, 0, 0);
     foot.addWidget(w.applyButton, 0, 0);
+    foot.addWidget(w.testButton, 0, 0);
     foot.addWidget(w.importButton, 0, 0);
     layout.addLayout(foot, 0);
 
@@ -168,6 +173,7 @@ LinetypeMaker.buildDock = function(appWin) {
     on(w.saveButton.clicked, function() { LinetypeMaker.save(); });
     on(w.applyButton.clicked, function() { LinetypeMaker.applyToDrawing(); });
     on(w.importButton.clicked, function() { LinetypeMaker.importFile(); });
+    on(w.testButton.clicked, function() { LinetypeMaker.testLine(); });
     on(dock.visibilityChanged, function(shown) {
         if (shown) {
             LinetypeMaker.refresh();
@@ -219,7 +225,7 @@ LinetypeMaker.refresh = function() {
         }
     }
     w.picker.clear();
-    w.picker.addItem(qsTr("— choose a linetype —"));
+    w.picker.addItem(qsTr("\u2014 choose a linetype \u2014"));
     for (var k = 0; k < w.entries.length; k++) {
         var e = w.entries[k];
         w.picker.addItem((e.source === "library" ? qsTr("Library: ") :
@@ -656,6 +662,7 @@ LinetypeMaker.render = function() {
     w.problems.text = problems.join("\n");
     w.saveButton.enabled = problems.length === 0;
     w.applyButton.enabled = problems.length === 0 && LinetypeMaker.document() !== null;
+    w.testButton.enabled = w.applyButton.enabled;
     try {
         w.preview.setPixmap(LinetypeMaker.previewPixmap(w.model));
     } catch (ePix) {
@@ -782,6 +789,116 @@ LinetypeMaker.applyToDrawing = function() {
         qsTr(" is in this drawing -- pick it from any layer's or entity's linetype list."));
     LinetypeMaker.refresh();
 };
+
+LinetypeMaker.LINE_TOOL = "scripts/Draw/Line/Line2P/Line2P.js";
+
+/** How often, and for how long before the Line tool shows up, the
+ *  restore watch looks. */
+LinetypeMaker.WATCH_MS = 400;
+LinetypeMaker.WATCH_START_TICKS = 10;
+
+/** The script file of the active drawing's current action, or "". */
+LinetypeMaker.currentTool = function(di) {
+    try {
+        return String(di.getCurrentAction().getGuiAction().getScriptFile());
+    } catch (e) {
+        // the default select action has no gui action
+        return "";
+    }
+};
+
+/**
+ * Test: the linetype into the drawing, made current, and the Line tool
+ * started, so the caver sees it drawn at once.
+ *
+ * The current linetype is put back when the Line tool ends -- otherwise
+ * every wall drawn afterwards would quietly carry the test pattern. The
+ * watch only ever reads the ACTIVE drawing (EAction.getDocumentInterface
+ * at each tick), never a captured one: a tab closed meanwhile would leave
+ * a freed document, and touching one segfaults. It restores by NAME, and
+ * only while that drawing still has the test linetype current, so a tab
+ * switch or a linetype the caver picked by hand is left alone.
+ */
+LinetypeMaker.testLine = function() {
+    var doc = LinetypeMaker.document();
+    var di = EAction.getDocumentInterface();
+    if (doc === null || isNull(di)) {
+        CsTell.warn(qsTr("Open a drawing first."));
+        return;
+    }
+    if (CsSheetFile.blocks(doc, "Linetype Maker")) {
+        return;
+    }
+    var model = LinetypeMaker.w.model;
+    var err = CsLinetypeStore.applyToDocument(doc, di, model);
+    if (err !== null) {
+        CsTell.warn(err);
+        return;
+    }
+    var previous = String(doc.getLinetypeName(doc.getCurrentLinetypeId()));
+    di.setCurrentLinetype(doc.getLinetypeId(model.name));
+    var line = RGuiAction.getByScriptFile(LinetypeMaker.LINE_TOOL);
+    if (isNull(line)) {
+        CsTell.warn(qsTr("The Line tool is not available in this build."));
+        return;
+    }
+    line.slotTrigger();
+
+    LinetypeMaker.stopWatch();
+    var watch = { name: model.name, previous: previous, seen: false, ticks: 0 };
+    var timer = new QTimer();
+    timer.interval = LinetypeMaker.WATCH_MS;
+    timer.timeout.connect(function() {
+        LinetypeMaker.watchTick(watch);
+    });
+    LinetypeMaker.watch = { timer: timer, state: watch };
+    timer.start();
+    EAction.handleUserMessage(qsTr("Linetype Maker: drawing with ") + model.name +
+        qsTr(" -- click two points; Escape ends the Line tool and puts your " +
+        "previous linetype back."));
+};
+
+LinetypeMaker.watchTick = function(watch) {
+    watch.ticks++;
+    var di = EAction.getDocumentInterface();
+    if (isNull(di)) {
+        LinetypeMaker.stopWatch();
+        return;
+    }
+    if (LinetypeMaker.currentTool(di) === LinetypeMaker.LINE_TOOL) {
+        watch.seen = true;
+        return;
+    }
+    if (!watch.seen && watch.ticks < LinetypeMaker.WATCH_START_TICKS) {
+        return;
+    }
+    try {
+        var doc = di.getDocument();
+        var current = String(doc.getLinetypeName(doc.getCurrentLinetypeId()));
+        if (current.toUpperCase() === watch.name.toUpperCase()) {
+            var back = doc.getLinetypeId(watch.previous);
+            if (!(back >= 0)) {
+                back = doc.getLinetypeId("BYLAYER");
+            }
+            di.setCurrentLinetype(back);
+        }
+    } catch (eRestore) {
+        // the restore is a courtesy; the drawing itself is untouched
+    }
+    LinetypeMaker.stopWatch();
+};
+
+LinetypeMaker.stopWatch = function() {
+    if (!isNull(LinetypeMaker.watch)) {
+        try {
+            LinetypeMaker.watch.timer.stop();
+        } catch (eStop) {
+        }
+    }
+    LinetypeMaker.watch = null;
+};
+
+LinetypeMaker.watch = null;
 
 LinetypeMaker.remove = function() {
     var name = LinetypeMaker.w.model.name;
