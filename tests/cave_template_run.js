@@ -96,6 +96,13 @@ var doc = new RDocument(new RMemoryStorage(), createSpatialIndex());
 var di = new RDocumentInterface(doc);
 var fakeChild = { getDocumentInterface: function() { return di; } };
 
+// The caver's linetype library rides in on every pour (Linetype Maker).
+// A scratch library, so the test never reads or writes the real one.
+var ltLibrary = QDir.tempPath() + "/cs_template_lt/CaveCustomLinetypes.lin";
+CsLinetypeStore.pathOverride = ltLibrary;
+ok(CsLinetypeStore.writeText(ltLibrary, "*CSA,test\nA,1,-0.5\n") === null,
+    "scratch linetype library written");
+
 var settingBefore = RSettings.getBoolValue("CaveSurvey/TemplateOnNewOnce",
     false);
 RSettings.setValue("CaveSurvey/TemplateOnNewOnce", true);
@@ -125,6 +132,8 @@ ok(Object.keys(layerNames).length > 5,
     "the template's layers arrived (" + Object.keys(layerNames).length + ")");
 ok(!isNull(layerNames["WALLS-SURVEYED"]),
     "a known plan layer is present after the pour");
+ok(CsLinetypeStore.hasLinetype(doc, "CSA"),
+    "the caver's library linetype arrived with the pour");
 
 // ---------------------------------------------------------------------
 // The two repairs.
@@ -288,6 +297,8 @@ initNewFile({ getDocumentInterface: function() { return null; } });
 ok(true, "a null mdiChild or interface does not throw");
 
 var out;
+CsLinetypeStore.pathOverride = null;
+
 if (failures.length === 0) {
     out = "### CAVE TEMPLATE OK";
 } else {

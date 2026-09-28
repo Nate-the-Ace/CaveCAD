@@ -122,6 +122,22 @@ function initNewFile(mdiChild) {
             // caver their new map.
         }
 
+        // The caver's own linetypes (Linetype Maker). They live in their
+        // library beside the caves, not in the template, so a release can
+        // never take them; this is how a new map gets them.
+        try {
+            if (typeof CsLinetypeStore !== "undefined") {
+                var ltFailed = CsLinetypeStore.applyAll(di.getDocument(), di);
+                if (ltFailed.length > 0) {
+                    EAction.handleUserWarning("Cave template: these linetypes " +
+                        "from your library could not be added: " +
+                        ltFailed.join(", "));
+                }
+            }
+        } catch (eLinetypes) {
+            // a library that will not read must not cost a new map
+        }
+
         // Switch the registry's hidden layers OFF. The template cannot
         // carry this itself: a layer's off state does not survive a DXF
         // round trip in this build (probed 2026-08-28 -- exported off,

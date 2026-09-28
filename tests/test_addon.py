@@ -1807,6 +1807,7 @@ MENU = {
     "DrawPanel/DrawPanel.js":             (452, 10, ["draw", "ft", "sym", "area"]),
     "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),
     "ShapedLines/WallEdging.js":          (452, 36, ["walledging", "wed"]),
+    "LinetypeMaker/LinetypeMaker.js":     (452, 45, ["linetypemaker", "ltm"]),
     "ScatterBreakdown/ScatterBreakdown.js": (452, 30, ["scatterbreakdown", "scb"]),
     "AreaSync/AreaSync.js":               (452, 35, ["syncareas", "sya"]),
     "CrossSection/CrossSection.js":       (452, 40, ["crosssection", "cxs"]),
@@ -2113,7 +2114,7 @@ class TestSheetFileGuard(unittest.TestCase):
         "DrawPanel", "FeatureTrace", "GenerateProfile", "ImportCaveSurvey",
         "LoopErrors", "RepairDrawing", "ScatterBreakdown", "ShapedLines",
         "SketchScans", "SurfaceData", "SurveyNotebook", "SymbolPalette",
-        "ResetDrawing", "EntranceLocation",
+        "ResetDrawing", "EntranceLocation", "LinetypeMaker",
     ]
 
     # Tools that only READ, and are welcome on a sheet: checking a sheet
@@ -2207,8 +2208,8 @@ class TestPanelsRunInTheApplicationEngine(unittest.TestCase):
     ]
 
     # Already application-level: they never require a document at all.
-    NO_DOCUMENT_NEEDED = ["CaveShelf", "Handbook", "StartHere",
-                          "SurveyNotebook"]
+    NO_DOCUMENT_NEEDED = ["CaveShelf", "Handbook", "LinetypeMaker",
+                          "StartHere", "SurveyNotebook"]
 
     def source(self, folder):
         with open(os.path.join(ADDON, folder, folder + ".js")) as handle:

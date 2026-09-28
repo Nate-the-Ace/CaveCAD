@@ -94,6 +94,37 @@ var failed = CsLinetypeStore.applyAll(doc2, di2);
 check(failed.length === 0, "applyAll failed: " + failed.join(", "));
 check(CsLinetypeStore.hasLinetype(doc2, "CSA"), "applyAll did not add CSA");
 
+// ---- import reading, without the dialog ---------------------------------
+var sample = CsLinetypeStore.readImport(repo + "/testdata/linetypes/cave-sample.lin");
+check(sample.errors.length === 0, "sample .lin: " + sample.errors.join("; "));
+check(sample.linetypes.length === 2, "sample .lin: " + sample.linetypes.length);
+check(sample.linetypes[0].segments[1].text === "W", "sample .lin lost its W");
+
+// A drawing's linetypes: write one out, read it back through readImport.
+var exp = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+var expDi = new RDocumentInterface(exp);
+check(CsLinetypeStore.applyToDocument(exp, expDi,
+    model("CSDXF", 'A,1,-0.2,["DXF",standard,S=0.1],-0.3')) === null, "apply CSDXF");
+var filter = "";
+var filters = RFileExporterRegistry.getFilterStrings();
+for (var fi = 0; fi < filters.length; fi++) {
+    if (String(filters[fi]).indexOf("dxflib") >= 0 &&
+            String(filters[fi]).indexOf("2000") >= 0) {
+        filter = String(filters[fi]);
+    }
+}
+var dxfPath = QDir.tempPath() + "/cs_lt_test/import.dxf";
+check(expDi.exportFile(dxfPath, filter, false), "export for import test");
+var fromDxf = CsLinetypeStore.readImport(dxfPath);
+var got = null;
+for (var j = 0; j < fromDxf.linetypes.length; j++) {
+    if (fromDxf.linetypes[j].name.toUpperCase() === "CSDXF") {
+        got = fromDxf.linetypes[j];
+    }
+}
+check(got !== null, "DXF import did not list CSDXF");
+check(got.segments[1].text === "DXF", "DXF import lost the text");
+
 CsLinetypeStore.pathOverride = null;
 print("### LINETYPE MAKER OK");
 QCoreApplication.exit(0);

@@ -230,6 +230,17 @@
       "shots": []
     },
     {
+      "id": "linetype-maker",
+      "title": "Linetype Maker",
+      "class": "tool",
+      "file": "linetype-maker.html",
+      "stage": 452,
+      "tools": [
+        "LinetypeMaker"
+      ],
+      "shots": []
+    },
+    {
       "id": "area-fill",
       "title": "Area Fill",
       "class": "tool",

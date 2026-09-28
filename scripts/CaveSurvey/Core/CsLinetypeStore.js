@@ -191,6 +191,34 @@ CsLinetypeStore.applyToDocument = function(doc, di, model) {
 };
 
 /**
+ * Linetypes from a file a caver picked: a .lin read as text, anything
+ * else opened as a drawing offscreen and its linetypes read back.
+ * \return { linetypes, errors }
+ */
+CsLinetypeStore.readImport = function(path) {
+    var p = String(path);
+    if (/\.lin$/i.test(p)) {
+        var text = CsLinetypeStore.readText(p);
+        if (text === null) {
+            return { linetypes: [], errors: ["Could not read " + p + "."] };
+        }
+        return CsLinetype.parseLin(text);
+    }
+    var di = new RDocumentInterface(
+        new RDocument(new RMemoryStorage(), new RSpatialIndexNavel()));
+    try {
+        if (di.importFile(p, "", false) !== RDocumentInterface.IoErrorNoError) {
+            return { linetypes: [], errors: ["CaveCAD could not open " + p + "."] };
+        }
+        return { linetypes: CsLinetypeStore.fromDocument(di.getDocument()), errors: [] };
+    } finally {
+        if (typeof destr === "function") {
+            destr(di);
+        }
+    }
+};
+
+/**
  * The template pour's step: every custom linetype into a new drawing.
  * \return the names that could not be added.
  */
