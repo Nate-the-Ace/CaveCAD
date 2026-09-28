@@ -162,6 +162,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsPitch.js",
     "scripts/CaveSurvey/Core/CsStationTable.js",
     "scripts/CaveSurvey/Core/CsStationStore.js",
+    "scripts/CaveSurvey/Core/CsTripPlan.js",
     "scripts/CaveSurvey/Core/CsGhost.js",
     "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsSection3d.js",
@@ -33227,6 +33228,85 @@ ssSet.settings.packing = "First aid kit\nSpare batteries";
 var ssSetBack = CsStationStore.parse(CsStationStore.serialize(ssSet)).store;
 eqs(ssSetBack.settings.packing, "First aid kit\nSpare batteries",
     "store: packing list round trips");
+
+// ---------------------------------------------------------------------
+// Trip Plan -- routes
+// ---------------------------------------------------------------------
+
+// A square loop A1-A2-A3-A4-A1 (A1-A2 short, A1-A4-A3 long) plus a
+// spur A3-A5 that is a plumb 40 unit pitch.
+function tpSurvey() {
+    var s = frontierSurvey([
+        frontierShot("A1", "A2", 0), frontierShot("A2", "A3", 0),
+        frontierShot("A1", "A4", 0), frontierShot("A4", "A3", 0),
+        frontierShot("A3", "A5", 0)
+    ]);
+    return s;
+}
+var tpResolved = { stations: {
+    A1: { x: 0, y: 0, z: 0 },   A2: { x: 10, y: 0, z: 0 },
+    A3: { x: 20, y: 0, z: 0 },  A4: { x: 0, y: 30, z: 0 },
+    A5: { x: 20, y: 0, z: -40 } }, legs: [] };
+
+var tpAdj = CsTripPlan.graph(tpSurvey(), tpResolved);
+var tpSp = CsTripPlan.shortest(tpAdj, "A1");
+near(tpSp.dist.A3, 20, 1e-9, "route: A3 by the short side is 20");
+var tpPath = CsTripPlan.pathTo(tpSp, "A3");
+eqs(tpPath.map(function(e) { return e.to; }).join(","), "A2,A3",
+    "route: path goes A1 A2 A3");
+ok(CsTripPlan.pathTo(tpSp, "ZZ") === null, "route: unreachable is null");
+
+var tpToA5 = CsTripPlan.pathTo(tpSp, "A5");
+ok(tpToA5[tpToA5.length - 1].bearing === null,
+    "route: a plumb leg carries no bearing");
+ok(tpToA5[0].bearing !== null && Math.abs(tpToA5[0].bearing - 90) < 1e-6,
+    "route: a horizontal leg heads east (90)");
+near(tpToA5[tpToA5.length - 1].dz, -40, 1e-9, "route: dz of the drop is -40");
+
+// Stop order: two spurs, one near and one far; visiting near then far
+// beats far then near on the round trip.
+var tpOrder = CsTripPlan.order(tpAdj, "A1", ["A4", "A2", "A5"]);
+eqs(tpOrder.unreachable.length, 0, "order: everything reachable");
+eqs(tpOrder.order.length, 3, "order: all three stops kept");
+var tpRoundTrip = tpOrder.roundTrip;
+// brute force check against the worst permutation
+var tpAll = [["A4","A2","A5"],["A4","A5","A2"],["A2","A4","A5"],
+    ["A2","A5","A4"],["A5","A4","A2"],["A5","A2","A4"]];
+var tpBest = 1e18;
+tpAll.forEach(function(p) {
+    var d = 0, at = "A1";
+    p.forEach(function(t) {
+        d += CsTripPlan.shortest(tpAdj, at).dist[t]; at = t; });
+    d += CsTripPlan.shortest(tpAdj, at).dist.A1;
+    if (d < tpBest) { tpBest = d; }
+});
+near(tpRoundTrip, tpBest, 1e-9, "order: round trip is the true minimum");
+
+var tpUnr = CsTripPlan.order(tpAdj, "A1", ["A2", "NOPE"]);
+eqs(tpUnr.unreachable.join(","), "NOPE", "order: unknown station is unreachable");
+eqs(tpUnr.order.join(","), "A2", "order: reachable stops still ordered");
+
+// Directions: merged runs, junction break, pitch run.
+var tpDeg = CsFrontier.degrees(tpSurvey());
+var tpSteps = CsTripPlan.describe(tpToA5, { degree: tpDeg, notes: {},
+    pitchOfEdge: function(e) { return e.to === "A5" ? 0 : -1; }, unit: "ft" });
+ok(tpSteps.length >= 2, "describe: at least a walk and a pitch");
+var tpLast = tpSteps[tpSteps.length - 1];
+eqs(tpLast.kind, "pitch", "describe: final run is a pitch");
+eqs(tpLast.vertical, "down", "describe: the pitch goes down");
+ok(tpLast.text.indexOf("heading") < 0, "describe: no heading on a pitch");
+ok(tpSteps[0].text.indexOf("A1 to A3") === 0, "describe: A1 A2 A3 merge into one run");
+ok(tpSteps[0].text.indexOf("heading E") >= 0, "describe: heading in words");
+
+// Unknown z: no vertical wording invented.
+var tpNoZ = { stations: { A1: { x: 0, y: 0, z: null }, A2: { x: 10, y: 0, z: null } },
+    legs: [] };
+var tpNoZAdj = CsTripPlan.graph(frontierSurvey([frontierShot("A1", "A2", 0)]), tpNoZ);
+var tpNoZPath = CsTripPlan.pathTo(CsTripPlan.shortest(tpNoZAdj, "A1"), "A2");
+ok(tpNoZPath[0].dz === null, "route: unknown z gives dz null, not 0");
+var tpNoZSteps = CsTripPlan.describe(tpNoZPath, { degree: {}, notes: {},
+    pitchOfEdge: function() { return -1; }, unit: "ft" });
+ok(!/\b(up|down)\b/.test(tpNoZSteps[0].text), "describe: no vertical wording without z");
 
 // ---------------------------------------------------------------------
 // Report.

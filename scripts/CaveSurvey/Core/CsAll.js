@@ -73,6 +73,9 @@ include(includeBasePath + "/CsStationTable.js");
 // Pure sidecar logic for the Station Table's marks and notes; the file
 // I/O itself is in StationTable/StationTable.js.
 include(includeBasePath + "/CsStationStore.js");
+// After CsStationTable and CsPitch: routes over the survey graph and
+// reads pitches for its vertical steps.
+include(includeBasePath + "/CsTripPlan.js");
 include(includeBasePath + "/CsGhost.js");
 
 // The 3D passage surface. After CsTraverse and CsLrud, whose splay
