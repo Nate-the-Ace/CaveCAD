@@ -140,6 +140,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUuid.js",
     "scripts/CaveSurvey/Core/CsTell.js",
     "scripts/CaveSurvey/Core/CsUnits.js",
+    "scripts/CaveSurvey/Core/CsLinetype.js",
     "scripts/CaveSurvey/Core/CsCave.js",
     "scripts/CaveSurvey/Core/CsFiles.js",
     "scripts/CaveSurvey/Core/CsShelf.js",
@@ -32897,6 +32898,92 @@ ok(typeof CsGhost !== "undefined", "CsGhost loaded");
     } finally {
         includeBasePath = saved;
     }
+}());
+
+// ---------------------------------------------------------------------
+// CsLinetype -- linetype patterns (Linetype Maker)
+// ---------------------------------------------------------------------
+(function() {
+    var m = { name: "CSTEXT", description: "Text test", segments: [
+        CsLinetype.segment(0.5),
+        CsLinetype.segment(-0.2),
+        CsLinetype.segment(-0.3)
+    ] };
+    m.segments[1].text = "CAVE";
+    m.segments[1].style = "standard";
+    m.segments[1].scale = 0.1;
+    m.segments[1].rotation = 15;
+    m.segments[1].x = -0.1;
+    m.segments[1].y = -0.05;
+    eqs(CsLinetype.toPattern(m),
+        'A,0.5,-0.2,["CAVE",standard,S=0.1,R=15,X=-0.1,Y=-0.05],-0.3',
+        "toPattern writes the text element after its segment");
+
+    var back = CsLinetype.fromPattern(CsLinetype.toPattern(m));
+    eqs(back.errors.length, 0, "fromPattern: no errors");
+    eqs(back.segments.length, 3, "fromPattern: three segments");
+    eqs(back.segments[1].text, "CAVE", "fromPattern: text");
+    eqs(back.segments[1].style, "standard", "fromPattern: font");
+    eqs(back.segments[1].shape, false, "fromPattern: quoted = text, not shape");
+    near(back.segments[1].scale, 0.1, 1e-12, "fromPattern: scale");
+    near(back.segments[1].rotation, 15, 1e-12, "fromPattern: rotation");
+    near(back.segments[1].x, -0.1, 1e-12, "fromPattern: x");
+    near(back.segments[1].y, -0.05, 1e-12, "fromPattern: y");
+    eqs(back.segments[2].text, "", "fromPattern: plain gap stays plain");
+
+    eqs(CsLinetype.toPattern({ name: "D", description: "", segments: [
+        CsLinetype.segment(0.25), CsLinetype.segment(-0.125)] }),
+        "A,0.25,-0.125", "toPattern: plain dashes have no brackets");
+    eqs(CsLinetype.fromPattern('A,1,["X",standard],-1').segments[0].text, "X",
+        "fromPattern: element attaches to the segment before it");
+    eqs(CsLinetype.fromPattern('A,["X",standard],1').errors.length, 1,
+        "fromPattern: an element with nothing before it is an error");
+    eqs(CsLinetype.fromPattern('A,1,[TICK,cave.shx,S=2],-1').segments[0].shape,
+        true, "fromPattern: unquoted name = shape");
+    eqs(CsLinetype.fromPattern('A,1,"oops",-1').errors.length, 1,
+        "fromPattern: a stray token is an error");
+
+    var lin = ";; comment\n*CSTEXT,Text test\nA,0.5,-0.2,[\"CAVE\",standard,S=0.1],-0.3\n" +
+        "\n*DASH2,Two dashes\nA,1,-0.5\n" +
+        "A,2,-2\n";
+    var parsed = CsLinetype.parseLin(lin);
+    eqs(parsed.linetypes.length, 2, "parseLin: two linetypes");
+    eqs(parsed.linetypes[0].name, "CSTEXT", "parseLin: first name");
+    eqs(parsed.linetypes[0].description, "Text test", "parseLin: description");
+    eqs(parsed.linetypes[1].segments.length, 2, "parseLin: second pattern");
+    eqs(parsed.errors.length, 1, "parseLin: headerless pattern reported");
+
+    var again = CsLinetype.parseLin(CsLinetype.writeLin(parsed.linetypes));
+    eqs(again.linetypes.length, 2, "writeLin then parseLin keeps both");
+    eqs(CsLinetype.toPattern(again.linetypes[0]),
+        CsLinetype.toPattern(parsed.linetypes[0]), "writeLin round trip");
+
+    eqs(CsLinetype.validate(m).length, 0, "validate: a good linetype passes");
+    function problems(edit) {
+        var c = JSON.parse(JSON.stringify(m));
+        edit(c);
+        return CsLinetype.validate(c).length;
+    }
+    ok(problems(function(c) { c.name = ""; }) > 0, "validate: empty name");
+    ok(problems(function(c) { c.name = "CAVE WALL"; }) > 0, "validate: space in name");
+    ok(problems(function(c) { c.segments = []; }) > 0, "validate: no segments");
+    ok(problems(function(c) { c.segments = [CsLinetype.segment(-1)]; }) > 0,
+        "validate: gaps only");
+    ok(problems(function(c) { c.segments[1].text = "TWO WORDS"; }) > 0,
+        "validate: space in text");
+    ok(problems(function(c) { c.segments[1].style = ""; }) > 0, "validate: no font");
+    ok(problems(function(c) { c.segments[1].scale = 0; }) > 0, "validate: zero scale");
+    ok(problems(function(c) { c.segments[0].length = NaN; }) > 0, "validate: NaN length");
+
+    var lay = CsLinetype.layout(m, 2.0);
+    eqs(lay.dashes.length, 2, "layout: two dashes in 2 units of a 1-unit period");
+    near(lay.dashes[0][0], 0, 1e-12, "layout: first dash starts at 0");
+    near(lay.dashes[0][1], 0.5, 1e-12, "layout: first dash ends at 0.5");
+    eqs(lay.glyphs.length, 2, "layout: one glyph per period");
+    near(lay.glyphs[0].at, 0.7, 1e-12, "layout: glyph at the END of its gap");
+    eqs(lay.glyphs[0].index, 1, "layout: glyph names its segment");
+    eqs(CsLinetype.layout({ segments: [] }, 5).dashes.length, 0,
+        "layout: empty pattern draws nothing");
 }());
 
 // ---------------------------------------------------------------------

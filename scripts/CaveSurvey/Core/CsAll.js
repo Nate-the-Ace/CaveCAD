@@ -20,6 +20,7 @@ include(includeBasePath + "/CsUuid.js");
 // will see (warning() only reaches stderr).
 include(includeBasePath + "/CsTell.js");
 include(includeBasePath + "/CsUnits.js");
+include(includeBasePath + "/CsLinetype.js");
 include(includeBasePath + "/CsCave.js");
 include(includeBasePath + "/CsFiles.js");
 // After CsCave: the shelf reads CsCave.SCANS/PDF when it scans a cave
