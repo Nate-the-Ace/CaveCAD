@@ -33410,6 +33410,21 @@ ok(tpEvilHtml.indexOf("&lt;script&gt;alert(1)&lt;/script&gt;") >= 0,
     "packet: a script note arrives escaped");
 ok(tpEvilHtml.indexOf("<script>") < 0, "packet: a script note never renders live");
 
+// A walk that ends at a junction names the NEXT step's heading. Every
+// heading must exist before any text is built (it once printed
+// "heading undefined").
+var tpJuncEdges = [tpAdj.A1[0], tpAdj.A2.filter(function(e) { return e.to === "A3"; })[0],
+    tpAdj.A3.filter(function(e) { return e.to === "A4"; })[0]];
+var tpJuncSteps = CsTripPlan.describe(tpJuncEdges, { degree: tpDeg, notes: {},
+    pitchOfEdge: function() { return -1; }, unit: "ft" });
+eqs(tpJuncSteps.length, 2, "describe: a junction splits the walk");
+ok(tpJuncSteps[0].text.indexOf("junction") >= 0, "describe: junction is named");
+ok(tpJuncSteps[0].text.indexOf("undefined") < 0,
+    "describe: the junction hint never prints undefined");
+ok(/leave by the branch heading (N|NE|E|SE|S|SW|W|NW)$/.test(tpJuncSteps[0].text),
+    "describe: the junction hint carries the next step's heading");
+
+
 // ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------

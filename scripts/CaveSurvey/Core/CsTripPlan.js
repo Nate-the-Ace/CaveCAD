@@ -278,6 +278,13 @@ CsTripPlan.describe = function(edges, ctx) {
                 st.heading = CsTripPlan.compass(b);
             }
         }
+    }
+
+    // SECOND PASS. A junction hint names the NEXT step's heading, so every
+    // heading has to exist before any text is built; setting them in the
+    // same loop printed "heading undefined" for the step after a junction.
+    for (s = 0; s < steps.length; s++) {
+        st = steps[s];
         st.atJunction = isJunction(st.to) && s < steps.length - 1;
         st.notes = [];
         var stations = [];
