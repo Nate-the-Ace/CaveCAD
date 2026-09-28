@@ -86,7 +86,79 @@ var line = doc.queryEntity(lines[0]);
 check(String(doc.getLinetypeName(line.getLinetypeId())).toUpperCase() === "CSTEXT",
     "line lost its linetype");
 
-// Task 2 appends the write half here.
+// ---- 3. Write, reopen, compare -----------------------------------------
+function dxf2000Filter() {
+    var filters = RFileExporterRegistry.getFilterStrings();
+    for (var i = 0; i < filters.length; i++) {
+        var s = String(filters[i]);
+        if (s.indexOf("dxflib") >= 0 && s.indexOf("2000") >= 0) {
+            return s;
+        }
+    }
+    fail("no DXF 2000 dxflib export filter");
+}
+
+function roundTrip(name, patternString) {
+    var d = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+    var i = new RDocumentInterface(d);
+    var pat = new RLinetypePattern(true, name, name + " test");
+    check(pat.setPatternString(patternString), name + ": pattern refused");
+    i.applyOperation(new RAddObjectOperation(new RLinetype(d, pat), false));
+    var ln = new RLineEntity(d, new RLineData(new RVector(0, 0), new RVector(10, 0)));
+    ln.setLinetypeId(d.getLinetypeId(name));
+    i.applyOperation(new RAddObjectOperation(ln, false));
+
+    var path = QDir.tempPath() + "/cs_linetype_" + name + ".dxf";
+    check(i.exportFile(path, dxf2000Filter(), false), name + ": export failed");
+
+    var back = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+    var bi = new RDocumentInterface(back);
+    bi.importFile(path);
+    var blt = back.queryLinetype(name);
+    check(!isNull(blt), name + ": linetype missing after reopen");
+    var a = pat, b = blt.getPattern();
+    check(b.getNumDashes() === a.getNumDashes(), name + ": dash count " +
+        b.getNumDashes() + " vs " + a.getNumDashes());
+    for (var k = 0; k < a.getNumDashes(); k++) {
+        near(b.getDashLengthAt(k), a.getDashLengthAt(k), name + ": dash " + k);
+        check(b.getShapeTextAt(k) === a.getShapeTextAt(k),
+            name + ": text at " + k + " '" + b.getShapeTextAt(k) + "'");
+        if (a.getShapeTextAt(k) !== "") {
+            check(String(b.getShapeTextStyleAt(k)).toLowerCase() ===
+                String(a.getShapeTextStyleAt(k)).toLowerCase(),
+                name + ": font at " + k + " '" + b.getShapeTextStyleAt(k) + "'");
+            near(b.getShapeScaleAt(k), a.getShapeScaleAt(k), name + ": scale " + k);
+            near(b.getShapeRotationAt(k), a.getShapeRotationAt(k), name + ": rotation " + k);
+            near(b.getShapeOffsetAt(k).x, a.getShapeOffsetAt(k).x, name + ": x " + k);
+            near(b.getShapeOffsetAt(k).y, a.getShapeOffsetAt(k).y, name + ": y " + k);
+        }
+    }
+    var bl = back.queryAllEntities(false, true, RS.EntityLine);
+    check(bl.length === 1, name + ": line missing after reopen");
+    check(String(back.getLinetypeName(back.queryEntity(bl[0]).getLinetypeId()))
+        .toUpperCase() === name.toUpperCase(), name + ": line lost its linetype");
+    return path;
+}
+
+var written = roundTrip("CSRT",
+    'A,0.5,-0.2,["CAVE",standard,S=0.1,R=15,X=-0.1,Y=-0.05],-0.3');
+
+// The 340 must point at the CS_LT_ STYLE record's own handle.
+var rf = new QFile(written);
+check(rf.open(QIODevice.ReadOnly | QIODevice.Text), "cannot reread " + written);
+var body = String(new QTextStream(rf).readAll());
+rf.close();
+var ptr = /\n\s*340\n([0-9A-Fa-f]+)\n/.exec(body);
+check(ptr !== null, "no 340 pointer written");
+var styleRe = new RegExp("\\n\\s*0\\nSTYLE\\n\\s*5\\n" + ptr[1] +
+    "\\n[\\s\\S]*?\\n\\s*2\\nCS_LT_STANDARD\\n");
+check(styleRe.test(body), "340 " + ptr[1] + " does not name the CS_LT_STANDARD STYLE");
+
+var longText = "";
+while (longText.length < 300) {
+    longText += "X";
+}
+roundTrip("CSLONG", 'A,1,["' + longText + '",standard,S=0.1],-1');
 
 print("### LINETYPE ROUNDTRIP OK");
 QCoreApplication.exit(0);
