@@ -71,6 +71,7 @@ include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../FeatureTrace/FeatureTrace.js");
 include(includeBasePath + "/../SymbolPalette/SymbolPalette.js");
 include(includeBasePath + "/../AreaFill/AreaFill.js");
+include(includeBasePath + "/../LinetypeMaker/LinetypeMaker.js");
 
 var csDrawPanelDock;
 
@@ -101,6 +102,7 @@ DrawPanel.SECTION_MIN_HEIGHT = 150;
 DrawPanel.SEC_TRACE = "Trace";
 DrawPanel.SEC_SYMBOLS = "Symbols";
 DrawPanel.SEC_AREAS = "Areas";
+DrawPanel.SEC_LINETYPES = "Custom Linetypes";
 
 /** The built sections by title, so `featuretrace` and `symbolpalette`
  *  can unfold the half they name. */
@@ -146,7 +148,11 @@ DrawPanel.buildDock = function(appWin) {
         { title: DrawPanel.SEC_SYMBOLS,
           build: function(parent) { return SymbolPalette.buildBody(parent); } },
         { title: DrawPanel.SEC_AREAS,
-          build: function(parent) { return AreaFill.buildBody(parent); } }
+          build: function(parent) { return AreaFill.buildBody(parent); } },
+        // The caver's own linetypes, grouped by the category set in
+        // Linetype Maker (Nathan, 2026-09-28).
+        { title: DrawPanel.SEC_LINETYPES,
+          build: function(parent) { return LinetypeMaker.buildBody(parent); } }
     ];
     var problems = [];
     for (var i = 0; i < sections.length; i++) {

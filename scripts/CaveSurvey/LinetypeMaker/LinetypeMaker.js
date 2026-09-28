@@ -50,7 +50,7 @@ LinetypeMaker.PREVIEW_H = 56;
 LinetypeMaker.w = undefined;
 
 LinetypeMaker.blank = function() {
-    return { name: "", description: "", segments: [CsLinetype.segment(0.5),
+    return { name: "", description: "", category: "", segments: [CsLinetype.segment(0.5),
                                                    CsLinetype.segment(-0.25)] };
 };
 
@@ -83,6 +83,13 @@ LinetypeMaker.buildDock = function(appWin) {
     form.addWidget(new QLabel(qsTr("Description")), 1, 0);
     w.description = new QLineEdit();
     form.addWidget(w.description, 1, 1);
+    form.addWidget(new QLabel(qsTr("Category")), 2, 0);
+    // Editable: pick one you already use, or type a new one.
+    w.category = new QComboBox();
+    w.category.editable = true;
+    w.category.toolTip = qsTr("How the Draw panel's Custom Linetypes section groups it. " +
+        "Pick one you already use or type a new one.");
+    form.addWidget(w.category, 2, 1);
     layout.addLayout(form, 0);
 
     w.table = new QTableWidget(0, LinetypeMaker.COLUMNS.length);
@@ -163,6 +170,7 @@ LinetypeMaker.buildDock = function(appWin) {
     on(w.deleteButton.clicked, function() { LinetypeMaker.remove(); });
     on(w.name.textEdited, function() { LinetypeMaker.readNames(); });
     on(w.description.textEdited, function() { LinetypeMaker.readNames(); });
+    on(w.category.editTextChanged, function() { LinetypeMaker.readNames(); });
     on(w.table.cellChanged, function(row, col) { LinetypeMaker.cellEdited(row, col); });
     on(w.addDash.clicked, function() { LinetypeMaker.addRow(0.5, false); });
     on(w.addGap.clicked, function() { LinetypeMaker.addRow(-0.25, false); });
@@ -224,6 +232,7 @@ LinetypeMaker.refresh = function() {
             }
         }
     }
+    LinetypeMaker.rebuildTiles(lib.linetypes);
     w.picker.clear();
     w.picker.addItem(qsTr("\u2014 choose a linetype \u2014"));
     for (var k = 0; k < w.entries.length; k++) {
@@ -378,6 +387,7 @@ LinetypeMaker.load = function(model, selectRows) {
     try {
         w.name.text = model.name;
         w.description.text = model.description || "";
+        LinetypeMaker.fillCategories(model.category || "");
         // 0 first, so the old rows' dropdowns go with them
         w.table.setRowCount(0);
         w.table.setRowCount(model.segments.length);
@@ -416,6 +426,36 @@ LinetypeMaker.load = function(model, selectRows) {
         LinetypeMaker.selectRows(selectRows);
     }
     LinetypeMaker.render();
+};
+
+/** The category box: every category the library uses, showing `current`. */
+LinetypeMaker.fillCategories = function(current) {
+    var w = LinetypeMaker.w;
+    var cats = LinetypeMaker.categories(CsLinetypeStore.loadCustom().linetypes);
+    w.category.clear();
+    w.category.addItem("");
+    for (var i = 0; i < cats.length; i++) {
+        w.category.addItem(cats[i]);
+    }
+    try {
+        w.category.setEditText(current);
+    } catch (eEdit) {
+        w.category.editText = current;
+    }
+};
+
+/** Distinct non-empty categories, sorted. */
+LinetypeMaker.categories = function(models) {
+    var seen = {}, out = [];
+    for (var i = 0; i < models.length; i++) {
+        var c = String(models[i].category || "").trim();
+        if (c !== "" && !seen[c.toLowerCase()]) {
+            seen[c.toLowerCase()] = true;
+            out.push(c);
+        }
+    }
+    out.sort(function(a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; });
+    return out;
 };
 
 LinetypeMaker.cell = function(r, c) {
@@ -552,7 +592,8 @@ LinetypeMaker.readForm = function() {
     }
     var old = w.model.segments;
     var m = { name: String(w.name.text).trim(),
-              description: String(w.description.text).trim(), segments: [] };
+              description: String(w.description.text).trim(),
+              category: String(w.category.currentText).trim(), segments: [] };
     // rowCount is a PROPERTY in this bridge; currentRow is a method.
     for (var r = 0; r < w.table.rowCount; r++) {
         var prev = r < old.length ? old[r] : CsLinetype.segment(0);
@@ -652,6 +693,9 @@ LinetypeMaker.readNames = function() {
     var w = LinetypeMaker.w;
     w.model.name = String(w.name.text).trim();
     w.model.description = String(w.description.text).trim();
+    if (!w.filling) {
+        w.model.category = String(w.category.currentText).trim();
+    }
     LinetypeMaker.render();
 };
 
@@ -677,8 +721,8 @@ LinetypeMaker.render = function() {
  * CaveCAD will draw. A bridge that cannot paint an RPainterPath falls
  * back to drawText.
  */
-LinetypeMaker.previewPixmap = function(model) {
-    var W = LinetypeMaker.PREVIEW_W, H = LinetypeMaker.PREVIEW_H;
+LinetypeMaker.previewPixmap = function(model, width, height) {
+    var W = width || LinetypeMaker.PREVIEW_W, H = height || LinetypeMaker.PREVIEW_H;
     var pixmap = new QPixmap(W, H);
     pixmap.fill(new QColor(0, 0, 0, 0));
     var period = 0;
@@ -820,6 +864,11 @@ LinetypeMaker.currentTool = function(di) {
  * switch or a linetype the caver picked by hand is left alone.
  */
 LinetypeMaker.testLine = function() {
+    LinetypeMaker.drawWith(LinetypeMaker.w.model);
+};
+
+/** Draw with a linetype now: the Test button and every Draw panel tile. */
+LinetypeMaker.drawWith = function(model) {
     var doc = LinetypeMaker.document();
     var di = EAction.getDocumentInterface();
     if (doc === null || isNull(di)) {
@@ -829,7 +878,6 @@ LinetypeMaker.testLine = function() {
     if (CsSheetFile.blocks(doc, "Linetype Maker")) {
         return;
     }
-    var model = LinetypeMaker.w.model;
     var err = CsLinetypeStore.applyToDocument(doc, di, model);
     if (err !== null) {
         CsTell.warn(err);
@@ -988,6 +1036,107 @@ LinetypeMaker.importFile = function() {
     EAction.handleUserMessage(qsTr("Linetype Maker: imported ") + saved +
         qsTr(" linetype(s) into your library."));
     LinetypeMaker.refresh();
+};
+
+// ---- the Draw panel's "Custom Linetypes" section -----------------------
+//
+// The caver's library as tiles, grouped by category; a click draws with
+// that linetype (LinetypeMaker.drawWith -- the Test button's path). The
+// Draw panel calls buildBody for its section, the way it does for Feature
+// Trace, Symbols and Areas; LinetypeMaker.refresh rebuilds the tiles after
+// every save, delete and import, so the section always shows the library.
+
+LinetypeMaker.TILE_W = 120;
+LinetypeMaker.TILE_H = 22;
+LinetypeMaker.TILE_COLUMNS = 2;
+LinetypeMaker.NO_CATEGORY = "Uncategorized";
+
+/** The section's inner layout, once the Draw panel has built it. */
+LinetypeMaker.tilesLayout = null;
+
+LinetypeMaker.buildBody = function(parent) {
+    var body = new QWidget(parent);
+    var layout = new QVBoxLayout();
+    layout.setContentsMargins(4, 4, 4, 4);
+    layout.setSpacing(4);
+    body.setLayout(layout);
+    LinetypeMaker.tilesLayout = layout;
+    LinetypeMaker.rebuildTiles(CsLinetypeStore.loadCustom().linetypes);
+    return body;
+};
+
+LinetypeMaker.rebuildTiles = function(models) {
+    var layout = LinetypeMaker.tilesLayout;
+    if (isNull(layout)) {
+        return;
+    }
+    CsPanel.clearLayout(layout);
+    try {
+        if (models.length === 0) {
+            var none = new QLabel(qsTr("Your own linetypes appear here. Make one in " +
+                "Linetype Maker (ltm) and give it a category to group it."));
+            none.wordWrap = true;
+            layout.addWidget(none, 0, 0);
+            layout.addStretch(1);
+            return;
+        }
+        var groups = {}, order = LinetypeMaker.categories(models);
+        for (var i = 0; i < models.length; i++) {
+            var c = String(models[i].category || "").trim();
+            var key = c === "" ? LinetypeMaker.NO_CATEGORY : c;
+            var found = null;
+            for (var g in groups) {
+                if (groups.hasOwnProperty(g) && g.toLowerCase() === key.toLowerCase()) {
+                    found = g;
+                }
+            }
+            if (found === null) {
+                groups[key] = [];
+                found = key;
+            }
+            groups[found].push(models[i]);
+        }
+        if (groups.hasOwnProperty(LinetypeMaker.NO_CATEGORY)) {
+            order.push(LinetypeMaker.NO_CATEGORY);
+        }
+        for (var o = 0; o < order.length; o++) {
+            var list = groups[order[o]];
+            if (!list) {
+                continue;
+            }
+            var head = new QLabel("<b>" + CsPanel.escapeHtml(order[o]) + "</b>");
+            layout.addWidget(head, 0, 0);
+            var grid = new QGridLayout();
+            grid.setSpacing(2);
+            for (var k = 0; k < list.length; k++) {
+                grid.addWidget(LinetypeMaker.tile(list[k]),
+                    Math.floor(k / LinetypeMaker.TILE_COLUMNS),
+                    k % LinetypeMaker.TILE_COLUMNS);
+            }
+            layout.addLayout(grid, 0);
+        }
+        layout.addStretch(1);
+    } catch (e) {
+        // a tile the bridge refuses costs that tile, not the section
+    }
+};
+
+LinetypeMaker.tile = function(model) {
+    var b = new QToolButton();
+    b.text = model.name;
+    try {
+        b.toolButtonStyle = Qt.ToolButtonTextUnderIcon;
+        b.setIcon(new QIcon(LinetypeMaker.previewPixmap(model,
+            LinetypeMaker.TILE_W, LinetypeMaker.TILE_H)));
+        b.setIconSize(new QSize(LinetypeMaker.TILE_W, LinetypeMaker.TILE_H));
+    } catch (eIcon) {
+    }
+    b.toolTip = (model.description ? model.description + "\n" : "") +
+        qsTr("Click to draw with it (Line tool). Escape puts your previous linetype back.");
+    b.clicked.connect(function() {
+        LinetypeMaker.drawWith(model);
+    });
+    return b;
 };
 
 LinetypeMaker.prototype.beginEvent = function() {

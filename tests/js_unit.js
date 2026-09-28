@@ -32956,6 +32956,17 @@ ok(typeof CsGhost !== "undefined", "CsGhost loaded");
     eqs(parsed.linetypes[1].segments.length, 2, "parseLin: second pattern");
     eqs(parsed.errors.length, 1, "parseLin: headerless pattern reported");
 
+    // Category: a ;;@category comment line before the entry -- a comment
+    // to AutoCAD, so the file stays a valid .lin everywhere.
+    var cat = CsLinetype.parseLin(";;@category Water\n*CS_W,w\nA,1,-1\n*CS_D,d\nA,1,-1\n");
+    eqs(cat.linetypes[0].category, "Water", "parseLin: category read");
+    eqs(cat.linetypes[1].category, "", "parseLin: category applies to one entry only");
+    var catBack = CsLinetype.parseLin(CsLinetype.writeLin(cat.linetypes));
+    eqs(catBack.linetypes[0].category, "Water", "writeLin keeps the category");
+    eqs(catBack.errors.length, 0, "writeLin category line parses clean");
+    eqs(CsLinetype.writeLin([cat.linetypes[1]]).indexOf("@category"), -1,
+        "writeLin: no category, no line");
+
     var again = CsLinetype.parseLin(CsLinetype.writeLin(parsed.linetypes));
     eqs(again.linetypes.length, 2, "writeLin then parseLin keeps both");
     eqs(CsLinetype.toPattern(again.linetypes[0]),

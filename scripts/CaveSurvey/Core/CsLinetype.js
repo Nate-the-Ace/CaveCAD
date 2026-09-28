@@ -144,12 +144,23 @@ CsLinetype.fromPattern = function(text) {
     return { segments: segments, errors: errors };
 };
 
+/**
+ * A linetype's CATEGORY (how the Draw panel groups it) rides in the .lin
+ * as a comment line just above its entry -- ";;@category Water" -- so the
+ * file stays a valid .lin for AutoCAD, which skips it as a comment.
+ */
+CsLinetype.CATEGORY_TAG = ";;@category ";
+
 /** \return { linetypes: [model], errors: [string] } */
 CsLinetype.parseLin = function(text) {
     var lines = String(text).split(/\r?\n/);
-    var linetypes = [], errors = [], cur = null;
+    var linetypes = [], errors = [], cur = null, category = "";
     for (var i = 0; i < lines.length; i++) {
         var line = lines[i].trim();
+        if (line.indexOf(CsLinetype.CATEGORY_TAG) === 0) {
+            category = line.substring(CsLinetype.CATEGORY_TAG.length).trim();
+            continue;
+        }
         if (line === "" || line.indexOf(";;") === 0) {
             continue;
         }
@@ -158,7 +169,8 @@ CsLinetype.parseLin = function(text) {
             var comma = header.indexOf(",");
             cur = { name: (comma < 0 ? header : header.substring(0, comma)).trim(),
                     description: comma < 0 ? "" : header.substring(comma + 1).trim(),
-                    segments: null };
+                    category: category, segments: null };
+            category = "";
             continue;
         }
         if (cur === null || cur.segments !== null) {
@@ -180,6 +192,10 @@ CsLinetype.parseLin = function(text) {
 CsLinetype.writeLin = function(models) {
     var out = "";
     for (var i = 0; i < models.length; i++) {
+        var cat = String(models[i].category || "").replace(/[\r\n]/g, " ").trim();
+        if (cat !== "") {
+            out += CsLinetype.CATEGORY_TAG + cat + "\n";
+        }
         out += "*" + models[i].name + "," + (models[i].description || "") + "\n";
         out += CsLinetype.toPattern(models[i]) + "\n";
     }
