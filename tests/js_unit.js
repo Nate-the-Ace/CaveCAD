@@ -33827,6 +33827,102 @@ var sg2M2 = CsTripPlan.signs([
 eqs(sg2M2.signs.length, 2, "signs2: metric 2 m jog does not merge");
 
 // ---------------------------------------------------------------------
+// Callout card -- every missing item at once (missingAll)
+// ---------------------------------------------------------------------
+
+var ccMaTrip = { startDate: "2026-10-03", weatherPlace: "",
+    days: [ { entry: "08:00", workHours: 6, night: "out" } ] };
+var ccMaContacts = { topName: "Pat", topPhone: "555-0100",
+    escalation: "Call the county sheriff, 555-0199", bufferMin: 120 };
+var ccMaRoster = [ { name: "Nathan", role: "sketch", squeeze: null,
+    medical: "", emergency: "" } ];
+var ccMaCopy = function(o) { return JSON.parse(JSON.stringify(o)); };
+var ccMaAll = function(over) {
+    var a = { trip: ccMaCopy(ccMaTrip), plan: ccPlan, contacts: ccMaCopy(ccMaContacts),
+        roster: ccMaCopy(ccMaRoster), include: true };
+    for (var k in over) {
+        if (Object.prototype.hasOwnProperty.call(over, k)) { a[k] = over[k]; }
+    }
+    return CsCalloutCard.missingAll(a.trip, a.plan, a.contacts, a.roster, a.include);
+};
+var ccMaHas = function(list, word) {
+    for (var i = 0; i < list.length; i++) {
+        if (String(list[i]).indexOf(word) >= 0) { return true; }
+    }
+    return false;
+};
+eqs(Object.prototype.toString.call(ccMaAll({})), "[object Array]",
+    "missingAll: returns an array");
+eqs(ccMaAll({}).length, 0, "missingAll: complete is empty");
+
+var ccMaOne = function(over, want, what) {
+    var got = ccMaAll(over);
+    ok(got.length === 1 && got[0] === want, "missingAll: " + what +
+        " alone (" + got.join(" | ") + ")");
+};
+ccMaOne({ plan: null }, "at least one stop (add one under Route)", "no plan");
+ccMaOne({ plan: { stops: [], totals: {} } },
+    "at least one stop (add one under Route)", "a plan with no stops");
+ccMaOne({ trip: { startDate: "", weatherPlace: "", days: ccMaTrip.days } },
+    "start date", "start date");
+ccMaOne({ trip: { startDate: "2026-13-45x", weatherPlace: "", days: ccMaTrip.days } },
+    "start date", "a malformed start date");
+ccMaOne({ trip: { startDate: "2026-10-03", weatherPlace: "", days: [] } },
+    "at least one day", "days");
+ccMaOne({ contacts: { topName: "", topPhone: "555-0100", escalation: "x" } },
+    "topside contact name", "topside contact name");
+ccMaOne({ contacts: { topName: "Pat", topPhone: "", escalation: "x" } },
+    "contact phone", "contact phone");
+ccMaOne({ contacts: { topName: "Pat", topPhone: "555-0100", escalation: "" } },
+    "the if-no-word escalation line", "escalation line");
+ccMaOne({ roster: [] },
+    "at least one person on the roster (or untick Include roster)", "roster");
+
+// Whitespace is not an answer.
+ccMaOne({ contacts: { topName: "  \t", topPhone: "555-0100", escalation: "x" } },
+    "topside contact name", "whitespace-only contact name");
+ccMaOne({ contacts: { topName: "Pat", topPhone: "   ", escalation: "x" } },
+    "contact phone", "whitespace-only phone");
+ccMaOne({ contacts: { topName: "Pat", topPhone: "555", escalation: " \n " } },
+    "the if-no-word escalation line", "whitespace-only escalation");
+ccMaOne({ trip: { startDate: "   ", weatherPlace: "", days: ccMaTrip.days } },
+    "start date", "whitespace-only start date");
+ccMaOne({ roster: [ { name: "   ", role: "sketch" } ] },
+    "at least one person on the roster (or untick Include roster)",
+    "a roster row with a blank name is not a person");
+
+// The roster only counts when it goes on the card.
+eqs(ccMaAll({ roster: [], include: false }).length, 0,
+    "missingAll: no roster is fine when Include roster is off");
+eqs(ccMaAll({ roster: null, include: false }).length, 0,
+    "missingAll: a null roster is fine when Include roster is off");
+ok(ccMaHas(ccMaAll({ roster: [], include: true }), "roster"),
+    "missingAll: no roster is missing when Include roster is on");
+
+// The buffer is never required.
+eqs(ccMaAll({ contacts: { topName: "Pat", topPhone: "555", escalation: "x" } }).length, 0,
+    "missingAll: no buffer is not missing");
+eqs(ccMaAll({ contacts: { topName: "Pat", topPhone: "555", escalation: "x",
+    bufferMin: null } }).length, 0, "missingAll: a null buffer is not missing");
+
+// Everything at once, in the panel's (the card's) order.
+var ccMaEvery = CsCalloutCard.missingAll({ startDate: "", weatherPlace: "", days: [] },
+    null, { topName: "", topPhone: "", escalation: "" }, [], true);
+eqs(ccMaEvery.join(" | "), [ "start date",
+    "at least one person on the roster (or untick Include roster)",
+    "at least one day", "topside contact name", "contact phone",
+    "the if-no-word escalation line",
+    "at least one stop (add one under Route)" ].join(" | "),
+    "missingAll: every item named at once, in panel order");
+eqs(CsCalloutCard.missingAll(null, null, null, null, false).length, 6,
+    "missingAll: all-null input names six items (roster off) and does not throw");
+eqs(CsCalloutCard.missingAll(undefined, undefined, undefined, undefined, true).length, 7,
+    "missingAll: all-undefined input names seven items (roster on)");
+// The old single-answer form still works for its callers.
+eqs(CsCalloutCard.missing({ startDate: "", days: [] }, ccPlan), "start date",
+    "missing: still answers the first gap");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

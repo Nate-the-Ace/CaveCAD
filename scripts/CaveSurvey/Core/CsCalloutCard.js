@@ -65,6 +65,65 @@ CsCalloutCard.missing = function(trip, plan) {
     return "";
 };
 
+/** True when a value has something other than whitespace in it. */
+var csCardFilled = function(v) {
+    return v !== null && v !== undefined &&
+        String(v).replace(/^\s+|\s+$/g, "") !== "";
+};
+
+/**
+ * EVERYTHING missing before a card can be built, named at once (Nathan,
+ * 2026-09-29: "too easy to not enter important information"). In the
+ * panel's order, which is the card's: trip, roster, schedule,
+ * escalation, route. The callout buffer is never required (it has a
+ * default); the roster only when it is going on the card. Whitespace
+ * counts as blank. Never throws on null or missing arguments.
+ *
+ * \param trip {startDate, days}
+ * \param plan a CsTripPlan plan, or null
+ * \param contacts {topName, topPhone, escalation}
+ * \param roster [{name, ...}]
+ * \param includeRoster false leaves the roster off the card (and out of this)
+ * \return [short human strings], empty when the card can be built
+ */
+CsCalloutCard.missingAll = function(trip, plan, contacts, roster, includeRoster) {
+    var out = [];
+    var t = (trip !== null && typeof trip === "object") ? trip : {};
+    var c = (contacts !== null && typeof contacts === "object") ? contacts : {};
+    var date = csCardFilled(t.startDate) ?
+        String(t.startDate).replace(/^\s+|\s+$/g, "") : "";
+    if (CsCalloutCard.dateMinutes(date) === null) {
+        out.push("start date");
+    }
+    if (includeRoster !== false) {
+        var person = false;
+        var list = Object.prototype.toString.call(roster) === "[object Array]" ?
+            roster : [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] !== null && typeof list[i] === "object" &&
+                    csCardFilled(list[i].name)) {
+                person = true;
+            }
+        }
+        if (!person) {
+            out.push("at least one person on the roster (or untick Include roster)");
+        }
+    }
+    if (Object.prototype.toString.call(t.days) !== "[object Array]" ||
+            t.days.length === 0) {
+        out.push("at least one day");
+    }
+    if (!csCardFilled(c.topName)) { out.push("topside contact name"); }
+    if (!csCardFilled(c.topPhone)) { out.push("contact phone"); }
+    if (!csCardFilled(c.escalation)) { out.push("the if-no-word escalation line"); }
+    if (plan === null || plan === undefined || typeof plan !== "object" ||
+            Object.prototype.toString.call(plan.stops) !== "[object Array]" ||
+            plan.stops.length === 0) {
+        out.push("at least one stop (add one under Route)");
+    }
+    return out;
+};
+
 /**
  * The schedule as rows. A day STARTS FROM THE SURFACE when it is the
  * first or the night before was "out": the inbound time is added. A day
@@ -281,7 +340,7 @@ CsCalloutCard.html = function(plan, ctx) {
         "guarantee that the way is safe or easy: crawls, water, climbs and loose " +
         "ground are only known where someone wrote them down.</p>");
     if (plan.stops.length === 0) {
-        h.push("<p class=\"warn\">No route: pick stops on the Expedition Planner's Trip tab.</p>");
+        h.push("<p class=\"warn\">No route: add stops under Route in the Expedition Planner.</p>");
     } else {
         h.push(CsTripPlan.routeSvg(ctx.survey, ctx.resolved, plan));
         h.push("<h2>Directions</h2>");
