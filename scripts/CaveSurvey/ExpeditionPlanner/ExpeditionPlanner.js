@@ -850,21 +850,21 @@ ExpeditionPlanner.planText = function(p, paceUsed) {
     for (var w = 0; w < p.warnings.length; w++) {
         lines.push("WARNING: " + p.warnings[w]);
     }
-    for (var i = 0; i < p.stops.length; i++) {
+    // Counted intersections, not stations: underground nobody can tell
+    // which station they are at (Nathan, 2026-09-29). Same structure as
+    // the signs on the printed pages.
+    var leg = function(heading, steps, destination) {
+        var signs = CsTripPlan.signs(steps, unit, destination);
         lines.push("");
-        lines.push("To " + p.stops[i].station + "  (" +
-            CsTripPlan.clock(p.stops[i].minutesIn) + ")");
-        for (var k = 0; k < p.stops[i].steps.length; k++) {
-            lines.push("  " + p.stops[i].steps[k].text);
-        }
+        lines.push(heading + " " + destination + " (" +
+            CsTripPlan.legSummary(signs, steps, unit).split(" · ").join(", ") + ")");
+        lines = lines.concat(CsTripPlan.signsText(signs));
+    };
+    for (var i = 0; i < p.stops.length; i++) {
+        leg("To", p.stops[i].steps, p.stops[i].station);
     }
     if (p.stops.length > 0) {
-        lines.push("");
-        lines.push("Back to " + p.start + "  (" +
-            CsTripPlan.clock(p.back.minutes) + ")");
-        for (var b = 0; b < p.back.steps.length; b++) {
-            lines.push("  " + p.back.steps[b].text);
-        }
+        leg("Back to", p.back.steps, p.start);
     }
     var t = p.totals;
     lines.push("");
