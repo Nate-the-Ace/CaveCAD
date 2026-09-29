@@ -247,6 +247,11 @@ StationTable.buildTablePage = function() {
     var table = new QTableWidget(0, StationTable.HEADERS.length);
     table.objectName = "StationTableTable";
     table.setHorizontalHeaderLabels(StationTable.HEADERS);
+    // Dim the headings of the columns that cannot be typed in, the way
+    // Cave Shelf does (CsPanel.markHeadings). Status is edited through
+    // its dropdown, so it counts as editable.
+    CsPanel.markHeadings(table, StationTable.HEADERS,
+        [false, false, false, false, true, false, true, true]);
     try {
         table.selectionBehavior = QAbstractItemView.SelectRows;
         table.selectionMode = QAbstractItemView.SingleSelection;
@@ -555,13 +560,24 @@ StationTable.editTriggers = function() {
  * per cell, so Station, Kinds, Trips, Elev and the survey's note can
  * never be typed over.
  */
-StationTable.itemFor = function(text, editable) {
+StationTable.itemFor = function(text, editable, wash) {
     var item = new QTableWidgetItem(String(text));
     try {
         var flags = item.flags();
         item.setFlags(editable === true ? (flags | Qt.ItemIsEditable) :
             (flags & ~Qt.ItemIsEditable));
     } catch (eFlags) {
+    }
+    // The same grey wash every read-only cell wears elsewhere in
+    // CaveCAD (CsPanel.markCell), so what cannot be typed in is visible
+    // at a glance. The brush is read from the palette ONCE per refill by
+    // fill(), not once per cell: this table rebuilds on every keystroke
+    // of the search box.
+    if (editable !== true && !isNull(wash) && wash !== null) {
+        try {
+            item.setBackground(wash);
+        } catch (eBack) {
+        }
     }
     return item;
 };
@@ -645,6 +661,7 @@ StationTable.fill = function() {
     }
     var shown = StationTable.visibleRows();
     s.shown = shown;
+    var wash = CsPanel.readOnlyBrush(table);
     s.filling = true;
     var reselect = -1;
     try {
@@ -662,7 +679,8 @@ StationTable.fill = function() {
                 // shows through it (a marked row read "opeopen"), so the
                 // Status item carries no text at all.
                 table.setItem(r, c, StationTable.itemFor(
-                    c === C.STATUS ? "" : cells[c], editable));
+                    c === C.STATUS ? "" : cells[c], editable,
+                    c === C.STATUS ? null : wash));
             }
             table.setCellWidget(r, C.STATUS, StationTable.statusWidget(row));
             if (keep !== null && row.station === keep.station) {
