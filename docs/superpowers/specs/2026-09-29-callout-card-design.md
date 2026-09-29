@@ -67,12 +67,27 @@ will read the same field.
 
 ## Schedule arithmetic
 
-For each window: `turnaround = entry + inbound route time + work hours`.
-`callout = turnaround + buffer`. Route time comes from the plan (walk pace
-plus pitch timing, as the trip packet already does). Windows crossing
-midnight advance the date. A night marked camp prints a camp row between
-windows. A window whose turnaround falls after the next window's entry gets
-a warning on the card; the card still builds.
+The plan is one route with totals `minutesIn`, `minutesWork`, `minutesOut`.
+Each day of the schedule has an entry time (24 h clock), work hours, and a
+night: `out` (the team exits that day) or `camp` (the team stays
+underground). The last day is always treated as `out`.
+
+A day **starts from the surface** if it is the first day or the previous
+night was `out`; then its inbound time (`minutesIn`) is added. A day
+**ends on the surface** if its night is `out` or it is the last day.
+
+Per day:
+- `turnaround = entry + (starts from surface ? minutesIn : 0) + work hours`.
+  This is the time the team must turn around at the objective.
+- If the day ends on the surface: `expectedOut = turnaround + minutesOut`
+  and `callout = expectedOut + buffer`. Topside starts acting at callout.
+- If the night is `camp`: the row shows the turnaround and "camp night, no
+  callout until day N". Underground camp-to-camp moves are not modelled in
+  v1; the single route's in/out times are used at the ends only.
+
+Times carry an absolute day offset from the start date, so a window that
+crosses midnight advances the date. A day whose expected out falls after the
+next day's entry gets a warning on the card; the card still builds.
 
 ## Card layout
 
