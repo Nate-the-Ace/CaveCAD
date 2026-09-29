@@ -39,6 +39,16 @@
 <li>Rigging is not read from the map yet. Every pitch says "rig not on map, confirm": count the anchors and hangers from what you know of the cave before you pack.</li>
 <li>A stop that cannot be reached along the surveyed line is listed as a warning and left out of the route. A shot whose walls say the passage is under 3 feet high or wide is flagged as tight.</li>
 </ul>
+<h2>Callout card</h2>
+<p>The <b>Callout</b> tab builds <code>callout-card.html</code> beside the drawing: two printed sheets for a trip. Plan the trip on the <b>Plan</b> tab first, then fill in the Callout tab and press <b>Build card</b>.</p>
+<ul>
+<li><b>Sheet 1, for topside:</b> the roster (name, role, squeeze limit, medical notes, emergency contact), the schedule, who to call if there is no word, and the forecast for each trip day.</li>
+<li><b>Sheet 2, for the team:</b> the route sketch, turn-by-turn directions, hazard notes found on the way, and the rope list.</li>
+<li><b>Schedule:</b> a start date, then one row per day with an entry time, work hours, and a night: <code>out</code> (back on the surface) or <code>camp</code> (stay underground). Turnaround is entry plus the way in (on days that start from the surface) plus work hours. Callout is the expected time out plus your buffer. Camp nights have no callout. Only the trip's first way in and last way out use the route's times; moves between camps are not timed.</li>
+<li><b>Forecast:</b> looked up when you build, from the drawing's location rounded to about 10 km, or from a town you type. The exact entrance is never sent and never printed. With no network the card says so and still builds.</li>
+<li><b>Rain plus water:</b> if a day's forecast is wet and a station note on the route mentions water, the card carries a bold warning. It says "check", never "safe".</li>
+<li><b>Privacy:</b> the roster and phone numbers are saved on this computer only, not in the cave's folder, so Drive does not carry them. Untick <b>Include roster</b> for a copy that leaves your hands.</li>
+</ul>
 <h2>Where the marks live</h2>
 <p>Nothing in this table is written into the drawing. The kinds are worked out from the survey every time the panel opens or you press <b>Refresh</b>. What the team writes — a status, notes, who has it — is saved in <code>stations.json</code> in the cave's folder, beside the drawing, so Google Drive carries it to everyone who shares the cave. Save the drawing once before marking anything; an unsaved drawing has no folder to keep the file in.</p>
 <h2>When it refuses</h2>
