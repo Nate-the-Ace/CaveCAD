@@ -35667,6 +35667,788 @@ if (typeof ExpeditionPlanner !== "undefined" &&
 })();
 
 // ---------------------------------------------------------------------
+// Teams -- the panel's team sections and the multi-file build
+// (ExpeditionPlanner: teamSummary, file list, stale files, status text,
+// per-team planning, buildFiles, the dock-build guard, and real team
+// sections built on a never-shown QWidget).
+// ---------------------------------------------------------------------
+(function() {
+    var EP = ExpeditionPlanner;
+    var fns = ["teamSummary", "teamHeaderTitle", "buildFileList", "staleTeamFiles",
+        "conflictText", "buildStatusText", "missingText", "planTeams", "teamStartDate",
+        "buildFiles", "buildTeamsSection", "buildTeamSection", "rebuildTeamSections",
+        "refreshTeamHeaders", "flushPacking", "addTeamClicked", "removeTeamClicked"];
+    var absent = [];
+    for (var f = 0; f < fns.length; f++) {
+        if (typeof EP[fns[f]] !== "function") { absent.push(fns[f]); }
+    }
+    eqs(absent.join(","), "", "tm build: the team panel functions exist");
+    if (absent.length > 0) { return; }
+    var day = function(e, h, n) { return { entry: e, workHours: h, night: n }; };
+    var mk = function(id, name, members, stops, days, extra) {
+        var t = { id: id, name: name, goal: "", dayOffset: 0, members: members,
+            stops: stops, days: days, packing: "" };
+        for (var k in (extra || {})) { if (extra.hasOwnProperty(k)) { t[k] = extra[k]; } }
+        return t;
+    };
+    var ana = { id: "p-ana", name: "Ana Ruiz" };
+    var bo = { id: "p-bo", name: "Bo" };
+    var cy = { id: "", name: "Cy" };
+
+    // teamSummary / teamHeaderTitle
+    eqs(EP.teamSummary(mk("a", "A", [ana, bo, cy], ["B20", "D8"], [day("08:00", 5, "out"),
+        day("08:00", 5, "out")]), false), "3 people · 2 stops · 2 days",
+        "tm build: teamSummary counts people, stops and days");
+    eqs(EP.teamSummary(mk("a", "A", [ana], ["B20"], [day("08:00", 5, "out")]), false),
+        "1 person · 1 stop · 1 day", "tm build: teamSummary uses singulars");
+    eqs(EP.teamSummary(mk("a", "A", [], [], []), false), "0 people · 0 stops · 0 days",
+        "tm build: teamSummary of an empty team");
+    var sumC = EP.teamSummary(mk("a", "A", [ana], [], []), true);
+    ok(sumC.indexOf("1 person · 0 stops · 0 days") === 0 &&
+        sumC.indexOf("same-day") > 0, "tm build: a conflicted team's summary carries the same-day mark");
+    eqs(EP.teamSummary(null, false), "0 people · 0 stops · 0 days",
+        "tm build: teamSummary survives a null team");
+    eqs(EP.teamHeaderTitle(mk("a", "Alpha", [ana], [], []), 0, false),
+        "Alpha — 1 person · 0 stops · 0 days", "tm build: header title is name and summary");
+    ok(EP.teamHeaderTitle(mk("a", "  ", [], [], []), 1, false).indexOf("Team 2 — ") === 0,
+        "tm build: a blank name titles as Team N");
+    ok(EP.teamHeaderTitle(mk("a", "Alpha", [], [], []), 0, true).indexOf("⚠") === 0,
+        "tm build: a conflicted header starts with the warning mark");
+
+    // buildFileList
+    eqs(EP.buildFileList([mk("a", "Alpha", [], [], [])]).join(","), "callout-card.html",
+        "tm build: one team builds only callout-card.html");
+    eqs(EP.buildFileList([mk("a", "Alpha", [], [], []), mk("b", "Deep Push!", [], [], [])]).join(","),
+        "callout-card.html,team-1-alpha.html,team-2-deep-push.html",
+        "tm build: several teams build the topside sheet plus one file per team");
+    eqs(EP.buildFileList([]).join(","), "callout-card.html", "tm build: no teams is still the one card");
+
+    // staleTeamFiles
+    eqs(EP.staleTeamFiles(["callout-card.html", "team-1-alpha.html", "team-3-old.html",
+        "trip-plan.html", "notes.txt", "team-notes.txt", "Team-9-X.HTML", "team-2-beta.html"],
+        ["callout-card.html", "team-1-alpha.html", "team-2-beta.html"]).join(","),
+        "Team-9-X.HTML,team-3-old.html",
+        "tm build: stale files are the team-*.html this build did not write, sorted, others ignored");
+    eqs(EP.staleTeamFiles(["team-1-alpha.html"], ["callout-card.html"]).join(","), "team-1-alpha.html",
+        "tm build: a single-team build names every team file as left in place");
+    eqs(EP.staleTeamFiles(null, null).length, 0, "tm build: staleTeamFiles survives nulls");
+
+    // conflictText / buildStatusText
+    var cf = { person: "Ana Ruiz", date: "2026-10-04", teams: ["Team 1", "Team 2"] };
+    eqs(EP.conflictText(cf), "Ana Ruiz is on Team 1 and Team 2 on 2026-10-04", "tm build: conflictText, two teams");
+    eqs(EP.conflictText({ person: "Bo", date: "2026-10-05", teams: ["A", "B", "C"] }),
+        "Bo is on A, B and C on 2026-10-05", "tm build: conflictText, three teams");
+    eqs(EP.buildStatusText(["callout-card.html"], [], [], []), "Saved callout-card.html",
+        "tm build: the single-team status is today's");
+    eqs(EP.buildStatusText(["callout-card.html"], [], [], ["no forecast (offline)"]),
+        "Saved callout-card.html (no forecast (offline))", "tm build: problems in brackets as today");
+    eqs(EP.buildStatusText(["callout-card.html", "team-1-a.html", "team-2-b.html"], [cf],
+        ["team-3-old.html"], []),
+        "Saved callout-card.html, team-1-a.html, team-2-b.html. Build succeeded with warnings: " +
+        "Ana Ruiz is on Team 1 and Team 2 on 2026-10-04. Left in place from an earlier build: " +
+        "team-3-old.html", "tm build: status names files, conflicts and leftovers");
+    var st2 = EP.buildStatusText(["callout-card.html"], [cf, { person: "Bo", date: "2026-10-05",
+        teams: ["A", "B"] }], [], []);
+    ok(st2.indexOf("Ana Ruiz is on Team 1 and Team 2 on 2026-10-04; Bo is on A and B on 2026-10-05") > 0,
+        "tm build: several conflicts are listed");
+
+    // missingText
+    var twoTeams = [mk("a", "Alpha", [], [], []), mk("b", "Beta", [], [], [])];
+    eqs(EP.missingText(["start date", "contact phone", "Alpha: at least one person",
+        "Alpha: at least one stop", "Beta: at least one day"], twoTeams),
+        "Missing: start date, contact phone; Alpha: at least one person, at least one stop; " +
+        "Beta: at least one day", "tm build: missing items grouped per team");
+    eqs(EP.missingText(["start date"], twoTeams), "Missing: start date",
+        "tm build: trip-level only reads as before");
+
+    // teamStartDate
+    eqs(EP.teamStartDate("2026-10-03", mk("a", "A", [], [], [], { dayOffset: 0 })), "2026-10-03",
+        "tm build: offset 0 starts on the trip date");
+    eqs(EP.teamStartDate("2026-10-30", mk("a", "A", [], [], [], { dayOffset: 3 })), "2026-11-02",
+        "tm build: an offset crosses a month");
+    eqs(EP.teamStartDate("junk", mk("a", "A", [], [], [], { dayOffset: 1 })), "junk",
+        "tm build: a bad start date is passed through for the missing check");
+
+    // planTeams, with CsTripPlan.build stubbed
+    var realBuild = CsTripPlan.build;
+    var calls = [];
+    CsTripPlan.build = function(survey, resolved, opts) {
+        calls.push(opts.targets.join("+") + "|" + opts.packing + "|" + opts.unit + "|" +
+            opts.config.paceFtPerMin);
+        return { stops: opts.targets.slice(0), fake: true };
+    };
+    try {
+        var drawn = { survey: { distanceUnit: "ft", trips: [] }, resolved: {} };
+        var pt = EP.planTeams([mk("a", "Alpha", [ana], ["B20", "D8"], [day("08:00", 5, "out")],
+            { packing: "rope" }), mk("b", "Beta", [], [], [])], drawn, { paceFtPerMin: 100 }, "ft");
+        eqs(pt.length, 2, "tm build: planTeams answers every team");
+        eqs(calls.join(";"), "B20+D8|rope|ft|100", "tm build: each team is planned from its own stops, packing and the shared pace");
+        ok(pt[0].plan !== null && pt[0].plan.fake === true && pt[0].team.name === "Alpha",
+            "tm build: a team with stops gets its plan");
+        ok(pt[1].plan === null, "tm build: a team without stops gets no plan (and no route call)");
+        var miss = CsTeams.missingAll({ startDate: "2026-10-03", teams: [pt[0].team, pt[1].team] },
+            [pt[0].plan, pt[1].plan], { topName: "T", topPhone: "1", escalation: "E" }, [], true);
+        eqs(miss.join("|"), "Beta: at least one person|Beta: at least one day|Beta: at least one stop",
+            "tm build: the per-team plans give a per-team missing list");
+        calls = [];
+        var none = EP.planTeams([mk("a", "Alpha", [], ["B20"], [])], null, {}, "ft");
+        ok(none[0].plan === null && calls.length === 0, "tm build: no survey plans nothing");
+    } finally {
+        CsTripPlan.build = realBuild;
+    }
+
+    // buildFiles: the orchestration, everything around it stubbed.
+    var realState = EP.state;
+    var realChild = EP.child;
+    var realPath = CsStationSidecar.sidecarPath;
+    var realRead = CsStationSidecar.readSidecar;
+    var realWrite = CsStationSidecar.writeSidecar;
+    var realText = CsStationSidecar.writeText;
+    var realSaveContacts = CsCalloutLocal.saveContacts;
+    var realLookup = CsWeather.lookup;
+    var realHtml = CsCalloutCard.html;
+    var realTop = CsCalloutCard.topsideHtml;
+    var realTeamHtml = CsCalloutCard.teamHtml;
+    var realList = EP.listTeamFiles;
+    var realAnchor = EP.anchorOf;
+    var disk = { text: "", writes: 0 };
+    var files = {};
+    var seen = { html: [], top: [], team: [], wx: [] };
+    CsStationSidecar.sidecarPath = function(docPath) {
+        return (docPath === "" || docPath === null || docPath === undefined) ? "" : "/fake/Cave/stations.json";
+    };
+    CsStationSidecar.readSidecar = function() { return CsStationStore.parse(disk.text); };
+    CsStationSidecar.writeSidecar = function(path, st) {
+        disk.writes++;
+        disk.text = CsStationStore.serialize(st);
+        return true;
+    };
+    CsStationSidecar.writeText = function(path, text) { files[path] = text; return true; };
+    CsCalloutLocal.saveContacts = function() { return true; };
+    CsWeather.lookup = function(dates, anchor, place) {
+        seen.wx.push(dates.join(","));
+        return { days: [], error: "" };
+    };
+    CsCalloutCard.html = function(plan, ctx) { seen.html.push({ plan: plan, ctx: ctx }); return "<html>single"; };
+    CsCalloutCard.topsideHtml = function(ctx) { seen.top.push(ctx); return "<html>topside"; };
+    CsCalloutCard.teamHtml = function(ctx) { seen.team.push(ctx); return "<html>team " + ctx.team.name; };
+    EP.listTeamFiles = function() { return ["team-1-alpha.html", "team-3-old.html", "notes.html"]; };
+    EP.anchorOf = function() { return null; };
+    EP.child = function() { return null; };
+    CsTripPlan.build = function(survey, resolved, opts) {
+        return { stops: opts.targets.slice(0), packing: opts.packing,
+            totals: { minutesIn: 30, minutesOut: 30 } };
+    };
+    var people = [ { id: "p-ana", name: "Ana Ruiz", role: "lead", squeeze: null, medical: "None",
+        emergency: "Mum 555", skills: [], skillsNote: "" } ];
+    var start = function(teams) {
+        disk.text = JSON.stringify({ version: CsStationStore.VERSION, entries: [],
+            settings: { trip: { startDate: "2026-10-03", party: [ana, bo], teams: [] } } });
+        disk.writes = 0;
+        files = {};
+        seen = { html: [], top: [], team: [], wx: [] };
+        EP.state = { drawn: { survey: { distanceUnit: "ft", trips: [] }, resolved: {} },
+            docPath: "/fake/Cave/Cave.dxf", store: CsStationStore.parse(disk.text).store,
+            loadError: "", stations: ["A1", "B20", "D8"], plan: null, planShown: null,
+            people: people, peopleError: "", rosterRows: [], filling: false, teams: teams,
+            teamOpen: {}, activeTeamId: "", teamMessage: "", removedCount: 0, packingPending: null };
+    };
+    var form = function(date) {
+        return { trip: CsStationStore.cleanTrip({ startDate: date === undefined ? "2026-10-03" : date,
+            weatherPlace: "Town", party: [ana, bo] }),
+            contacts: { topName: "T", topPhone: "1", escalation: "Call SAR", bufferMin: 120 },
+            roster: CsPeople.resolveParty([ana, bo], people), includeRoster: true, pace: null };
+    };
+    try {
+        // One team: today's single card, from the team's members, days and stops.
+        start([mk("t1", "Team 1", [ana], ["B20"], [day("08:00", 5, "out"), day("09:00", 4, "out")],
+            { packing: "Helmet", dayOffset: 1 })]);
+        var r1 = EP.buildFiles(form(), "/fake/Cave");
+        eqs(r1.missing.length + ":" + r1.error, "0:", "tm build: a complete single team builds");
+        eqs(r1.written.join(","), "callout-card.html", "tm build: one team writes only callout-card.html");
+        eqs(Object.keys(files).join(","), "/fake/Cave/callout-card.html", "tm build: one file on disk, beside the drawing");
+        eqs(seen.html.length + ":" + seen.top.length + ":" + seen.team.length, "1:0:0",
+            "tm build: one team goes through the single-card renderer only");
+        var sc = seen.html[0].ctx;
+        eqs(JSON.stringify(sc.trip.days), JSON.stringify([day("08:00", 5, "out"), day("09:00", 4, "out")]),
+            "tm build: the single card carries the team's days");
+        eqs(sc.trip.startDate, "2026-10-04", "tm build: the single card starts on the team's first day");
+        eqs(sc.roster.length + ":" + sc.roster[0].name + ":" + sc.roster[0].known, "1:Ana Ruiz:true",
+            "tm build: the single card's roster is the team's members, resolved");
+        eqs(seen.html[0].plan.stops.join(",") + "|" + seen.html[0].plan.packing, "B20|Helmet",
+            "tm build: the single card's route is the team's stops and packing");
+        eqs(seen.wx[0], "2026-10-04,2026-10-05", "tm build: the single card's forecast covers the team's dates");
+        eqs(r1.leftovers.join(","), "team-1-alpha.html,team-3-old.html",
+            "tm build: a single-team build names the team files it left in place");
+        var saved = CsStationStore.parse(disk.text).store.settings.trip;
+        eqs(saved.startDate + "|" + saved.weatherPlace + "|" + saved.teams.length, "2026-10-03|Town|1",
+            "tm build: Build saves the trip and the teams");
+
+        // Two teams: topside + one file per team.
+        start([mk("t1", "Alpha", [ana], ["B20"], [day("08:00", 5, "out")], { packing: "rope" }),
+            mk("t2", "Beta", [ana, bo], ["D8"], [day("09:00", 3, "out"), day("09:00", 3, "out")],
+                { dayOffset: 2 })]);
+        var r2 = EP.buildFiles(form(), "/fake/Cave");
+        eqs(r2.written.join(","), "callout-card.html,team-1-alpha.html,team-2-beta.html",
+            "tm build: two teams write the topside sheet and both team files");
+        eqs(Object.keys(files).sort().join(","),
+            "/fake/Cave/callout-card.html,/fake/Cave/team-1-alpha.html,/fake/Cave/team-2-beta.html",
+            "tm build: the files land beside the drawing");
+        eqs(files["/fake/Cave/team-2-beta.html"], "<html>team Beta", "tm build: each team file is its own team's");
+        eqs(seen.html.length + ":" + seen.top.length + ":" + seen.team.length, "0:1:2",
+            "tm build: several teams never use the single-card renderer");
+        var top = seen.top[0];
+        eqs(top.teams.length + ":" + top.fileNames.join(","), "2:team-1-alpha.html,team-2-beta.html",
+            "tm build: the topside sheet knows every team and its file");
+        ok(top.contacts.escalation === "Call SAR" && top.teams[1].members.length === 2 &&
+            top.teams[0].plan.stops[0] === "B20", "tm build: the topside ctx carries contacts, members and plans");
+        ok(seen.team[0].contacts.escalation === "Call SAR" && seen.team[1].team.name === "Beta" &&
+            seen.team[1].plan.stops[0] === "D8" && seen.team[0].members[0].name === "Ana Ruiz",
+            "tm build: each team file gets the contacts, its team, its plan and its members");
+        eqs(seen.wx.length + ":" + seen.wx[0], "1:2026-10-03,2026-10-05,2026-10-06",
+            "tm build: one forecast lookup covers every team's dates, first to last");
+        eqs(r2.leftovers.join(","), "team-3-old.html", "tm build: only the unwritten team file is left in place");
+        eqs(r2.conflicts.length, 0, "tm build: no same-day overlap, no warning");
+        // A same-day overlap warns and still builds.
+        start([mk("t1", "Alpha", [ana], ["B20"], [day("08:00", 5, "out")]),
+            mk("t2", "Beta", [ana], ["D8"], [day("09:00", 3, "out")])]);
+        var r3 = EP.buildFiles(form(), "/fake/Cave");
+        eqs(r3.written.length + ":" + r3.conflicts.length, "3:1", "tm build: an overlap builds, with a warning");
+        ok(EP.buildStatusText(r3.written, r3.conflicts, r3.leftovers, r3.problems)
+            .indexOf("Build succeeded with warnings: Ana Ruiz is on Alpha and Beta on 2026-10-03") > 0,
+            "tm build: the status line names the overlap");
+
+        // Missing items: all of them, nothing built.
+        start([mk("t1", "Alpha", [ana], ["B20"], [day("08:00", 5, "out")]),
+            mk("t2", "Beta", [], [], [])]);
+        var f4 = form("");
+        f4.contacts.topPhone = "";
+        var r4 = EP.buildFiles(f4, "/fake/Cave");
+        eqs(r4.missing.join("|"), "start date|contact phone|Beta: at least one person|" +
+            "Beta: at least one day|Beta: at least one stop", "tm build: every missing item, per team");
+        eqs(r4.written.length + ":" + Object.keys(files).length + ":" + disk.writes, "0:0:0",
+            "tm build: nothing is built or saved while anything is missing");
+        // No survey: named, nothing built.
+        start([mk("t1", "Alpha", [ana], ["B20"], [day("08:00", 5, "out")])]);
+        EP.state.drawn = null;
+        var r5 = EP.buildFiles(form(), "/fake/Cave");
+        ok(r5.missing.length > 0 && r5.written.length === 0, "tm build: no survey builds nothing");
+        // A bad pace: an error, nothing built.
+        start([mk("t1", "Alpha", [ana], ["B20"], [day("08:00", 5, "out")])]);
+        var f6 = form();
+        f6.pace = NaN;
+        var r6 = EP.buildFiles(f6, "/fake/Cave");
+        ok(r6.error !== "" && r6.written.length === 0, "tm build: a bad pace builds nothing, with a reason");
+        // Nothing is ever deleted: the stale file is still listed, never removed.
+        ok(typeof EP.deleteStale === "undefined", "tm build: there is no delete path");
+    } finally {
+        EP.state = realState;
+        EP.child = realChild;
+        CsStationSidecar.sidecarPath = realPath;
+        CsStationSidecar.readSidecar = realRead;
+        CsStationSidecar.writeSidecar = realWrite;
+        CsStationSidecar.writeText = realText;
+        CsCalloutLocal.saveContacts = realSaveContacts;
+        CsWeather.lookup = realLookup;
+        CsCalloutCard.html = realHtml;
+        CsCalloutCard.topsideHtml = realTop;
+        CsCalloutCard.teamHtml = realTeamHtml;
+        EP.listTeamFiles = realList;
+        EP.anchorOf = realAnchor;
+        CsTripPlan.build = realBuild;
+    }
+
+    // The old single Schedule and Route sections are gone.
+    ok(EP.buildScheduleSection === undefined && EP.buildRouteSection === undefined &&
+        EP.fillStops === undefined && EP.addStop === undefined && EP.packingTyped === undefined,
+        "tm build: the single Schedule and Route sections and their handlers are gone");
+    (function() {
+        var src = readTextFile(repoRoot + "/scripts/CaveSurvey/ExpeditionPlanner/ExpeditionPlanner.js");
+        var gone = ["\"ExpeditionPlannerCalloutDays\"", "\"ExpeditionPlannerStops\"",
+            "\"ExpeditionPlannerPicker\"", "\"ExpeditionPlannerPacking\"", "\"ExpeditionPlannerAdd\"",
+            "\"ExpeditionPlannerRemove\"", "\"ExpeditionPlannerClear\"", "\"ExpeditionPlannerPickStatus\""];
+        var left = [];
+        for (var g = 0; g < gone.length; g++) { if (src.indexOf(gone[g]) >= 0) { left.push(gone[g]); } }
+        eqs(left.join(","), "", "tm build: no old single-team objectName is left in the source");
+        ok(src.indexOf("Build cards") > 0 && src.indexOf("\"ExpeditionPlannerCalloutBuild\"") > 0,
+            "tm build: the button reads Build cards and keeps its objectName");
+        var order = [src.indexOf("ExpeditionPlanner.buildTripSection,"),
+            src.indexOf("ExpeditionPlanner.buildRosterSection,"),
+            src.indexOf("ExpeditionPlanner.buildTeamsSection,"),
+            src.indexOf("ExpeditionPlanner.buildEscalationSection,"),
+            src.indexOf("ExpeditionPlanner.buildCardSection]")];
+        ok(order[0] > 0 && order[0] < order[1] && order[1] < order[2] && order[2] < order[3] &&
+            order[3] < order[4], "tm build: panel order is Trip, People, Teams, Escalation, Card");
+    })();
+
+    // NO REAL WIDGETS BELOW. A -no-gui run that builds real Qt widgets can
+    // segfault as Qt tears them down at exit, and every crash pops a
+    // dialog on the desktop (cavecad-headless-gl-crash-dialogs). The Qt
+    // classes the builders use are swapped for the plain-JS fakes of
+    // tmFakeQt for the length of each test and put back after; if any
+    // swap does not take, the test is skipped rather than run on real
+    // widgets. The real widgets are checked live, in a real launch.
+    var tmFakeQt = (function() {
+        var noop = function() {};
+        var signal = function() {
+            var sg = { fns: [] };
+            sg.connect = function(f) { sg.fns.push(f); };
+            sg.fire = function(a, b) {
+                for (var i = 0; i < sg.fns.length; i++) { sg.fns[i](a, b); }
+            };
+            return sg;
+        };
+        var W = function(a, b) {
+            this.objectName = "";
+            this.toolTip = "";
+            this.styleSheet = "";
+            this.placeholderText = "";
+            this.text = typeof a === "string" ? a : "";
+            this.checked = false;
+            this.enabled = true;
+            this.visible = true;
+            this.value = 0;
+            this.min = 0;
+            this.max = 99;
+            this.plain = "";
+            this.editText = "";
+            this.items = [];
+            this.rowCount = typeof a === "number" ? a : 0;
+            this.cells = [];
+            this.cur = -1;
+            this.kids = [];
+            this.lay = null;
+            this.props = {};
+            this.clicked = signal();
+            this.editingFinished = signal();
+            this.textChanged = signal();
+            this.textEdited = signal();
+            this.valueChanged = signal();
+            this.itemChanged = signal();
+            this.cellDoubleClicked = signal();
+            this["toggled(bool)"] = signal();
+            this["valueChanged(int)"] = this.valueChanged;
+            this["itemChanged(QTableWidgetItem*)"] = this.itemChanged;
+            this["cellDoubleClicked(int, int)"] = this.cellDoubleClicked;
+            if (a instanceof W) { a.kids.push(this); }
+        };
+        var P = W.prototype;
+        var quiet = ["setContentsMargins", "setSpacing", "addStretch", "addSpacing",
+            "setHorizontalSpacing", "setVerticalSpacing", "setColumnStretch", "setRowStretch",
+            "setHorizontalHeaderLabels", "setMinimumHeight", "setMaximumHeight",
+            "setMaximumWidth", "setMinimumWidth", "setEditable", "setFrameShape", "raise", "show"];
+        for (var q = 0; q < quiet.length; q++) { P[quiet[q]] = noop; }
+        P.addWidget = function(w) { this.kids.push(w); };
+        P.addLayout = function(l) { this.kids.push(l); };
+        P.setLayout = function(l) { this.lay = l; this.kids.push(l); };
+        P.layout = function() { return this.lay; };
+        P.children = function() { return this.kids.slice(0); };
+        P.findChild = function(name) {
+            for (var i = 0; i < this.kids.length; i++) {
+                var k = this.kids[i];
+                if (k && k.objectName === name) { return k; }
+                var d = (k && typeof k.findChild === "function") ? k.findChild(name) : undefined;
+                if (d !== undefined && d !== null) { return d; }
+            }
+            return undefined;
+        };
+        P.isHidden = function() { return this.visible === false; };
+        P.setProperty = function(n, v) { this.props[n] = v; };
+        P.property = function(n) { return this.props[n]; };
+        P.verticalHeader = function() { if (!this.vh) { this.vh = new W(); } return this.vh; };
+        P.horizontalHeader = function() { if (!this.hh) { this.hh = new W(); } return this.hh; };
+        P.setRowCount = function(n) {
+            this.rowCount = n;
+            if (this.cells.length > n) { this.cells.length = n; }
+        };
+        P.setItem = function(r, c, it) {
+            if (!this.cells[r]) { this.cells[r] = []; }
+            this.cells[r][c] = it;
+            it.owner = this;
+            // A real QTableWidget fires itemChanged on setItem too.
+            this.itemChanged.fire(it);
+        };
+        P.item = function(r, c) {
+            return (this.cells[r] && this.cells[r][c]) ? this.cells[r][c] : null;
+        };
+        P.removeRow = function(r) {
+            this.cells.splice(r, 1);
+            this.rowCount = Math.max(0, this.rowCount - 1);
+        };
+        P.selectionModel = function() {
+            var self = this;
+            return { selectedRows: function() {
+                return self.cur >= 0 ? [{ row: function() { return self.cur; } }] : [];
+            } };
+        };
+        P.currentRow = function() { return this.cur; };
+        P.clear = function() { this.items = []; this.editText = ""; };
+        P.addItem = function(t) { this.items.push(String(t)); };
+        P.currentText = function() { return this.editText; };
+        P.setEditText = function(t) { this.editText = String(t); };
+        P.setMinimum = function(v) { this.min = v; };
+        P.setMaximum = function(v) { this.max = v; };
+        P.setValue = function(v) {
+            var n = Math.max(this.min, Math.min(this.max, v));
+            if (n !== this.value) {
+                this.value = n;
+                this.valueChanged.fire(n);
+            }
+        };
+        P.setPlainText = function(t) { this.plain = String(t); this.textChanged.fire(); };
+        P.toPlainText = function() { return this.plain; };
+        P.click = function() {
+            if (this.checkable === true) {
+                this.checked = !this.checked;
+                this["toggled(bool)"].fire(this.checked);
+            }
+            this.clicked.fire(this.checked);
+        };
+        var make = function(checkable) {
+            var C = function(a, b) {
+                W.call(this, a, b);
+                if (checkable) { this.checkable = true; }
+            };
+            C.prototype = P;
+            return C;
+        };
+        var Item = function(t) { this.t = String(t === undefined ? "" : t); this.owner = null; };
+        Item.prototype.text = function() { return this.t; };
+        Item.prototype.setText = function(t) {
+            this.t = String(t);
+            if (this.owner) { this.owner.itemChanged.fire(this); }
+        };
+        Item.prototype.setFlags = noop;
+        Item.prototype.flags = function() { return 0; };
+        Item.prototype.setCheckState = noop;
+        Item.prototype.setForeground = noop;
+        Item.prototype.setToolTip = noop;
+        var Timer = function() {
+            this.singleShot = false;
+            this.timeout = signal();
+            this.starts = 0;
+        };
+        Timer.prototype.start = function() { this.starts++; };
+        var fakes = { QWidget: make(false), QLabel: make(false), QPushButton: make(false),
+            QLineEdit: make(false), QTableWidget: make(false), QTableWidgetItem: Item,
+            QCheckBox: make(true), QComboBox: make(false), QSpinBox: make(false),
+            QPlainTextEdit: make(false), QHBoxLayout: make(false), QVBoxLayout: make(false),
+            QGridLayout: make(false), QTimer: Timer,
+            WidgetFactory: { createWidget: function() {
+                var row = new W();
+                row.setLayout(new W());
+                var date = new W();
+                date.objectName = "ExpeditionPlannerCalloutStart";
+                row.kids.push(date);
+                return row;
+            } } };
+        var glob = IS_NODE ? global : (function() { return this; })();
+        var saved = null;
+        return {
+            W: W,
+            /** Swap every class for its fake. \return false (all put back) if one did not take */
+            install: function() {
+                saved = {};
+                var took = true;
+                for (var name in fakes) {
+                    if (!fakes.hasOwnProperty(name)) { continue; }
+                    saved[name] = glob[name];
+                    try {
+                        glob[name] = fakes[name];
+                    } catch (eSet) {
+                    }
+                    if (glob[name] !== fakes[name]) { took = false; }
+                }
+                if (!took) { this.restore(); }
+                return took;
+            },
+            restore: function() {
+                if (saved === null) { return; }
+                for (var name in saved) {
+                    if (saved.hasOwnProperty(name)) { glob[name] = saved[name]; }
+                }
+                saved = null;
+            }
+        };
+    })();
+
+    // The dock-build rule: no builder reaches the dock (0.9.194.0 hang).
+    (function() {
+        if (!tmFakeQt.install()) {
+            ok(true, "tm build: (fake Qt could not be installed; builder guard skipped)");
+            return;
+        }
+        var realEnsure = EP.ensureDock;
+        var realBase = EP.basePath;
+        var hits = 0;
+        var errors = [];
+        EP.ensureDock = function() {
+            hits++;
+            return { findChild: function() { return undefined; } };
+        };
+        EP.basePath = "/fake";
+        try {
+            var builders = ["buildTripSection", "buildRosterSection", "buildTeamsSection",
+                "buildEscalationSection", "buildCardSection"];
+            for (var b = 0; b < builders.length; b++) {
+                try {
+                    EP[builders[b]](new QVBoxLayout());
+                } catch (eB) {
+                    errors.push(builders[b] + ": " + eB);
+                }
+            }
+            var parent = new QWidget();
+            try {
+                EP.buildTeamSection(parent, new QVBoxLayout(), mk("t1", "Alpha", [ana], ["B20"],
+                    [day("08:00", 5, "out")]), 0, { open: true, party: [ana, bo],
+                        stations: ["B20"], conflicted: false });
+            } catch (eT) {
+                errors.push("buildTeamSection: " + eT);
+            }
+        } finally {
+            EP.ensureDock = realEnsure;
+            EP.basePath = realBase;
+            tmFakeQt.restore();
+        }
+        eqs(hits, 0, "tm build: no section builder reaches the dock through ensureDock/child()");
+        eqs(errors.join("; "), "", "tm build: every section builder runs to the end");
+        // The guard sees a lookup: child() is exactly what it counts.
+        hits = 0;
+        EP.ensureDock = function() { hits++; return { findChild: function() { return undefined; } }; };
+        try {
+            EP.child("ExpeditionPlannerTeamsBody");
+        } finally {
+            EP.ensureDock = realEnsure;
+        }
+        eqs(hits, 1, "tm build: the guard sees a child() lookup");
+    })();
+
+    // The team sections on fake widgets: build, write-through, add /
+    // remove / add, stale names.
+    (function() {
+        if (!tmFakeQt.install()) {
+            ok(true, "tm build: (fake Qt could not be installed; team section tests skipped)");
+            return;
+        }
+        var realEnsure = EP.ensureDock;
+        var realState2 = EP.state;
+        var realGuard = EP.planGuard;
+        var realPath2 = CsStationSidecar.sidecarPath;
+        var realRead2 = CsStationSidecar.readSidecar;
+        var realWrite2 = CsStationSidecar.writeSidecar;
+        var disk2 = { text: "", writes: 0 };
+        var root = null;
+        var w = function(name) {
+            var x = root.findChild(name);
+            return (x === null || x === undefined) ? null : x;
+        };
+        var text = function(name) { var x = w(name); return x === null ? null : String(x.text); };
+        try {
+            root = new QWidget();
+            var rootLay = new QVBoxLayout();
+            root.setLayout(rootLay);
+            CsStationSidecar.sidecarPath = function() { return "/fake/Cave/stations.json"; };
+            CsStationSidecar.readSidecar = function() { return CsStationStore.parse(disk2.text); };
+            CsStationSidecar.writeSidecar = function(path, st) {
+                disk2.writes++;
+                disk2.text = CsStationStore.serialize(st);
+                return true;
+            };
+            EP.ensureDock = function() { return root; };
+            EP.planGuard = function() { return true; };
+            csEpPackingTimer = null;
+
+            EP.buildTeamsSection(rootLay);
+            ok(w("ExpeditionPlannerTeamsBody") !== null && w("ExpeditionPlannerTeamAdd") !== null &&
+                w("ExpeditionPlannerTeamRemove") !== null && w("ExpeditionPlannerTeamStatus") !== null,
+                "tm build: the Teams section has its body, buttons and status line");
+            ok(w("ExpeditionPlannerTeam1_Section") === null, "tm build: the Teams section builds no team section itself");
+            var teams = [mk("t1", "Alpha", [ana], ["B20"], [day("08:00", 5, "out")], { goal: "Push", packing: "Rope" }),
+                mk("t2", "Beta", [], [], [day("09:00", 3, "out")], { dayOffset: 2 })];
+            disk2.text = JSON.stringify({ version: CsStationStore.VERSION, entries: [],
+                settings: { trip: { startDate: "2026-10-03", party: [ana, bo], teams: teams } } });
+            disk2.writes = 0;
+            var parsed = CsStationStore.parse(disk2.text).store;
+            EP.state = { drawn: null, docPath: "/fake/Cave/Cave.dxf", store: parsed, loadError: "",
+                stations: ["A1", "B20", "D8"], plan: null, planShown: null, people: [], peopleError: "",
+                rosterRows: [], filling: false, teams: [], teamOpen: {}, activeTeamId: "",
+                teamMessage: "", removedCount: 0, packingPending: null };
+            EP.loadTeams(parsed.settings.trip, parsed.settings);
+            EP.state.teamOpen = { t2: true };
+            EP.rebuildTeamSections();
+            eqs(disk2.writes, 0, "tm build: building the team sections writes nothing");
+            eqs(EP.state.filling, false, "tm build: the fill guard is down after a rebuild");
+            eqs(text("ExpeditionPlannerTeam1_Name") + "|" + text("ExpeditionPlannerTeam1_Goal") + "|" +
+                text("ExpeditionPlannerTeam2_Name"), "Alpha|Push|Beta", "tm build: the sections show each team");
+            ok(w("ExpeditionPlannerTeam3_Section") === null, "tm build: no third section");
+            eqs(w("ExpeditionPlannerTeam1_Offset").value + ":" + w("ExpeditionPlannerTeam2_Offset").value, "1:3",
+                "tm build: Starts on trip day is 1-based");
+            eqs(w("ExpeditionPlannerTeam1_StopPicker").items.join(","), "A1,B20,D8",
+                "tm build: the stop picker offers the drawing's stations");
+            eqs(String(w("ExpeditionPlannerTeam1_Packing").toPlainText()), "Rope", "tm build: packing is shown");
+            eqs(w("ExpeditionPlannerTeam1_Days").rowCount + ":" + w("ExpeditionPlannerTeam1_Stops").rowCount, "1:1",
+                "tm build: days and stops tables are filled");
+            ok(w("ExpeditionPlannerTeam1_Member_1").checked === true &&
+                w("ExpeditionPlannerTeam1_Member_2").checked === false &&
+                text("ExpeditionPlannerTeam1_Member_2") === "Bo",
+                "tm build: a checkbox per Going person, ticked when on the team");
+            ok(text("ExpeditionPlannerTeam1_Header").indexOf("Alpha — 1 person · 1 stop · 1 day") >= 0,
+                "tm build: the header shows the name and summary");
+            ok(text("ExpeditionPlannerTeam2_Header").indexOf(CsPanel.OPEN_MARK) === 0 &&
+                text("ExpeditionPlannerTeam1_Header").indexOf(CsPanel.SHUT_MARK) === 0 &&
+                w("ExpeditionPlannerTeam2_Body").visible === true &&
+                w("ExpeditionPlannerTeam1_Body").visible === false,
+                "tm build: only the open team is expanded");
+            var names = ["Section", "Header", "Body", "Name", "Goal", "Offset", "Days", "DayAdd",
+                "DayRemove", "StopPicker", "StopAdd", "StopStatus", "Stops", "StopRemove", "StopClear",
+                "Packing"];
+            var missingNames = [];
+            for (var nn = 0; nn < names.length; nn++) {
+                if (w("ExpeditionPlannerTeam2_" + names[nn]) === null) { missingNames.push(names[nn]); }
+            }
+            eqs(missingNames.join(","), "", "tm build: every team widget has its objectName");
+            // A member no longer going is offered greyed, still ticked.
+            EP.state.store.settings.trip.party = [bo];
+            EP.rebuildTeamSections();
+            ok(text("ExpeditionPlannerTeam1_Member_1") === "Bo" &&
+                w("ExpeditionPlannerTeam1_Member_1").checked === false &&
+                text("ExpeditionPlannerTeam1_Member_2").indexOf("Ana Ruiz") === 0 &&
+                text("ExpeditionPlannerTeam1_Member_2").indexOf("no longer going") > 0 &&
+                w("ExpeditionPlannerTeam1_Member_2").checked === true,
+                "tm build: a member no longer going is listed after the Going people, ticked, flagged");
+            EP.state.store.settings.trip.party = [ana, bo];
+            EP.rebuildTeamSections();
+
+            // Write-through from the widgets.
+            w("ExpeditionPlannerTeam1_Offset").setValue(3);
+            eqs(EP.state.teams[0].dayOffset + ":" + CsStationStore.parse(disk2.text).store.settings.trip.teams[0].dayOffset,
+                "2:2", "tm build: the spin box writes dayOffset (value - 1) through");
+            w("ExpeditionPlannerTeam1_Name").text = "Alpha Two ";
+            w("ExpeditionPlannerTeam1_Name").editingFinished.fire();
+            eqs(EP.state.teams[0].name + "|" + text("ExpeditionPlannerTeam1_Name"), "Alpha Two|Alpha Two ",
+                "tm build: a name edit writes through and the field is never refilled");
+            ok(text("ExpeditionPlannerTeam1_Header").indexOf("Alpha Two —") >= 0,
+                "tm build: the header follows the name");
+            w("ExpeditionPlannerTeam1_Goal").text = "Map it";
+            w("ExpeditionPlannerTeam1_Goal").editingFinished.fire();
+            eqs(EP.state.teams[0].goal, "Map it", "tm build: a goal edit writes through");
+            w("ExpeditionPlannerTeam1_Member_2").click();
+            eqs(EP.state.teams[0].members.length, 2, "tm build: ticking a member adds them");
+            ok(text("ExpeditionPlannerTeam1_Header").indexOf("2 people") >= 0,
+                "tm build: the header summary follows the edit");
+            eqs(EP.state.activeTeamId, "t1", "tm build: the edited team is the active one");
+            w("ExpeditionPlannerTeam1_Member_2").click();
+            eqs(EP.state.teams[0].members.length, 1, "tm build: unticking takes them off");
+            // A refused tick (someone not going) goes back, by code.
+            EP.state.store.settings.trip.party = [ana];
+            w("ExpeditionPlannerTeam1_Member_2").click();
+            ok(w("ExpeditionPlannerTeam1_Member_2").checked === false && EP.state.teams[0].members.length === 1 &&
+                text("ExpeditionPlannerTeamStatus").indexOf("tick Going first") > 0,
+                "tm build: a refused member tick is undone and the reason shown");
+            EP.state.store.settings.trip.party = [ana, bo];
+            w("ExpeditionPlannerTeam1_DayAdd").click();
+            eqs(EP.state.teams[0].days.length + ":" + w("ExpeditionPlannerTeam1_Days").rowCount, "2:2",
+                "tm build: Add day adds a row and writes the days");
+            w("ExpeditionPlannerTeam1_Days").item(1, 1).setText("10:30");
+            eqs(EP.state.teams[0].days[1].entry, "10:30", "tm build: a days cell edit writes through");
+            w("ExpeditionPlannerTeam1_Days").cur = 0;
+            w("ExpeditionPlannerTeam1_DayRemove").click();
+            eqs(EP.state.teams[0].days.length + ":" + EP.state.teams[0].days[0].entry, "1:10:30",
+                "tm build: Remove day takes the selected day off");
+            w("ExpeditionPlannerTeam1_StopPicker").setEditText("zz9");
+            w("ExpeditionPlannerTeam1_StopAdd").click();
+            ok(text("ExpeditionPlannerTeam1_StopStatus").indexOf("zz9 is not a station") === 0,
+                "tm build: an unknown stop is named in the team's stop status line");
+            w("ExpeditionPlannerTeam1_StopPicker").setEditText("d8");
+            w("ExpeditionPlannerTeam1_StopAdd").click();
+            eqs(EP.state.teams[0].stops.join(",") + ":" + w("ExpeditionPlannerTeam1_Stops").rowCount + ":" +
+                text("ExpeditionPlannerTeam1_StopStatus") + ":" + w("ExpeditionPlannerTeam1_StopPicker").editText,
+                "B20,D8:2::", "tm build: Add stop adds a real station and empties the box");
+            w("ExpeditionPlannerTeam1_Stops").cur = 0;
+            w("ExpeditionPlannerTeam1_StopRemove").click();
+            eqs(EP.state.teams[0].stops.join(",") + ":" + w("ExpeditionPlannerTeam1_Stops").rowCount, "D8:1",
+                "tm build: Remove takes the selected stop off");
+            w("ExpeditionPlannerTeam1_StopClear").click();
+            eqs(EP.state.teams[0].stops.length + ":" + w("ExpeditionPlannerTeam1_Stops").rowCount, "0:0",
+                "tm build: Clear empties the team's stops");
+            var before = disk2.writes;
+            w("ExpeditionPlannerTeam1_Packing").setPlainText("Rope\nBolts ");
+            ok(EP.state.packingPending !== null && disk2.writes === before && csEpPackingTimer.starts > 0,
+                "tm build: a packing edit waits for its debounce");
+            EP.flushPacking();
+            eqs(CsStationStore.parse(disk2.text).store.settings.trip.teams[0].packing, "Rope\nBolts",
+                "tm build: packing is written through");
+            eqs(String(w("ExpeditionPlannerTeam1_Packing").toPlainText()), "Rope\nBolts ",
+                "tm build: the edited widget is never refilled");
+            // The guard: a fill never writes.
+            EP.state.filling = true;
+            before = disk2.writes;
+            w("ExpeditionPlannerTeam1_Offset").setValue(9);
+            w("ExpeditionPlannerTeam1_Member_2").click();
+            w("ExpeditionPlannerTeam1_DayAdd").click();
+            EP.state.filling = false;
+            eqs(disk2.writes + ":" + EP.state.teams[0].dayOffset, before + ":2",
+                "tm build: handlers write nothing while the fill guard is up");
+
+            // Add / remove / add: only the live teams are findable by name.
+            var old2 = w("ExpeditionPlannerTeam2_Name");
+            var oldBox = w("ExpeditionPlannerTeam2_Section");
+            w("ExpeditionPlannerTeamAdd").click();
+            eqs(EP.state.teams.length, 3, "tm build: Add team adds");
+            eqs(text("ExpeditionPlannerTeam3_Name"), "Team 3", "tm build: the new team gets a section");
+            ok(text("ExpeditionPlannerTeam3_Header").indexOf(CsPanel.OPEN_MARK) === 0 &&
+                text("ExpeditionPlannerTeam1_Header").indexOf(CsPanel.SHUT_MARK) === 0,
+                "tm build: the newest team is expanded, the others collapsed");
+            ok(String(old2.objectName).indexOf("ExpeditionPlannerRemoved") === 0 && oldBox.isHidden() &&
+                String(oldBox.objectName).indexOf("ExpeditionPlannerRemoved") === 0,
+                "tm build: a torn-down section is hidden and every widget in it renamed");
+            ok(w("ExpeditionPlannerTeam2_Name") !== old2 && text("ExpeditionPlannerTeam2_Name") === "Beta",
+                "tm build: the live Team2 is a fresh widget");
+            EP.removeTeam(EP.state.teams[1].id);
+            EP.rebuildTeamSections();
+            ok(w("ExpeditionPlannerTeam3_Section") === null && w("ExpeditionPlannerTeam3_Name") === null,
+                "tm build: after a removal no stale Team3 widget is findable");
+            eqs(text("ExpeditionPlannerTeam2_Name"), "Team 3", "tm build: sections renumber after a removal");
+            w("ExpeditionPlannerTeamAdd").click();
+            var live = [];
+            for (var qn = 1; qn <= 9; qn++) {
+                if (w("ExpeditionPlannerTeam" + qn + "_Section") !== null) {
+                    live.push(text("ExpeditionPlannerTeam" + qn + "_Name"));
+                }
+            }
+            eqs(live.join(","), "Alpha Two,Team 3,Team 4", "tm build: an add/remove/add cycle leaves exactly the live teams");
+            eqs(w("ExpeditionPlannerTeamRemove").enabled, true, "tm build: Remove team is enabled with several teams");
+            while (EP.state.teams.length > 1) { EP.removeTeam(EP.state.teams[EP.state.teams.length - 1].id); }
+            EP.rebuildTeamSections();
+            eqs(w("ExpeditionPlannerTeamRemove").enabled, false, "tm build: the last team cannot be removed");
+            var single = 0;
+            for (var qs = 1; qs <= 9; qs++) {
+                if (w("ExpeditionPlannerTeam" + qs + "_Section") !== null) { single++; }
+            }
+            eqs(single, 1, "tm build: one team, one live section");
+            // A same-day overlap turns the headers red and names it.
+            EP.state.teams[0].members = [ana];
+            EP.state.teams[0].dayOffset = 0;
+            EP.state.teams.push(mk("tx", "Other", [ana], [], [day("08:00", 5, "out")]));
+            EP.rebuildTeamSections();
+            ok(text("ExpeditionPlannerTeam2_Header").indexOf("⚠") >= 0 &&
+                w("ExpeditionPlannerTeam2_Header").styleSheet.indexOf("#c00") >= 0 &&
+                text("ExpeditionPlannerTeamStatus").indexOf("Ana Ruiz is on Alpha Two and Other on 2026-10-03") >= 0,
+                "tm build: a same-day overlap marks the headers red and is named in the Teams status");
+        } finally {
+            EP.ensureDock = realEnsure;
+            EP.state = realState2;
+            EP.planGuard = realGuard;
+            CsStationSidecar.sidecarPath = realPath2;
+            CsStationSidecar.readSidecar = realRead2;
+            CsStationSidecar.writeSidecar = realWrite2;
+            csEpPackingTimer = null;
+            tmFakeQt.restore();
+        }
+    })();
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

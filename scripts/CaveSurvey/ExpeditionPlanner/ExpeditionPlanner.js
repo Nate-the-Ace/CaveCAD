@@ -4,24 +4,24 @@
 //
 //   Cave Survey > Expedition Planner   (or type "epl")
 //
-// WHAT IT IS. A docked panel, ONE page with no tabs, laid out top to
-// bottom in the order of the printed callout card: Trip, Roster,
-// Schedule, Escalation, Route, Card. Route plans a trip from the
-// survey's first station to the stops picked from a dropdown of the
-// map's stations and back (Core/CsTripPlan.js), and writes the packet,
-// trip-plan.html, beside the drawing. Build card writes
-// callout-card.html, the sheet a topside contact keeps
-// (Core/CsCalloutCard.js), and refuses until every required field is
-// filled in, naming all the gaps at once. This is the home for the
-// later expedition tools too.
+// WHAT IT IS. A docked panel, ONE page with no tabs: Trip, People,
+// Teams, Escalation, Card. Each team (members, schedule, stops, packing)
+// is a fold-away section under Teams; its route runs from the survey's
+// first station to its stops and back (Core/CsTripPlan.js). Build cards
+// writes callout-card.html beside the drawing -- with one team today's
+// single card (Core/CsCalloutCard.js), with several a topside sheet plus
+// one team-<n>-<slug>.html per team (Core/CsTeams.js) -- and refuses
+// until every required field is filled in, naming all the gaps at once.
+// Save packet writes trip-plan.html for a one-team trip. This is the
+// home for the later expedition tools too.
 //
-// THE SIDECAR IS SHARED, SO A WRITE RE-READS IT FIRST. Pace, the team's
-// packing list and the trip's days are stations.json `settings`, the
-// same file Station Table keeps its marks in (Core/CsStationSidecar.js).
-// Every write reads the file again and changes only its own settings,
-// so a teammate's marks that arrived through Drive are never thrown
-// away. The trip's party (who is going: id and name only) is
-// settings.trip.party there too.
+// THE SIDECAR IS SHARED, SO A WRITE RE-READS IT FIRST. Pace, the trip
+// and its teams are stations.json `settings`, the same file Station
+// Table keeps its marks in (Core/CsStationSidecar.js). Every write reads
+// the file again and changes only its own settings, so a teammate's
+// marks that arrived through Drive are never thrown away. The trip's
+// party (who is going: id and name only) is settings.trip.party there
+// too, and the teams settings.trip.teams.
 //
 // PERSONAL DATA STAYS ON THIS COMPUTER. The people directory (medical
 // notes, emergency contacts, skills) is people.json in CaveCAD's
@@ -56,12 +56,12 @@ ExpeditionPlanner.DOCK_NAME = "CaveSurveyExpeditionPlannerDock";
  */
 ExpeditionPlanner.state = { drawn: null, docPath: null, store: null,
     loadError: "",
-    // The station names the picker offers, in natural order.
+    // The station names the stop pickers offer, in natural order.
     stations: [],
-    // The stops picked, the last plan built, and the pace and packing
-    // text last PUT INTO the widgets from stations.json (so a reload can
-    // tell a caver's unsaved typing from what it showed).
-    planStops: [], plan: null, planShown: null,
+    // The last one-team plan built (Save packet), and the pace text last
+    // PUT INTO the widget from stations.json (so a reload can tell a
+    // caver's unsaved typing from what it showed).
+    plan: null, planShown: null,
     // The people directory as loaded from people.json, why it could not
     // be (the table is then read-only and nothing is written to it), and
     // what each roster row is: {id, name, known}. Unknown rows are party
@@ -71,20 +71,31 @@ ExpeditionPlanner.state = { drawn: null, docPath: null, store: null,
     filling: false,
     // The trip's teams (CsStationStore.cleanTeam shape), loaded by
     // loadTeams and changed only through the team edit functions.
-    teams: [] };
+    teams: [],
+    // Which team sections are unfolded (team id -> true), the team last
+    // opened, added or edited, the Teams status message, how many team
+    // sections have been torn down (their widgets' new names count up),
+    // and a packing edit waiting for its debounce: {id, text} or null.
+    teamOpen: {}, activeTeamId: "", teamMessage: "", removedCount: 0,
+    packingPending: null };
 
 // ---------------------------------------------------------------------
 // The panel
 // ---------------------------------------------------------------------
 //
-// ONE PAGE, NO TABS, IN THE ORDER OF THE PRINTED CARD (Nathan,
-// 2026-09-29: "Too easy to not enter important information"). The page
-// reads top to bottom as callout-card.html does: Trip, Roster,
-// Schedule, Escalation, Route, Card. Required fields carry a red
-// asterisk, and Build card refuses, naming every gap at once
-// (CsCalloutCard.missingAll), until they are all filled in.
+// ONE PAGE, NO TABS (Nathan, 2026-09-29: "Too easy to not enter
+// important information"). Top to bottom: Trip, People, Teams,
+// Escalation, Card. Required fields carry a red asterisk, and Build
+// cards refuses, naming every gap at once (CsTeams.missingAll), until
+// they are all filled in.
 //
-// The stop list is a one-column QTableWidget, not a QListWidget: this
+// TEAM SECTIONS ARE BUILT AFTER THE DOCK EXISTS. buildDock only makes the
+// empty ExpeditionPlannerTeamsBody; rebuildTeamSections (from the
+// populate path and the Add/Remove team buttons) fills it. Nothing a
+// build* function runs may reach the dock through child()/ensureDock:
+// 0.9.194.0 hung CaveCAD at startup that way (see ensureDock).
+//
+// A stop list is a one-column QTableWidget, not a QListWidget: this
 // bridge has no constructor for QListWidget (see CaveShelf.js). The
 // picker is an editable QComboBox, whose own inline completion does the
 // typing help: QCompleter does not exist on this bridge. QFormLayout has
@@ -126,9 +137,9 @@ ExpeditionPlanner.calloutField = function(grid, row, label, required, name, tip)
 };
 
 /**
- * A table with fixed headers. The days table never connects
- * itemChanged: it is read on Build card, so filling it by code writes
- * nothing. The roster does connect it, behind a fill guard.
+ * A table with fixed headers. Tables that connect itemChanged (the
+ * roster, a team's days) do it behind the state.filling guard, because
+ * filling a cell by code fires it exactly as typing does.
  */
 ExpeditionPlanner.calloutTable = function(name, headers, minH, maxH) {
     var t = new QTableWidget(0, headers.length);
@@ -325,24 +336,39 @@ ExpeditionPlanner.buildRosterSection = function(layout) {
     layout.addWidget(include, 0, 0);
 };
 
-/** 3. SCHEDULE: one row per day. */
-ExpeditionPlanner.buildScheduleSection = function(layout) {
-    ExpeditionPlanner.heading(layout, qsTr("Schedule"));
-    layout.addWidget(new QLabel(ExpeditionPlanner.labelText(
-        qsTr("Days: entry time, work hours, night"), true)), 0, 0);
-    var days = ExpeditionPlanner.calloutTable("ExpeditionPlannerCalloutDays",
-        ExpeditionPlanner.CALLOUT_DAY_HEADERS, 90, 150);
-    layout.addWidget(days, 0, 0);
-    var b = ExpeditionPlanner.buttonRow(layout,
-        [qsTr("Add day"), qsTr("Remove day")]);
-    b[0].clicked.connect(function() {
-        var t = ExpeditionPlanner.child("ExpeditionPlannerCalloutDays");
-        ExpeditionPlanner.addTableRow(t, [t.rowCount + 1, "08:00", "6", "out"]);
-    });
-    b[1].clicked.connect(function() {
-        ExpeditionPlanner.removeTableRow(
-            ExpeditionPlanner.child("ExpeditionPlannerCalloutDays"));
-    });
+/**
+ * 3. TEAMS: a heading, Add team / Remove team, the Teams status line,
+ * and an EMPTY body. The team sections themselves are built later, into
+ * ExpeditionPlannerTeamsBody, by rebuildTeamSections -- never here: this
+ * runs while the dock is being built (see ensureDock).
+ */
+ExpeditionPlanner.buildTeamsSection = function(layout) {
+    ExpeditionPlanner.heading(layout, qsTr("Teams"));
+    layout.addWidget(new QLabel("<span style=\"color:#777\">" +
+        CsPanel.escapeHtml(qsTr("Each team has its own people, schedule, " +
+            "stops and packing list. Click a team to open it.")) + "</span>"), 0, 0);
+    var b = ExpeditionPlanner.buttonRow(layout, [qsTr("Add team"), qsTr("Remove team")]);
+    b[0].objectName = "ExpeditionPlannerTeamAdd";
+    b[0].toolTip = qsTr("Add a team. It starts with the last team's schedule.");
+    b[1].objectName = "ExpeditionPlannerTeamRemove";
+    b[1].toolTip = qsTr("Remove the open team (asks first). The last team " +
+        "cannot be removed.");
+    b[0].clicked.connect(function() { ExpeditionPlanner.addTeamClicked(); });
+    b[1].clicked.connect(function() { ExpeditionPlanner.removeTeamClicked(); });
+    var status = new QLabel("");
+    status.objectName = "ExpeditionPlannerTeamStatus";
+    try {
+        status.wordWrap = true;
+    } catch (eWrap) {
+    }
+    layout.addWidget(status, 0, 0);
+    var body = new QWidget();
+    body.objectName = "ExpeditionPlannerTeamsBody";
+    var bodyLayout = new QVBoxLayout();
+    bodyLayout.setContentsMargins(0, 0, 0, 0);
+    bodyLayout.setSpacing(2);
+    body.setLayout(bodyLayout);
+    layout.addWidget(body, 0, 0);
 };
 
 /** 4. ESCALATION: who topside is, and what they do. */
@@ -363,75 +389,11 @@ ExpeditionPlanner.buildEscalationSection = function(layout) {
 };
 
 /**
- * 5. ROUTE: the station picker, the stops, pace and packing (kept in
- * stations.json settings), Plan trip and Save packet.
+ * 5. CARD: the walking pace (the whole trip's), Plan trip, Save packet,
+ * Build cards, the status line, and the plan as text beneath.
  */
-ExpeditionPlanner.buildRouteSection = function(layout) {
-    ExpeditionPlanner.heading(layout, qsTr("Route"));
-    layout.addWidget(new QLabel(ExpeditionPlanner.labelText(
-        qsTr("Stops"), true)), 0, 0);
-
-    var pickRow = new QHBoxLayout();
-    var picker = new QComboBox();
-    picker.objectName = "ExpeditionPlannerPicker";
-    picker.toolTip = qsTr("Type or pick a station of this drawing.");
-    try {
-        picker.setEditable(true);
-    } catch (eEdit) {
-        try {
-            picker.editable = true;
-        } catch (eEdit2) {
-        }
-    }
-    try {
-        // Enter must not add the typed text to the list as a new
-        // "station": only Add stop adds, and only a real station.
-        picker.insertPolicy = QComboBox.NoInsert;
-    } catch (eIns) {
-    }
-    var addButton = new QPushButton(qsTr("Add stop"));
-    addButton.objectName = "ExpeditionPlannerAdd";
-    addButton.toolTip = qsTr("Add the station in the box to this trip's stops.");
-    pickRow.addWidget(picker, 1, 0);
-    pickRow.addWidget(addButton, 0, 0);
-    layout.addLayout(pickRow, 0);
-    addButton.clicked.connect(function() { ExpeditionPlanner.addStop(); });
-
-    // One line, deliberately (qcad-js-bridge-traps).
-    var pickStatus = new QLabel("");
-    pickStatus.objectName = "ExpeditionPlannerPickStatus";
-    layout.addWidget(pickStatus, 0, 0);
-
-    var stops = new QTableWidget(0, 1);
-    stops.objectName = "ExpeditionPlannerStops";
-    try {
-        stops.horizontalHeader().visible = false;
-        stops.verticalHeader().visible = false;
-        stops.horizontalHeader().stretchLastSection = true;
-        stops.selectionBehavior = QAbstractItemView.SelectRows;
-        stops.selectionMode = QAbstractItemView.SingleSelection;
-        stops.editTriggers = QAbstractItemView.NoEditTriggers;
-    } catch (eStops) {
-    }
-    try {
-        stops.setMinimumHeight(70);
-        stops.setMaximumHeight(120);
-    } catch (eStopsH) {
-    }
-    layout.addWidget(stops, 0, 0);
-
-    var stopRow = new QHBoxLayout();
-    var removeButton = new QPushButton(qsTr("Remove"));
-    removeButton.objectName = "ExpeditionPlannerRemove";
-    removeButton.toolTip = qsTr("Take the selected stop off the list.");
-    var clearButton = new QPushButton(qsTr("Clear"));
-    clearButton.objectName = "ExpeditionPlannerClear";
-    stopRow.addWidget(removeButton, 0, 0);
-    stopRow.addWidget(clearButton, 0, 0);
-    stopRow.addStretch(1);
-    layout.addLayout(stopRow, 0);
-    removeButton.clicked.connect(function() { ExpeditionPlanner.removeStop(); });
-    clearButton.clicked.connect(function() { ExpeditionPlanner.clearStops(); });
+ExpeditionPlanner.buildCardSection = function(layout) {
+    ExpeditionPlanner.heading(layout, qsTr("Card"));
 
     // Pace: one line, deliberately (qcad-js-bridge-traps).
     var paceGrid = CsPanel.formGrid(1);
@@ -443,54 +405,32 @@ ExpeditionPlanner.buildRouteSection = function(layout) {
     } catch (ePh) {
     }
     pace.toolTip = qsTr("Leave blank for the default, 264 ft a minute " +
-        "(3 mph). Saved in stations.json for the whole team.");
+        "(3 mph). Saved in stations.json; every team walks at this pace.");
     paceGrid.addWidget(pace, 0, 1);
     layout.addLayout(paceGrid, 0);
-
-    var packing = new QPlainTextEdit();
-    packing.objectName = "ExpeditionPlannerPacking";
-    try {
-        packing.placeholderText = qsTr("Team packing list, one item per line");
-    } catch (ePh2) {
-    }
-    packing.toolTip = qsTr("Printed in the packet as written. Saved in " +
-        "stations.json for the whole team.");
-    try {
-        packing.setMinimumHeight(50);
-        packing.setMaximumHeight(100);
-    } catch (ePackH) {
-    }
-    layout.addWidget(packing, 0, 0);
 
     var runRow = new QHBoxLayout();
     var planButton = new QPushButton(qsTr("Plan trip"));
     planButton.objectName = "ExpeditionPlannerPlanButton";
-    planButton.toolTip = qsTr("Route from the survey's first station to " +
-        "every stop and back.");
+    planButton.toolTip = qsTr("Route every team from the survey's first " +
+        "station to its stops and back.");
     var packetButton = new QPushButton(qsTr("Save packet"));
     packetButton.objectName = "ExpeditionPlannerSavePacket";
     packetButton.toolTip = qsTr("Write trip-plan.html beside the drawing: " +
         "route sketch, directions, time and gear. No coordinates.");
     packetButton.enabled = false;
+    var build = new QPushButton(qsTr("Build cards"));
+    build.objectName = "ExpeditionPlannerCalloutBuild";
+    build.toolTip = qsTr("Write callout-card.html beside the drawing (with " +
+        "several teams, also one file per team). Every field marked * must " +
+        "be filled in first.");
     runRow.addWidget(planButton, 0, 0);
     runRow.addWidget(packetButton, 0, 0);
+    runRow.addWidget(build, 0, 0);
     runRow.addStretch(1);
     layout.addLayout(runRow, 0);
     planButton.clicked.connect(function() { ExpeditionPlanner.planTrip(); });
     packetButton.clicked.connect(function() { ExpeditionPlanner.savePacket(); });
-};
-
-/** 6. CARD: Build card, its status, and the plan as text beneath. */
-ExpeditionPlanner.buildCardSection = function(layout) {
-    ExpeditionPlanner.heading(layout, qsTr("Card"));
-    var buildRow = new QHBoxLayout();
-    var build = new QPushButton(qsTr("Build card"));
-    build.objectName = "ExpeditionPlannerCalloutBuild";
-    build.toolTip = qsTr("Write callout-card.html beside the drawing. Every " +
-        "field marked * must be filled in first.");
-    buildRow.addWidget(build, 0, 0);
-    buildRow.addStretch(1);
-    layout.addLayout(buildRow, 0);
     build.clicked.connect(function() { ExpeditionPlanner.buildCard(); });
 
     // Its own row and word-wrapped: "Missing: ..." names every gap at
@@ -522,16 +462,15 @@ ExpeditionPlanner.buildPage = function() {
     layout.setContentsMargins(6, 6, 6, 6);
     layout.setSpacing(4);
     var hint = new QLabel("<span style=\"color:#777\">" +
-        CsPanel.escapeHtml(qsTr("* required to build the card")) + "</span>");
+        CsPanel.escapeHtml(qsTr("* required to build the cards")) + "</span>");
     hint.objectName = "ExpeditionPlannerRequiredHint";
     layout.addWidget(hint, 0, 0);
     // Each section in its own try: a refused control costs that
     // section, never the page (qcad-js-bridge-traps: wrap per control).
     var sections = [ExpeditionPlanner.buildTripSection,
         ExpeditionPlanner.buildRosterSection,
-        ExpeditionPlanner.buildScheduleSection,
+        ExpeditionPlanner.buildTeamsSection,
         ExpeditionPlanner.buildEscalationSection,
-        ExpeditionPlanner.buildRouteSection,
         ExpeditionPlanner.buildCardSection];
     for (var i = 0; i < sections.length; i++) {
         try {
@@ -744,24 +683,24 @@ ExpeditionPlanner.setPickerText = function(picker, text) {
     }
 };
 
-ExpeditionPlanner.pickSay = function(text) {
-    var label = ExpeditionPlanner.child("ExpeditionPlannerPickStatus");
-    if (label !== null) { label.text = text; }
-};
-
 /**
- * Refill the picker from state.stations. Anything the caver has typed
- * but not added yet stays in the box.
+ * Refill every team's stop picker from state.stations. Anything the
+ * caver has typed but not added yet stays in the box.
  */
 ExpeditionPlanner.fillPicker = function() {
-    var picker = ExpeditionPlanner.child("ExpeditionPlannerPicker");
-    if (picker === null) {
-        return;
+    for (var n = 1; n <= ExpeditionPlanner.state.teams.length; n++) {
+        var picker = ExpeditionPlanner.child("ExpeditionPlannerTeam" + n + "_StopPicker");
+        if (picker !== null) {
+            ExpeditionPlanner.fillPickerWidget(picker, ExpeditionPlanner.state.stations);
+        }
     }
+};
+
+/** Put `names` into the picker in hand, keeping any typed text. */
+ExpeditionPlanner.fillPickerWidget = function(picker, names) {
     var typed = ExpeditionPlanner.pickerText(picker);
     try {
         picker.clear();
-        var names = ExpeditionPlanner.state.stations;
         for (var i = 0; i < names.length; i++) {
             picker.addItem(String(names[i]));
         }
@@ -771,72 +710,8 @@ ExpeditionPlanner.fillPicker = function() {
 };
 
 // ---------------------------------------------------------------------
-// The Route section
+// Routes: pace, Plan trip, Save packet
 // ---------------------------------------------------------------------
-
-/** Repaint the stop list from state.planStops. */
-ExpeditionPlanner.fillStops = function() {
-    var list = ExpeditionPlanner.child("ExpeditionPlannerStops");
-    if (list === null) {
-        return;
-    }
-    var stops = ExpeditionPlanner.state.planStops;
-    list.setRowCount(0);
-    list.setRowCount(stops.length);
-    for (var i = 0; i < stops.length; i++) {
-        list.setItem(i, 0, new QTableWidgetItem(String(stops[i])));
-    }
-};
-
-/** Add the station named in the picker to the stops. */
-ExpeditionPlanner.addStop = function() {
-    if (!ExpeditionPlanner.planGuard()) {
-        return;
-    }
-    var picker = ExpeditionPlanner.child("ExpeditionPlannerPicker");
-    if (picker === null) {
-        return;
-    }
-    var typed = ExpeditionPlanner.pickerText(picker).replace(/^\s+|\s+$/g, "");
-    if (typed === "") {
-        ExpeditionPlanner.pickSay(qsTr("Type or pick a station first."));
-        return;
-    }
-    var station = ExpeditionPlanner.matchStation(
-        ExpeditionPlanner.state.stations, typed);
-    if (station === null) {
-        ExpeditionPlanner.pickSay(qsTr("%1 is not a station in this drawing")
-            .arg(typed));
-        return;
-    }
-    ExpeditionPlanner.pickSay("");
-    var stops = ExpeditionPlanner.state.planStops;
-    if (stops.indexOf(station) >= 0) {
-        return;
-    }
-    stops.push(station);
-    ExpeditionPlanner.fillStops();
-    ExpeditionPlanner.setPickerText(picker, "");
-};
-
-/** Take the selected stop off the list. */
-ExpeditionPlanner.removeStop = function() {
-    var list = ExpeditionPlanner.child("ExpeditionPlannerStops");
-    if (list === null) {
-        return;
-    }
-    var idx = ExpeditionPlanner.selectedRowOf(list);
-    var stops = ExpeditionPlanner.state.planStops;
-    if (idx >= 0 && idx < stops.length) {
-        stops.splice(idx, 1);
-        ExpeditionPlanner.fillStops();
-    }
-};
-
-ExpeditionPlanner.clearStops = function() {
-    ExpeditionPlanner.state.planStops = [];
-    ExpeditionPlanner.fillStops();
-};
 
 /**
  * The pace field read: null when blank (the default applies), a number
@@ -850,11 +725,6 @@ ExpeditionPlanner.paceTyped = function() {
     }
     var v = Number(text);
     return (isFinite(v) && v > 0) ? v : NaN;
-};
-
-ExpeditionPlanner.packingTyped = function() {
-    var edit = ExpeditionPlanner.child("ExpeditionPlannerPacking");
-    return edit === null ? "" : String(edit.toPlainText());
 };
 
 /**
@@ -879,39 +749,35 @@ ExpeditionPlanner.paceBlock = function(stored, typed) {
 };
 
 /**
- * Put pace and packing into stations.json settings, re-reading the file
- * first like every other write here. Unchanged values write nothing.
+ * Put the pace into stations.json settings, re-reading the file first
+ * like every other write here. An unchanged pace writes nothing. Packing
+ * lists are the teams' own now (settings.packing is only read once, by
+ * the migration in loadTeams).
  * \return "" when saved or nothing to save, else why not
  */
-ExpeditionPlanner.savePlanSettings = function(pace, packing) {
+ExpeditionPlanner.savePlanSettings = function(pace) {
     var s = ExpeditionPlanner.state;
     var path = CsStationSidecar.sidecarPath(s.docPath);
     if (path === "") {
-        return qsTr("pace and packing not saved: save the drawing first");
+        return qsTr("pace not saved: save the drawing first");
     }
     var side = CsStationSidecar.readSidecar(path);
     if (side.error !== "") {
         s.loadError = side.error;
         ExpeditionPlanner.updateSummary();
-        return qsTr("pace and packing not saved: stations.json could not " +
+        return qsTr("pace not saved: stations.json could not " +
             "be read") + " (" + side.error + ")";
     }
     var st = side.store.settings;
     var block = ExpeditionPlanner.paceBlock(st.pace, pace);
     var was = st.pace === null || typeof st.pace !== "object" ? undefined :
         st.pace.paceFtPerMin;
-    var shown = { pace: pace === null ? "" : String(pace), packing: packing };
-    if (st.packing === packing && was === block.paceFtPerMin) {
-        if (s.store !== null) {
-            s.store.settings = st;
+    var shown = { pace: pace === null ? "" : String(pace) };
+    if (was !== block.paceFtPerMin) {
+        st.pace = block;
+        if (!CsStationSidecar.writeSidecar(path, side.store)) {
+            return qsTr("pace not saved: could not write stations.json");
         }
-        s.planShown = shown;
-        return "";
-    }
-    st.packing = packing;
-    st.pace = block;
-    if (!CsStationSidecar.writeSidecar(path, side.store)) {
-        return qsTr("pace and packing not saved: could not write stations.json");
     }
     if (s.store !== null) {
         s.store.settings = st;
@@ -921,29 +787,25 @@ ExpeditionPlanner.savePlanSettings = function(pace, packing) {
 };
 
 /**
- * Show the stored pace and packing in the widgets. Only overwrites what
- * the caver has not edited since it was last shown (or when the drawing
- * changed), so a Refresh never eats unsaved typing.
+ * Show the stored pace in its field. Only overwrites what the caver has
+ * not edited since it was last shown (or when the drawing changed), so a
+ * Refresh never eats unsaved typing.
  */
 ExpeditionPlanner.showPlanSettings = function(force) {
     var s = ExpeditionPlanner.state;
     var paceEdit = ExpeditionPlanner.child("ExpeditionPlannerPace");
-    var packEdit = ExpeditionPlanner.child("ExpeditionPlannerPacking");
-    if (paceEdit === null || packEdit === null || s.store === null) {
+    if (paceEdit === null || s.store === null) {
         return;
     }
     var st = s.store.settings || {};
     var pv = (st.pace !== null && typeof st.pace === "object") ?
         st.pace.paceFtPerMin : undefined;
     var want = { pace: (typeof pv === "number" && isFinite(pv) && pv > 0) ?
-        String(pv) : "", packing: String(st.packing || "") };
+        String(pv) : "" };
     var shown = s.planShown;
-    var untouched = shown === null ||
-        (String(paceEdit.text) === shown.pace &&
-         String(packEdit.toPlainText()) === shown.packing);
+    var untouched = shown === null || String(paceEdit.text) === shown.pace;
     if (force === true || untouched) {
         paceEdit.text = want.pace;
-        packEdit.setPlainText(want.packing);
         s.planShown = want;
     }
 };
@@ -1008,26 +870,64 @@ ExpeditionPlanner.planText = function(p, paceUsed) {
 };
 
 /**
- * Build the plan from the stop list and show it. Saves pace and packing
- * to stations.json first.
- * \return the plan, or null when nothing was planned
+ * Every team's route: from the survey's first station to the team's own
+ * stops and back, at the shared pace, with the team's packing list.
+ * \param drawn {survey, resolved} or null (no survey: no plans)
+ * \return [{team, plan}] in team order; plan null for a team without stops
+ */
+ExpeditionPlanner.planTeams = function(teams, drawn, config, unit) {
+    var out = [];
+    var list = Object.prototype.toString.call(teams) === "[object Array]" ? teams : [];
+    for (var i = 0; i < list.length; i++) {
+        var team = list[i];
+        var stops = Object.prototype.toString.call(team.stops) === "[object Array]" ?
+            team.stops : [];
+        var plan = null;
+        if (drawn !== null && drawn !== undefined && stops.length > 0) {
+            plan = CsTripPlan.build(drawn.survey, drawn.resolved, {
+                targets: stops.slice(0), unit: unit, config: config,
+                packing: team.packing });
+        }
+        out.push({ team: team, plan: plan });
+    }
+    return out;
+};
+
+/** The plans as the panel's text: a heading per team, then its plan. */
+ExpeditionPlanner.plansText = function(planned, paceUsed) {
+    var parts = [];
+    for (var i = 0; i < planned.length; i++) {
+        var head = "=== " + ExpeditionPlanner.teamLabel(planned[i].team, i) + " ===";
+        parts.push(head + "\n" + (planned[i].plan === null ?
+            qsTr("No stops yet: add stops under this team.") :
+            ExpeditionPlanner.planText(planned[i].plan, paceUsed)));
+    }
+    return parts.join("\n\n");
+};
+
+/**
+ * Plan every team's route and show it. Saves the pace to stations.json
+ * first. \return [{team, plan}], or null when nothing was planned
  */
 ExpeditionPlanner.planTrip = function() {
     var s = ExpeditionPlanner.state;
     var out = ExpeditionPlanner.child("ExpeditionPlannerPlanOut");
-    var packetButton = ExpeditionPlanner.child("ExpeditionPlannerSavePacket");
     if (!ExpeditionPlanner.planGuard()) {
         return null;
     }
+    ExpeditionPlanner.flushPacking();
     var d = s.drawn;
     if (d === null) {
         CsTell.warn(qsTr("Expedition Planner: this drawing holds no survey " +
             "to plan on."));
         return null;
     }
-    var targets = s.planStops.slice(0);
-    if (targets.length === 0) {
-        CsTell.warn(qsTr("Expedition Planner: Add at least one stop."));
+    var any = false;
+    for (var i = 0; i < s.teams.length; i++) {
+        if (s.teams[i].stops.length > 0) { any = true; }
+    }
+    if (!any) {
+        CsTell.warn(qsTr("Expedition Planner: Add at least one stop to a team."));
         return null;
     }
     var pace = ExpeditionPlanner.paceTyped();
@@ -1036,25 +936,41 @@ ExpeditionPlanner.planTrip = function() {
             "number of feet per minute above 0, or blank for the default 264."));
         return null;
     }
-    var packing = ExpeditionPlanner.packingTyped();
-    var why = ExpeditionPlanner.savePlanSettings(pace, packing);
+    var why = ExpeditionPlanner.savePlanSettings(pace);
     var config = ExpeditionPlanner.paceBlock(
         s.store === null ? {} : s.store.settings.pace, pace);
-    s.plan = CsTripPlan.build(d.survey, d.resolved, { targets: targets,
-        unit: ExpeditionPlanner.unitOf(d.survey), config: config,
-        packing: packing });
-    var text = ExpeditionPlanner.planText(s.plan,
-        CsTripPlan.config(config).paceFtPerMin);
+    var planned = ExpeditionPlanner.planTeams(s.teams, d, config,
+        ExpeditionPlanner.unitOf(d.survey));
+    s.plan = planned.length === 1 ? planned[0].plan : null;
+    var text = ExpeditionPlanner.plansText(planned, CsTripPlan.config(config).paceFtPerMin);
     if (why !== "") {
         text += "\n(" + why + ")";
     }
     if (out !== null) {
         out.setPlainText(text);
     }
-    if (packetButton !== null) {
-        packetButton.enabled = s.plan.stops.length > 0;
+    ExpeditionPlanner.updatePacketButton();
+    return planned;
+};
+
+/**
+ * Save packet is for a one-team trip (the team files carry the route
+ * otherwise), and only once that team has a plan with stops.
+ */
+ExpeditionPlanner.updatePacketButton = function() {
+    var s = ExpeditionPlanner.state;
+    var b = ExpeditionPlanner.child("ExpeditionPlannerSavePacket");
+    if (b === null) {
+        return;
     }
-    return s.plan;
+    var one = s.teams.length === 1;
+    try {
+        b.enabled = one && s.plan !== null && s.plan.stops.length > 0;
+        b.toolTip = one ? qsTr("Write trip-plan.html beside the drawing: " +
+            "route sketch, directions, time and gear. No coordinates.") :
+            qsTr("Only for a one-team trip: the team files include the route.");
+    } catch (e) {
+    }
 };
 
 /** Today as YYYY-MM-DD (JS Date: the bridge has no QDate). */
@@ -1065,8 +981,9 @@ ExpeditionPlanner.today = function() {
 };
 
 /**
- * Write trip-plan.html beside the drawing. Re-plans first, so the packet
- * is always what the panel shows for the stops, pace and packing now.
+ * Write trip-plan.html beside the drawing, for a one-team trip. Re-plans
+ * first, so the packet is always what the panel shows for the team's
+ * stops and packing and the pace now.
  * \return the path written, or ""
  */
 ExpeditionPlanner.savePacket = function() {
@@ -1074,12 +991,19 @@ ExpeditionPlanner.savePacket = function() {
     if (!ExpeditionPlanner.planGuard()) {
         return "";
     }
+    if (s.teams.length !== 1) {
+        CsTell.warn(qsTr("Expedition Planner: Save packet is for a one-team " +
+            "trip. With several teams, Build cards writes a file per team " +
+            "that includes its route."));
+        return "";
+    }
     if (s.docPath === "" || CsCave.folderOf(s.docPath) === null) {
         CsTell.warn(qsTr("Expedition Planner: save the drawing first. The " +
             "packet is written beside it."));
         return "";
     }
-    var plan = ExpeditionPlanner.planTrip();
+    var planned = ExpeditionPlanner.planTrip();
+    var plan = planned === null ? null : planned[0].plan;
     if (plan === null || plan.stops.length === 0) {
         return "";
     }
@@ -1106,22 +1030,16 @@ ExpeditionPlanner.savePacket = function() {
     return path;
 };
 
-/** Forget the trip's stops and plan (the drawing changed). */
+/** Forget the plan (the drawing changed; its teams are loaded again). */
 ExpeditionPlanner.resetPlan = function() {
     var s = ExpeditionPlanner.state;
-    s.planStops = [];
     s.plan = null;
     s.planShown = null;
-    ExpeditionPlanner.fillStops();
-    ExpeditionPlanner.pickSay("");
     var out = ExpeditionPlanner.child("ExpeditionPlannerPlanOut");
     if (out !== null) {
         out.setPlainText("");
     }
-    var packetButton = ExpeditionPlanner.child("ExpeditionPlannerSavePacket");
-    if (packetButton !== null) {
-        packetButton.enabled = false;
-    }
+    ExpeditionPlanner.updatePacketButton();
 };
 
 // ---------------------------------------------------------------------
@@ -1361,6 +1279,8 @@ ExpeditionPlanner.onRosterItemChanged = function(item) {
     }
     ExpeditionPlanner.peopleSay(ExpeditionPlanner.saveParty(
         ExpeditionPlanner.readParty()));
+    // The team sections offer the Going people as members.
+    ExpeditionPlanner.rebuildTeamSections();
 };
 
 /** The directory index of a person id, or -1. */
@@ -1430,6 +1350,7 @@ ExpeditionPlanner.applyPerson = function(fields, existingId) {
     ExpeditionPlanner.fillRoster(party);
     ExpeditionPlanner.peopleSay(ExpeditionPlanner.saveParty(
         ExpeditionPlanner.readParty()));
+    ExpeditionPlanner.rebuildTeamSections();
     return "";
 };
 
@@ -1463,6 +1384,7 @@ ExpeditionPlanner.removePersonById = function(id) {
     ExpeditionPlanner.fillRoster(keep);
     ExpeditionPlanner.peopleSay(ExpeditionPlanner.saveParty(
         ExpeditionPlanner.readParty()));
+    ExpeditionPlanner.rebuildTeamSections();
     return "";
 };
 
@@ -1832,25 +1754,19 @@ ExpeditionPlanner.setStartDateText = function(text) {
 // The callout card
 // ---------------------------------------------------------------------
 
-/** The form as {trip (with its party), contacts, roster (resolved), includeRoster}. */
+/**
+ * The form as {trip (start date, forecast place, party), contacts,
+ * roster (the party, resolved), includeRoster, pace (paceTyped)}. The
+ * teams are state.teams, already written through.
+ */
 ExpeditionPlanner.readCalloutForm = function() {
     var text = function(name) {
         var w = ExpeditionPlanner.child(name);
         return w === null ? "" : String(w.text);
     };
-    var cell = function(t, r, c) {
-        var it = t.item(r, c);
-        return isNull(it) ? "" : String(it.text());
-    };
-    var days = [];
-    var dt = ExpeditionPlanner.child("ExpeditionPlannerCalloutDays");
-    for (var r = 0; dt !== null && r < dt.rowCount; r++) {
-        days.push({ entry: cell(dt, r, 1), workHours: parseFloat(cell(dt, r, 2)),
-            night: cell(dt, r, 3) });
-    }
     var trip = CsStationStore.cleanTrip({
         startDate: ExpeditionPlanner.startDateText(),
-        weatherPlace: text("ExpeditionPlannerCalloutPlace"), days: days,
+        weatherPlace: text("ExpeditionPlannerCalloutPlace"),
         party: ExpeditionPlanner.readParty() });
     var include = ExpeditionPlanner.child("ExpeditionPlannerCalloutInclude");
     return { trip: trip,
@@ -1859,15 +1775,17 @@ ExpeditionPlanner.readCalloutForm = function() {
             topPhone: text("ExpeditionPlannerCalloutTopPhone"),
             escalation: text("ExpeditionPlannerCalloutEscalation"),
             bufferMin: text("ExpeditionPlannerCalloutBuffer") })),
-        // What the card prints: the party with the directory's details.
+        // Everyone going, with the directory's details.
         roster: CsPeople.resolveParty(trip.party, ExpeditionPlanner.state.people),
-        includeRoster: include === null ? true : include.checked === true };
+        includeRoster: include === null ? true : include.checked === true,
+        pace: ExpeditionPlanner.paceTyped() };
 };
 
 /**
- * Fill the form from stations.json (trip and party), people.json (the
- * directory) and local settings (contacts). The days table connects no
- * itemChanged handler, and the roster's is fill-guarded, so filling
+ * Fill the form from stations.json (trip, party and teams), people.json
+ * (the directory) and local settings (contacts), then build the team
+ * sections -- after the roster, because they offer its Going people as
+ * members. The roster and the team widgets are fill-guarded, so filling
  * writes nothing.
  */
 ExpeditionPlanner.showCalloutSettings = function() {
@@ -1881,17 +1799,18 @@ ExpeditionPlanner.showCalloutSettings = function() {
     // The teams, migrated from the legacy single schedule when the file
     // has none. Loading writes nothing.
     ExpeditionPlanner.loadTeams(trip, s.store === null ? null : s.store.settings);
-    var dt = ExpeditionPlanner.child("ExpeditionPlannerCalloutDays");
-    if (dt === null) {
+    // A new drawing: its newest (last) team is the open one.
+    var last = s.teams[s.teams.length - 1];
+    s.teamOpen = {};
+    s.teamOpen[last.id] = true;
+    s.activeTeamId = last.id;
+    s.teamMessage = "";
+    s.packingPending = null;
+    if (ExpeditionPlanner.child("ExpeditionPlannerTeamsBody") === null) {
         return;
     }
     ExpeditionPlanner.setStartDateText(trip.startDate);
     set("ExpeditionPlannerCalloutPlace", trip.weatherPlace);
-    dt.setRowCount(0);
-    for (var i = 0; i < trip.days.length; i++) {
-        ExpeditionPlanner.addTableRow(dt, [i + 1, trip.days[i].entry,
-            trip.days[i].workHours, trip.days[i].night]);
-    }
     var c = CsCalloutLocal.loadContacts();
     set("ExpeditionPlannerCalloutTopName", c.topName);
     set("ExpeditionPlannerCalloutTopPhone", c.topPhone);
@@ -1900,6 +1819,7 @@ ExpeditionPlanner.showCalloutSettings = function() {
     ExpeditionPlanner.loadPeople();
     ExpeditionPlanner.fillRoster(trip.party || []);
     ExpeditionPlanner.peopleSay("");
+    ExpeditionPlanner.rebuildTeamSections();
 };
 
 /**
@@ -1918,14 +1838,18 @@ ExpeditionPlanner.saveTrip = function(trip) {
             " (" + side.error + ")";
     }
     // The teams belong to saveTeams: the form's trip carries none, and
-    // writing it as is would wipe every saved team.
+    // writing it as is would wipe every saved team. The legacy single
+    // days are kept as they were too (only loadTeams reads them).
     var old = side.store.settings.trip;
     var out = {};
     for (var key in trip) {
         if (Object.prototype.hasOwnProperty.call(trip, key)) { out[key] = trip[key]; }
     }
-    out.teams = (old && Object.prototype.toString.call(old.teams) === "[object Array]") ?
-        old.teams : [];
+    var isArr = function(v) { return Object.prototype.toString.call(v) === "[object Array]"; };
+    out.teams = (old && isArr(old.teams)) ? old.teams : [];
+    if (old && isArr(old.days) && old.days.length > 0 && !(isArr(trip.days) && trip.days.length > 0)) {
+        out.days = old.days;
+    }
     side.store.settings.trip = out;
     if (!CsStationSidecar.writeSidecar(path, side.store)) {
         return qsTr("trip not saved: could not write stations.json");
@@ -2216,12 +2140,975 @@ ExpeditionPlanner.teamWarnings = function() {
     return CsTeams.sameDayConflicts({ startDate: start, teams: s.teams });
 };
 
+// ---------------------------------------------------------------------
+// Teams: the sections in the panel
+// ---------------------------------------------------------------------
+//
+// One fold-away section per team -- CsPanel.section, the chevron helper
+// the person popup's skills groups use, with no settings key so the fold
+// state is never saved -- inside ExpeditionPlannerTeamsBody. Every widget
+// is named ExpeditionPlannerTeam<n>_<Field>, n the team's 1-based place.
+//
+// THE BRIDGE CANNOT DESTROY A WIDGET ON THE SPOT, so any structural
+// change (a new drawing, Add team, Remove team, a Going tick) tears ALL
+// the team sections down and builds fresh ones from state.teams, reusing
+// nothing: each old section is hidden and every named widget in it
+// renamed ExpeditionPlannerRemoved<k>_<Field>, so findChild can never hand
+// back a stale one. They are NOT deleted (see teardownTeamSections).
+//
+// WRITE-THROUGH, NEVER READ-BACK. A widget's handler calls the data layer
+// (setTeamField, setTeamMember, setTeamDays, addTeamStop...) by team ID,
+// then repaints only the headers and the Teams status line -- never the
+// edited widget itself: cleanTeam trims, and refilling a field would eat
+// a trailing space mid-typing. Fills run under state.filling, and every
+// handler is connected after its widget's first fill.
+//
+// Packing is a QPlainTextEdit, which has no editingFinished: its edits
+// wait 700 ms (queuePacking) so stations.json, which Drive syncs, is not
+// rewritten on every keystroke; flushPacking runs before anything reads
+// or rebuilds the teams.
+
+var csEpPackingTimer = null;
+
+/** A team's display name: its trimmed name, or "Team N" when blank. */
+ExpeditionPlanner.teamLabel = function(team, index0) {
+    var n = (team === null || team === undefined || team.name === undefined ||
+        team.name === null) ? "" : String(team.name).replace(/^\s+|\s+$/g, "");
+    return n === "" ? "Team " + (index0 + 1) : n;
+};
+
+/** "3 people · 2 stops · 2 days", with a same-day mark when conflicted. */
+ExpeditionPlanner.teamSummary = function(team, hasConflict) {
+    var t = (team !== null && typeof team === "object") ? team : {};
+    var count = function(v) {
+        return Object.prototype.toString.call(v) === "[object Array]" ? v.length : 0;
+    };
+    var p = count(t.members);
+    var st = count(t.stops);
+    var d = count(t.days);
+    var text = (p === 1 ? qsTr("1 person") : qsTr("%1 people").arg(p)) + " · " +
+        (st === 1 ? qsTr("1 stop") : qsTr("%1 stops").arg(st)) + " · " +
+        (d === 1 ? qsTr("1 day") : qsTr("%1 days").arg(d));
+    return hasConflict === true ? text + " · ⚠ " + qsTr("same-day overlap") : text;
+};
+
+/** A team section's header title: "Alpha — 3 people · 2 stops · 2 days". */
+ExpeditionPlanner.teamHeaderTitle = function(team, index0, hasConflict) {
+    return (hasConflict === true ? "⚠ " : "") +
+        ExpeditionPlanner.teamLabel(team, index0) + " — " +
+        ExpeditionPlanner.teamSummary(team, hasConflict);
+};
+
+/** "Ana Ruiz is on Team 1 and Team 2 on 2026-10-04". */
+ExpeditionPlanner.conflictText = function(c) {
+    var names = Object.prototype.toString.call(c.teams) === "[object Array]" ? c.teams : [];
+    var list = names.length < 2 ? names.join("") :
+        names.slice(0, names.length - 1).join(", ") + " and " + names[names.length - 1];
+    return qsTr("%1 is on %2 on %3").arg(String(c.person)).arg(list).arg(String(c.date));
+};
+
+/** The names of the teams in a same-day overlap, as a set. */
+var csEpConflicted = function(warnings) {
+    var bad = {};
+    for (var w = 0; w < warnings.length; w++) {
+        for (var t = 0; t < warnings[w].teams.length; t++) {
+            bad["#" + warnings[w].teams[t]] = true;
+        }
+    }
+    return bad;
+};
+
+/** The header's style: left-aligned like CsPanel's, red when conflicted. */
+var csEpHeaderStyle = function(conflicted) {
+    return "text-align: left; padding: 3px;" + (conflicted ? " color: #c00;" : "");
+};
+
+/**
+ * The Teams status line: every same-day overlap (red), then the last
+ * message (a refusal, or why a save failed). `text` undefined keeps the
+ * message there.
+ */
+ExpeditionPlanner.teamSay = function(text) {
+    var s = ExpeditionPlanner.state;
+    if (text !== undefined) {
+        s.teamMessage = (text === null) ? "" : String(text);
+    }
+    var label = ExpeditionPlanner.child("ExpeditionPlannerTeamStatus");
+    if (label === null) {
+        return;
+    }
+    var parts = [];
+    var warnings = ExpeditionPlanner.teamWarnings();
+    for (var w = 0; w < warnings.length; w++) {
+        parts.push("<span style=\"color:#c00\">⚠ " +
+            CsPanel.escapeHtml(ExpeditionPlanner.conflictText(warnings[w])) + "</span>");
+    }
+    if (s.teamMessage !== undefined && s.teamMessage !== "") {
+        parts.push(CsPanel.escapeHtml(s.teamMessage));
+    }
+    label.text = parts.join("<br>");
+};
+
+/**
+ * Repaint every team header (name, summary, chevron, red when in a
+ * same-day overlap), the Teams status line and the buttons that depend
+ * on how many teams there are. Never touches a team's own fields.
+ */
+ExpeditionPlanner.refreshTeamHeaders = function() {
+    var s = ExpeditionPlanner.state;
+    var open = s.teamOpen || {};
+    var bad = csEpConflicted(ExpeditionPlanner.teamWarnings());
+    for (var i = 0; i < s.teams.length; i++) {
+        var h = ExpeditionPlanner.child("ExpeditionPlannerTeam" + (i + 1) + "_Header");
+        if (h === null) {
+            continue;
+        }
+        var conflicted = bad["#" + s.teams[i].name] === true;
+        try {
+            h.text = CsPanel.headerText(ExpeditionPlanner.teamHeaderTitle(s.teams[i], i,
+                conflicted), open[s.teams[i].id] === true);
+            h.styleSheet = csEpHeaderStyle(conflicted);
+        } catch (eHead) {
+        }
+    }
+    var add = ExpeditionPlanner.child("ExpeditionPlannerTeamAdd");
+    if (add !== null) {
+        try {
+            add.enabled = s.teams.length < ExpeditionPlanner.MAX_TEAMS;
+        } catch (eAdd) {
+        }
+    }
+    var remove = ExpeditionPlanner.child("ExpeditionPlannerTeamRemove");
+    if (remove !== null) {
+        try {
+            remove.enabled = s.teams.length > 1;
+        } catch (eRemove) {
+        }
+    }
+    ExpeditionPlanner.teamSay();
+    ExpeditionPlanner.updatePacketButton();
+};
+
+/** After an edit of team `id`: it is the active team; repaint headers and status. */
+ExpeditionPlanner.teamChanged = function(id, why) {
+    var s = ExpeditionPlanner.state;
+    if (ExpeditionPlanner.teamIndex(id) >= 0) {
+        s.activeTeamId = id;
+    }
+    s.teamMessage = (why === undefined || why === null) ? "" : String(why);
+    ExpeditionPlanner.refreshTeamHeaders();
+};
+
+/** Whether a widget handler of team `id` may act: not a fill, a live team, same drawing. */
+ExpeditionPlanner.teamEditOk = function(id) {
+    if (ExpeditionPlanner.state.filling === true) {
+        return false;
+    }
+    if (ExpeditionPlanner.teamIndex(id) < 0) {
+        return false;
+    }
+    return ExpeditionPlanner.planGuard();
+};
+
+/** Rename `obj` and everything under it from prefix `from` to `to`. */
+var csEpRenameTree = function(obj, from, to, depth) {
+    if (obj === null || obj === undefined || typeof obj !== "object" || depth > 16) {
+        return;
+    }
+    try {
+        var name = String(obj.objectName);
+        if (name.indexOf(from) === 0) {
+            obj.objectName = to + name.substring(from.length);
+        }
+    } catch (eName) {
+    }
+    var kids = [];
+    try {
+        // children() can hold an unwrapped (undefined) entry: skipped.
+        kids = obj.children();
+    } catch (eKids) {
+        kids = [];
+    }
+    for (var i = 0; kids !== null && kids !== undefined && i < kids.length; i++) {
+        csEpRenameTree(kids[i], from, to, depth + 1);
+    }
+};
+
+/**
+ * Take every live team section out of use: hidden, and every named widget
+ * in it renamed ExpeditionPlannerRemoved<k>_...
+ */
+ExpeditionPlanner.teardownTeamSections = function() {
+    var s = ExpeditionPlanner.state;
+    for (var n = 1; n <= ExpeditionPlanner.MAX_TEAMS; n++) {
+        var box = ExpeditionPlanner.child("ExpeditionPlannerTeam" + n + "_Section");
+        if (box === null) {
+            continue;
+        }
+        s.removedCount = (typeof s.removedCount === "number" ? s.removedCount : 0) + 1;
+        try {
+            box.visible = false;
+        } catch (eHide) {
+        }
+        csEpRenameTree(box, "ExpeditionPlannerTeam" + n + "_",
+            "ExpeditionPlannerRemoved" + s.removedCount + "_", 0);
+        // NEVER deleteLater (measured 2026-09-29): destroying the section's
+        // script-built editable QComboBox segfaults in
+        // QCompletionModel::filter. Nor setParent(null): a detached widget
+        // becomes a black top-level window (qcad-js-bridge-traps). Hidden
+        // and renamed, it stays in the body, out of the way.
+    }
+};
+
+/**
+ * Tear the team sections down and build fresh ones from state.teams.
+ * Runs only once the dock exists (the populate path and the Add/Remove
+ * team buttons), never during buildDock.
+ */
+ExpeditionPlanner.rebuildTeamSections = function() {
+    var s = ExpeditionPlanner.state;
+    var body = ExpeditionPlanner.child("ExpeditionPlannerTeamsBody");
+    if (body === null) {
+        return;
+    }
+    ExpeditionPlanner.flushPacking();
+    var layout = null;
+    try {
+        layout = body.layout();
+    } catch (eLayout) {
+        layout = null;
+    }
+    if (isNull(layout)) {
+        return;
+    }
+    var party = ExpeditionPlanner.readParty();
+    var bad = csEpConflicted(ExpeditionPlanner.teamWarnings());
+    var open = s.teamOpen || {};
+    s.filling = true;
+    try {
+        ExpeditionPlanner.teardownTeamSections();
+        for (var i = 0; i < s.teams.length; i++) {
+            try {
+                ExpeditionPlanner.buildTeamSection(body, layout, s.teams[i], i, {
+                    open: open[s.teams[i].id] === true, party: party,
+                    stations: s.stations, conflicted: bad["#" + s.teams[i].name] === true });
+            } catch (eTeam) {
+                CsTell.warn("Expedition Planner: the section for " +
+                    ExpeditionPlanner.teamLabel(s.teams[i], i) + " could not be " +
+                    "built (" + eTeam + ") -- please report this.");
+            }
+        }
+    } finally {
+        s.filling = false;
+    }
+    ExpeditionPlanner.refreshTeamHeaders();
+};
+
+/** Fill a team's days table (the widget in hand) from `days`, fill-guarded. */
+ExpeditionPlanner.fillDaysTable = function(table, days) {
+    var s = ExpeditionPlanner.state;
+    var was = s.filling;
+    s.filling = true;
+    try {
+        table.setRowCount(0);
+        for (var i = 0; i < days.length; i++) {
+            ExpeditionPlanner.addTableRow(table, [i + 1, days[i].entry,
+                days[i].workHours, days[i].night]);
+        }
+    } finally {
+        s.filling = was;
+    }
+};
+
+/** A team's days as its table shows them (cleaned by setTeamDays). */
+ExpeditionPlanner.readDaysTable = function(table) {
+    var cell = function(r, c) {
+        var it = table.item(r, c);
+        return isNull(it) ? "" : String(it.text());
+    };
+    var days = [];
+    for (var r = 0; r < table.rowCount; r++) {
+        days.push({ entry: cell(r, 1), workHours: parseFloat(cell(r, 2)), night: cell(r, 3) });
+    }
+    return days;
+};
+
+/** Fill a team's stop list (the widget in hand) from `stops`, fill-guarded. */
+ExpeditionPlanner.fillStopsTable = function(table, stops) {
+    var s = ExpeditionPlanner.state;
+    var was = s.filling;
+    s.filling = true;
+    try {
+        table.setRowCount(0);
+        table.setRowCount(stops.length);
+        for (var i = 0; i < stops.length; i++) {
+            table.setItem(i, 0, new QTableWidgetItem(String(stops[i])));
+        }
+    } finally {
+        s.filling = was;
+    }
+};
+
+/** The team's stops now (after an edit), or []. */
+var csEpTeamStops = function(id) {
+    var i = ExpeditionPlanner.teamIndex(id);
+    return i < 0 ? [] : ExpeditionPlanner.state.teams[i].stops;
+};
+
+/** Connect a checkbox the way the person popup's skill boxes are. */
+var csEpOnToggle = function(box, fn) {
+    try {
+        box["toggled(bool)"].connect(fn);
+    } catch (eTog) {
+        try {
+            box.clicked.connect(fn);
+        } catch (eClick) {
+        }
+    }
+};
+
+/**
+ * One team's section, built from `team` and the widgets in hand ONLY: it
+ * must never look anything up through the dock (see ensureDock).
+ * \param opts {open, party (the Going people), stations, conflicted}
+ * \return the CsPanel section {box, host, header, open}
+ */
+ExpeditionPlanner.buildTeamSection = function(parent, layout, team, index0, opts) {
+    var o = (opts !== null && typeof opts === "object") ? opts : {};
+    var id = team.id;
+    var pre = "ExpeditionPlannerTeam" + (index0 + 1) + "_";
+    var title = ExpeditionPlanner.teamHeaderTitle(team, index0, o.conflicted === true);
+    var shut = {};
+    if (o.open !== true) { shut[title] = true; }
+    var sec = CsPanel.section(parent, title, "", shut);
+    sec.box.objectName = pre + "Section";
+    sec.host.objectName = pre + "Body";
+    if (sec.header !== null) {
+        sec.header.objectName = pre + "Header";
+        try {
+            sec.header.styleSheet = csEpHeaderStyle(o.conflicted === true);
+            sec.header.toolTip = qsTr("Click to open or fold this team");
+        } catch (eStyle) {
+        }
+        // After CsPanel's own handler, which re-titles the header with
+        // the title it was built with: this remembers the fold and puts
+        // the live summary back.
+        sec.header.clicked.connect(function() {
+            var st = ExpeditionPlanner.state;
+            if (!st.teamOpen) { st.teamOpen = {}; }
+            st.teamOpen[id] = sec.open === true;
+            if (sec.open === true) { st.activeTeamId = id; }
+            ExpeditionPlanner.refreshTeamHeaders();
+        });
+    }
+
+    var v = new QVBoxLayout();
+    v.setContentsMargins(12, 2, 0, 8);
+    v.setSpacing(4);
+
+    // Name, goal, first day.
+    var grid = CsPanel.formGrid(1);
+    var nameEdit = ExpeditionPlanner.calloutField(grid, 0, qsTr("Name"), false,
+        pre + "Name", qsTr("Blank is named Team N."));
+    nameEdit.text = String(team.name);
+    var goalEdit = ExpeditionPlanner.calloutField(grid, 1, qsTr("Goal"), false,
+        pre + "Goal", qsTr("Optional: what this team is going in to do."));
+    goalEdit.text = String(team.goal);
+    grid.addWidget(new QLabel(ExpeditionPlanner.labelText(qsTr("Starts on trip day"),
+        false)), 2, 0);
+    var spin = new QSpinBox();
+    spin.objectName = pre + "Offset";
+    spin.toolTip = qsTr("1 is the trip's start date; 2 the day after, and so on.");
+    try {
+        spin.setMinimum(1);
+        spin.setMaximum(366);
+        spin.setValue((typeof team.dayOffset === "number" ? team.dayOffset : 0) + 1);
+    } catch (eSpin) {
+    }
+    grid.addWidget(spin, 2, 1);
+    v.addLayout(grid, 0);
+    nameEdit.editingFinished.connect(function() {
+        if (!ExpeditionPlanner.teamEditOk(id)) { return; }
+        var r = ExpeditionPlanner.setTeamField(id, "name", String(nameEdit.text));
+        ExpeditionPlanner.teamChanged(id, r.why);
+    });
+    goalEdit.editingFinished.connect(function() {
+        if (!ExpeditionPlanner.teamEditOk(id)) { return; }
+        var r = ExpeditionPlanner.setTeamField(id, "goal", String(goalEdit.text));
+        ExpeditionPlanner.teamChanged(id, r.why);
+    });
+    var onSpin = function(value) {
+        if (!ExpeditionPlanner.teamEditOk(id)) { return; }
+        var n = typeof value === "number" ? value : Number(spin.value);
+        var r = ExpeditionPlanner.setTeamField(id, "dayOffset",
+            Math.max(0, Math.round(isFinite(n) ? n : 1) - 1));
+        ExpeditionPlanner.teamChanged(id, r.why);
+    };
+    try {
+        spin["valueChanged(int)"].connect(onSpin);
+    } catch (eVal) {
+        try {
+            spin.valueChanged.connect(onSpin);
+        } catch (eVal2) {
+        }
+    }
+
+    // Members: a box per Going person, then members no longer going.
+    v.addWidget(new QLabel(ExpeditionPlanner.labelText(qsTr("Members"), true)), 0, 0);
+    var mgrid = new QGridLayout();
+    var party = Object.prototype.toString.call(o.party) === "[object Array]" ? o.party : [];
+    var flags = ExpeditionPlanner.teamMemberFlags(team, party);
+    var k = 0;
+    var member = function(box, person) {
+        csEpOnToggle(box, function() {
+            if (!ExpeditionPlanner.teamEditOk(id)) { return; }
+            var on = box.checked === true;
+            var r = ExpeditionPlanner.setTeamMember(id, person, on);
+            if (on && r.done !== true && r.why !== "") {
+                // Refused (not going): the box goes back, by code.
+                var st = ExpeditionPlanner.state;
+                st.filling = true;
+                try {
+                    box.checked = false;
+                } finally {
+                    st.filling = false;
+                }
+            }
+            ExpeditionPlanner.teamChanged(id, r.why);
+        });
+    };
+    for (var p = 0; p < party.length; p++) {
+        var on = false;
+        for (var f = 0; f < flags.length; f++) {
+            if (flags[f].going && csEpSamePerson(flags[f], party[p])) { on = true; }
+        }
+        var cb = new QCheckBox(String(party[p].name));
+        cb.objectName = pre + "Member_" + (k + 1);
+        cb.checked = on;
+        mgrid.addWidget(cb, Math.floor(k / 2), k % 2);
+        member(cb, { id: party[p].id, name: party[p].name });
+        k++;
+    }
+    for (var g = 0; g < flags.length; g++) {
+        if (flags[g].going) { continue; }
+        var gone = new QCheckBox(qsTr("%1 (no longer going)").arg(String(flags[g].name)));
+        gone.objectName = pre + "Member_" + (k + 1);
+        gone.checked = true;
+        gone.toolTip = qsTr("On this team but no longer ticked Going. Untick " +
+            "to take them off the team.");
+        try {
+            gone.styleSheet = "color: #777;";
+        } catch (eGrey) {
+        }
+        mgrid.addWidget(gone, Math.floor(k / 2), k % 2);
+        member(gone, { id: flags[g].id, name: flags[g].name });
+        k++;
+    }
+    v.addLayout(mgrid, 0);
+    if (k === 0) {
+        v.addWidget(new QLabel("<span style=\"color:#777\">" + CsPanel.escapeHtml(
+            qsTr("Tick Going under People to offer someone here.")) + "</span>"), 0, 0);
+    }
+
+    // Schedule.
+    v.addWidget(new QLabel(ExpeditionPlanner.labelText(
+        qsTr("Days: entry time, work hours, night"), true)), 0, 0);
+    var days = ExpeditionPlanner.calloutTable(pre + "Days",
+        ExpeditionPlanner.CALLOUT_DAY_HEADERS, 90, 150);
+    ExpeditionPlanner.fillDaysTable(days, team.days);
+    v.addWidget(days, 0, 0);
+    var db = ExpeditionPlanner.buttonRow(v, [qsTr("Add day"), qsTr("Remove day")]);
+    db[0].objectName = pre + "DayAdd";
+    db[1].objectName = pre + "DayRemove";
+    db[1].toolTip = qsTr("Take the selected day off this team's schedule.");
+    var daysEdited = function() {
+        var r = ExpeditionPlanner.setTeamDays(id, ExpeditionPlanner.readDaysTable(days));
+        ExpeditionPlanner.teamChanged(id, r.why);
+    };
+    var onDayItem = function(item) {
+        if (!ExpeditionPlanner.teamEditOk(id)) { return; }
+        daysEdited();
+    };
+    try {
+        days["itemChanged(QTableWidgetItem*)"].connect(onDayItem);
+    } catch (eDayChanged) {
+        try {
+            days.itemChanged.connect(onDayItem);
+        } catch (eDayChanged2) {
+        }
+    }
+    db[0].clicked.connect(function() {
+        if (!ExpeditionPlanner.teamEditOk(id)) { return; }
+        var st = ExpeditionPlanner.state;
+        st.filling = true;
+        try {
+            ExpeditionPlanner.addTableRow(days, [days.rowCount + 1, "08:00", "6", "out"]);
+        } finally {
+            st.filling = false;
+        }
+        daysEdited();
+    });
+    db[1].clicked.connect(function() {
+        if (!ExpeditionPlanner.teamEditOk(id)) { return; }
+        ExpeditionPlanner.removeTableRow(days);
+        daysEdited();
+    });
+
+    // Stops.
+    v.addWidget(new QLabel(ExpeditionPlanner.labelText(qsTr("Stops"), true)), 0, 0);
+    var pickRow = new QHBoxLayout();
+    var picker = new QComboBox();
+    picker.objectName = pre + "StopPicker";
+    picker.toolTip = qsTr("Type or pick a station of this drawing.");
+    try {
+        picker.setEditable(true);
+    } catch (eEdit) {
+        try {
+            picker.editable = true;
+        } catch (eEdit2) {
+        }
+    }
+    try {
+        // Enter must not add the typed text to the list as a new
+        // "station": only Add stop adds, and only a real station.
+        picker.insertPolicy = QComboBox.NoInsert;
+    } catch (eIns) {
+    }
+    ExpeditionPlanner.fillPickerWidget(picker,
+        Object.prototype.toString.call(o.stations) === "[object Array]" ? o.stations : []);
+    var addStop = new QPushButton(qsTr("Add stop"));
+    addStop.objectName = pre + "StopAdd";
+    addStop.toolTip = qsTr("Add the station in the box to this team's stops.");
+    pickRow.addWidget(picker, 1, 0);
+    pickRow.addWidget(addStop, 0, 0);
+    v.addLayout(pickRow, 0);
+    // One line, deliberately (qcad-js-bridge-traps).
+    var pickStatus = new QLabel("");
+    pickStatus.objectName = pre + "StopStatus";
+    v.addWidget(pickStatus, 0, 0);
+    var stops = new QTableWidget(0, 1);
+    stops.objectName = pre + "Stops";
+    try {
+        stops.horizontalHeader().visible = false;
+        stops.verticalHeader().visible = false;
+        stops.horizontalHeader().stretchLastSection = true;
+        stops.selectionBehavior = QAbstractItemView.SelectRows;
+        stops.selectionMode = QAbstractItemView.SingleSelection;
+        stops.editTriggers = QAbstractItemView.NoEditTriggers;
+    } catch (eStops) {
+    }
+    try {
+        stops.setMinimumHeight(70);
+        stops.setMaximumHeight(120);
+    } catch (eStopsH) {
+    }
+    ExpeditionPlanner.fillStopsTable(stops, team.stops);
+    v.addWidget(stops, 0, 0);
+    var sb = ExpeditionPlanner.buttonRow(v, [qsTr("Remove"), qsTr("Clear")]);
+    sb[0].objectName = pre + "StopRemove";
+    sb[0].toolTip = qsTr("Take the selected stop off this team's list.");
+    sb[1].objectName = pre + "StopClear";
+    addStop.clicked.connect(function() {
+        if (!ExpeditionPlanner.teamEditOk(id)) { return; }
+        var typed = ExpeditionPlanner.pickerText(picker).replace(/^\s+|\s+$/g, "");
+        var r = ExpeditionPlanner.addTeamStop(id, typed);
+        if (r.done !== true) {
+            // Blank or not a station: said here. Already a stop: silence.
+            pickStatus.text = r.why;
+            return;
+        }
+        pickStatus.text = "";
+        ExpeditionPlanner.fillStopsTable(stops, csEpTeamStops(id));
+        ExpeditionPlanner.setPickerText(picker, "");
+        ExpeditionPlanner.teamChanged(id, r.why);
+    });
+    sb[0].clicked.connect(function() {
+        if (!ExpeditionPlanner.teamEditOk(id)) { return; }
+        var idx = ExpeditionPlanner.selectedRowOf(stops);
+        var list = csEpTeamStops(id);
+        if (idx < 0 || idx >= list.length) { return; }
+        var r = ExpeditionPlanner.removeTeamStop(id, list[idx]);
+        ExpeditionPlanner.fillStopsTable(stops, csEpTeamStops(id));
+        ExpeditionPlanner.teamChanged(id, r.why);
+    });
+    sb[1].clicked.connect(function() {
+        if (!ExpeditionPlanner.teamEditOk(id)) { return; }
+        var r = ExpeditionPlanner.clearTeamStops(id);
+        ExpeditionPlanner.fillStopsTable(stops, csEpTeamStops(id));
+        ExpeditionPlanner.teamChanged(id, r.why);
+    });
+
+    // Packing.
+    v.addWidget(new QLabel(qsTr("Packing list")), 0, 0);
+    var packing = new QPlainTextEdit();
+    packing.objectName = pre + "Packing";
+    try {
+        packing.placeholderText = qsTr("This team's packing list, one item per line");
+    } catch (ePh) {
+    }
+    packing.toolTip = qsTr("Printed in this team's file as written. Saved in " +
+        "stations.json.");
+    try {
+        packing.setMinimumHeight(50);
+        packing.setMaximumHeight(100);
+    } catch (ePackH) {
+    }
+    packing.setPlainText(String(team.packing));
+    v.addWidget(packing, 0, 0);
+    // textChanged also fires on setPlainText: the fill guard, and the
+    // connection made after the fill.
+    packing.textChanged.connect(function() {
+        if (ExpeditionPlanner.state.filling === true || ExpeditionPlanner.teamIndex(id) < 0) {
+            return;
+        }
+        ExpeditionPlanner.queuePacking(id, String(packing.toPlainText()));
+    });
+
+    sec.host.setLayout(v);
+    layout.addWidget(sec.box, 0, 0);
+    return sec;
+};
+
+/** A packing edit: written after 700 ms without another one (or on flush). */
+ExpeditionPlanner.queuePacking = function(id, text) {
+    var s = ExpeditionPlanner.state;
+    if (s.packingPending !== null && s.packingPending !== undefined &&
+            s.packingPending.id !== id) {
+        ExpeditionPlanner.flushPacking();
+    }
+    s.packingPending = { id: id, text: text };
+    try {
+        if (csEpPackingTimer === null) {
+            csEpPackingTimer = new QTimer();
+            csEpPackingTimer.singleShot = true;
+            // Plain JS resolved at fire time, never a widget in the closure.
+            csEpPackingTimer.timeout.connect(function() { ExpeditionPlanner.flushPacking(); });
+        }
+        csEpPackingTimer.start(700);
+    } catch (eTimer) {
+        ExpeditionPlanner.flushPacking();
+    }
+};
+
+/** Write a waiting packing edit now. */
+ExpeditionPlanner.flushPacking = function() {
+    var s = ExpeditionPlanner.state;
+    var p = s.packingPending;
+    if (p === null || p === undefined) {
+        return;
+    }
+    s.packingPending = null;
+    if (ExpeditionPlanner.teamIndex(p.id) < 0) {
+        return;
+    }
+    var r = ExpeditionPlanner.setTeamField(p.id, "packing", p.text);
+    ExpeditionPlanner.teamChanged(p.id, r.why);
+};
+
+/** Add team: a new team, open, the others folded. */
+ExpeditionPlanner.addTeamClicked = function() {
+    if (!ExpeditionPlanner.planGuard()) {
+        return;
+    }
+    ExpeditionPlanner.flushPacking();
+    var s = ExpeditionPlanner.state;
+    var r = ExpeditionPlanner.addTeam();
+    s.teamMessage = r.why;
+    if (r.done === true && r.team) {
+        s.teamOpen = {};
+        s.teamOpen[r.team.id] = true;
+        s.activeTeamId = r.team.id;
+        s.plan = null;
+        ExpeditionPlanner.rebuildTeamSections();
+    } else {
+        ExpeditionPlanner.refreshTeamHeaders();
+    }
+};
+
+/** Remove team: the open (last opened or edited) team, after a Yes. */
+ExpeditionPlanner.removeTeamClicked = function() {
+    if (!ExpeditionPlanner.planGuard()) {
+        return;
+    }
+    ExpeditionPlanner.flushPacking();
+    var s = ExpeditionPlanner.state;
+    if (s.teams.length <= 1) {
+        ExpeditionPlanner.teamSay(qsTr("A trip needs at least one team."));
+        return;
+    }
+    var i = ExpeditionPlanner.teamIndex(s.activeTeamId);
+    if (i < 0) {
+        i = s.teams.length - 1;
+    }
+    var team = s.teams[i];
+    // Parented to the main window and compared to QMessageBox.Yes
+    // (qcad-js-bridge-traps: never truthy-test a message box answer).
+    var answer = QMessageBox.question(RMainWindowQt.getMainWindow(),
+        qsTr("Remove team"),
+        qsTr("Remove %1 from this trip? Its members, schedule, stops and " +
+            "packing list go with it. Files already built are left as they " +
+            "are.").arg(ExpeditionPlanner.teamLabel(team, i)),
+        QMessageBox.Yes | QMessageBox.No, QMessageBox.No);
+    if (answer !== QMessageBox.Yes) {
+        return;
+    }
+    var r = ExpeditionPlanner.removeTeam(team.id);
+    s.teamMessage = r.why;
+    if (r.done !== true) {
+        ExpeditionPlanner.refreshTeamHeaders();
+        return;
+    }
+    var next = s.teams[Math.max(0, i - 1)];
+    if (!s.teamOpen) { s.teamOpen = {}; }
+    delete s.teamOpen[team.id];
+    s.teamOpen[next.id] = true;
+    s.activeTeamId = next.id;
+    s.plan = null;
+    ExpeditionPlanner.rebuildTeamSections();
+};
+
+// ---------------------------------------------------------------------
+// Build cards
+// ---------------------------------------------------------------------
+
 ExpeditionPlanner.calloutSay = function(text) {
     var label = ExpeditionPlanner.child("ExpeditionPlannerCalloutStatus");
     if (label !== null) { label.text = text; }
 };
 
-/** Write callout-card.html beside the drawing. \return the path or "" */
+/** The trip's start date moved on by the team's dayOffset (a bad date passes through). */
+ExpeditionPlanner.teamStartDate = function(startDate, team) {
+    var base = CsCalloutCard.dateMinutes(String(startDate === undefined || startDate === null ?
+        "" : startDate));
+    if (base === null) {
+        return startDate;
+    }
+    var off = (team !== null && typeof team === "object" && typeof team.dayOffset === "number") ?
+        team.dayOffset : 0;
+    return CsCalloutCard.stamp(base + off * 1440).date;
+};
+
+/** The files Build cards writes: one team -> the card; several -> topside + a file each. */
+ExpeditionPlanner.buildFileList = function(teams) {
+    var list = Object.prototype.toString.call(teams) === "[object Array]" ? teams : [];
+    var out = ["callout-card.html"];
+    if (list.length > 1) {
+        for (var i = 0; i < list.length; i++) {
+            out.push(CsTeams.fileName(i, list[i]));
+        }
+    }
+    return out;
+};
+
+/**
+ * The team-*.html files in `existing` that this build did not write,
+ * sorted. They are only NAMED: nothing here ever deletes a file.
+ */
+ExpeditionPlanner.staleTeamFiles = function(existing, written) {
+    var isArr = function(v) { return Object.prototype.toString.call(v) === "[object Array]"; };
+    var have = {};
+    var w = isArr(written) ? written : [];
+    for (var i = 0; i < w.length; i++) { have["#" + String(w[i])] = true; }
+    var out = [];
+    var e = isArr(existing) ? existing : [];
+    for (var j = 0; j < e.length; j++) {
+        var name = String(e[j]);
+        if (/^team-.+\.html$/i.test(name) && have["#" + name] !== true) { out.push(name); }
+    }
+    out.sort();
+    return out;
+};
+
+/** The team-*.html names in `folder` (QDir), or [] when it cannot be read. */
+ExpeditionPlanner.listTeamFiles = function(folder) {
+    var out = [];
+    try {
+        var list = new QDir(folder).entryList(["team-*.html"], QDir.Files, QDir.Name);
+        for (var i = 0; list !== null && list !== undefined && i < list.length; i++) {
+            out.push(String(list[i]));
+        }
+    } catch (e) {
+        out = [];
+    }
+    return out;
+};
+
+/** The drawing's geo anchor for the forecast, or null. */
+ExpeditionPlanner.anchorOf = function() {
+    try {
+        var rec = CsLocationPick.anchorRecord(CsStationSidecar.document());
+        if (rec !== null) { return { lat: rec.lat, lon: rec.lon }; }
+    } catch (eAnchor) {
+    }
+    return null;
+};
+
+/** "Missing: start date; Alpha: at least one person, at least one stop". */
+ExpeditionPlanner.missingText = function(items, teams) {
+    var list = Object.prototype.toString.call(teams) === "[object Array]" ? teams : [];
+    var labels = [];
+    for (var t = 0; t < list.length; t++) {
+        labels.push(ExpeditionPlanner.teamLabel(list[t], t) + ": ");
+    }
+    var groups = [];
+    var current = null;
+    for (var i = 0; i < items.length; i++) {
+        var item = String(items[i]);
+        var key = "";
+        for (var l = 0; l < labels.length; l++) {
+            if (item.indexOf(labels[l]) === 0 && labels[l].length > key.length) { key = labels[l]; }
+        }
+        var text = item.substring(key.length);
+        if (current !== null && current.key === key) {
+            current.items.push(text);
+        } else {
+            current = { key: key, items: [text] };
+            groups.push(current);
+        }
+    }
+    var parts = [];
+    for (var g = 0; g < groups.length; g++) {
+        parts.push(groups[g].key + groups[g].items.join(", "));
+    }
+    return qsTr("Missing: %1").arg(parts.join("; "));
+};
+
+/** The status line after a build: files, warnings, files left in place, problems. */
+ExpeditionPlanner.buildStatusText = function(written, conflicts, leftovers, problems) {
+    var text = qsTr("Saved %1").arg(written.join(", "));
+    if (problems.length > 0) {
+        text += " (" + problems.join("; ") + ")";
+    }
+    if (conflicts.length > 0) {
+        var c = [];
+        for (var i = 0; i < conflicts.length; i++) {
+            c.push(ExpeditionPlanner.conflictText(conflicts[i]));
+        }
+        text += ". " + qsTr("Build succeeded with warnings: %1").arg(c.join("; "));
+    }
+    if (leftovers.length > 0) {
+        text += ". " + qsTr("Left in place from an earlier build: %1").arg(leftovers.join(", "));
+    }
+    return text;
+};
+
+/**
+ * Plan every team, check that nothing is missing, save the trip, teams,
+ * pace and contacts, then write the files into `folder`: with ONE team
+ * today's single callout-card.html (CsCalloutCard.html, from that team's
+ * members, days and stops); with several the topside sheet as
+ * callout-card.html plus CsTeams.fileName per team. Deletes nothing.
+ *
+ * \param form readCalloutForm()'s {trip, contacts, roster, includeRoster, pace}
+ * \return {written: [names], missing, problems, conflicts, leftovers,
+ *   error, planned: [{team, plan}], paceUsed}
+ */
+ExpeditionPlanner.buildFiles = function(form, folder) {
+    var s = ExpeditionPlanner.state;
+    var teams = s.teams;
+    var res = { written: [], missing: [], problems: [], conflicts: [], leftovers: [],
+        error: "", planned: [], paceUsed: 0 };
+    var pace = (form.pace === undefined) ? null : form.pace;
+    if (pace !== null && isNaN(pace)) {
+        res.error = qsTr("The walking pace must be a number of feet per minute " +
+            "above 0, or blank for the default 264; nothing was built.");
+        return res;
+    }
+    var config = ExpeditionPlanner.paceBlock(
+        s.store === null ? {} : s.store.settings.pace, pace);
+    res.paceUsed = CsTripPlan.config(config).paceFtPerMin;
+    res.planned = ExpeditionPlanner.planTeams(teams, s.drawn, config,
+        s.drawn === null ? "ft" : ExpeditionPlanner.unitOf(s.drawn.survey));
+    var plans = [];
+    for (var p = 0; p < res.planned.length; p++) { plans.push(res.planned[p].plan); }
+    var trip = { startDate: form.trip.startDate, weatherPlace: form.trip.weatherPlace,
+        party: form.trip.party, teams: teams };
+    // EVERY gap at once, and nothing built until there are none.
+    res.missing = CsTeams.missingAll(trip, plans, form.contacts, form.roster,
+        form.includeRoster);
+    if (s.drawn === null) {
+        res.missing.push(qsTr("a survey in this drawing to route on"));
+    }
+    if (res.missing.length > 0) {
+        return res;
+    }
+    var why = ExpeditionPlanner.saveTrip(form.trip);
+    if (why !== "") { res.problems.push(why); }
+    why = ExpeditionPlanner.saveTeams();
+    if (why !== "") { res.problems.push(why); }
+    why = ExpeditionPlanner.savePlanSettings(pace);
+    if (why !== "") { res.problems.push(why); }
+    if (!CsCalloutLocal.saveContacts(form.contacts)) { res.problems.push(qsTr("contacts not saved")); }
+
+    // One forecast lookup for every team's dates (it reads first to last).
+    var dates = [];
+    var seen = {};
+    for (var t = 0; t < teams.length; t++) {
+        var td = CsTeams.dates(trip, teams[t]);
+        for (var d = 0; d < td.length; d++) {
+            if (seen[td[d]] !== true) { seen[td[d]] = true; dates.push(td[d]); }
+        }
+    }
+    dates.sort();
+    var wx = CsWeather.lookup(dates, ExpeditionPlanner.anchorOf(), form.trip.weatherPlace);
+    if (wx.days === null) {
+        res.problems.push(qsTr("no forecast (%1)").arg(wx.error));
+    }
+    var forecast = wx.days === null ? null : { days: wx.days };
+    var title = CsCave.nameOf(s.docPath) || qsTr("Cave");
+    var generated = ExpeditionPlanner.today();
+    var names = ExpeditionPlanner.buildFileList(teams);
+    var pages = [];
+    if (teams.length === 1) {
+        // Today's card exactly, from the one team.
+        var one = teams[0];
+        var single = CsStationStore.cleanTrip({
+            startDate: ExpeditionPlanner.teamStartDate(form.trip.startDate, one),
+            weatherPlace: form.trip.weatherPlace, days: one.days, party: one.members });
+        pages.push({ name: names[0], html: CsCalloutCard.html(res.planned[0].plan, {
+            title: title, survey: s.drawn.survey, resolved: s.drawn.resolved,
+            trip: single, contacts: form.contacts,
+            roster: CsTeams.memberRows(one, s.people),
+            includeRoster: form.includeRoster, forecast: forecast,
+            generated: generated }) });
+    } else {
+        var buffer = typeof form.contacts.bufferMin === "number" ? form.contacts.bufferMin : 120;
+        var ctxTeams = [];
+        for (var c = 0; c < teams.length; c++) {
+            ctxTeams.push({ team: teams[c], plan: res.planned[c].plan,
+                windows: CsTeams.windows(res.planned[c].plan, trip, teams[c], buffer),
+                members: CsTeams.memberRows(teams[c], s.people),
+                route: { survey: s.drawn.survey, resolved: s.drawn.resolved } });
+        }
+        pages.push({ name: names[0], html: CsCalloutCard.topsideHtml({ title: title,
+            trip: trip, teams: ctxTeams, contacts: form.contacts,
+            includeRoster: form.includeRoster, forecast: forecast,
+            generated: generated, fileNames: names.slice(1) }) });
+        for (var f = 0; f < teams.length; f++) {
+            pages.push({ name: names[f + 1], html: CsCalloutCard.teamHtml({ title: title,
+                trip: trip, team: teams[f], plan: res.planned[f].plan,
+                windows: ctxTeams[f].windows, members: ctxTeams[f].members,
+                contacts: form.contacts, forecast: forecast, generated: generated,
+                survey: s.drawn.survey, resolved: s.drawn.resolved }) });
+        }
+    }
+    for (var w = 0; w < pages.length; w++) {
+        if (CsStationSidecar.writeText(folder + "/" + pages[w].name, pages[w].html)) {
+            res.written.push(pages[w].name);
+        } else {
+            res.problems.push(qsTr("could not write %1").arg(pages[w].name));
+        }
+    }
+    res.conflicts = CsTeams.sameDayConflicts(trip);
+    res.leftovers = ExpeditionPlanner.staleTeamFiles(
+        ExpeditionPlanner.listTeamFiles(folder), res.written);
+    return res;
+};
+
+/**
+ * Build cards: write the file(s) beside the drawing and say what
+ * happened. \return the path of callout-card.html, or ""
+ */
 ExpeditionPlanner.buildCard = function() {
     var s = ExpeditionPlanner.state;
     if (!ExpeditionPlanner.planGuard()) { return ""; }
@@ -2229,56 +3116,39 @@ ExpeditionPlanner.buildCard = function() {
         ExpeditionPlanner.calloutSay(qsTr("Save the drawing first."));
         return "";
     }
-    var form = ExpeditionPlanner.readCalloutForm();
-    // No stops (or no survey) is a gap to name with the others, not a
-    // reason for planTrip's warning box; route only when there is one.
-    var plan = null;
-    if (s.drawn !== null && s.planStops.length > 0) {
-        plan = ExpeditionPlanner.planTrip();
-        if (plan === null) {
-            // planTrip has said why (a bad pace, most likely).
-            ExpeditionPlanner.calloutSay(qsTr("The route could not be " +
-                "planned; nothing was built."));
-            return "";
+    ExpeditionPlanner.flushPacking();
+    var folder = CsCave.folderOf(s.docPath);
+    var res = ExpeditionPlanner.buildFiles(ExpeditionPlanner.readCalloutForm(), folder);
+    // The plans as text, a heading per team, whatever the outcome.
+    var any = false;
+    for (var p = 0; p < res.planned.length; p++) {
+        if (res.planned[p].plan !== null) { any = true; }
+    }
+    if (any) {
+        var out = ExpeditionPlanner.child("ExpeditionPlannerPlanOut");
+        if (out !== null) {
+            out.setPlainText(ExpeditionPlanner.plansText(res.planned, res.paceUsed));
         }
+        s.plan = res.planned.length === 1 ? res.planned[0].plan : null;
     }
-    // EVERY gap at once, and nothing built until there are none.
-    var need = CsCalloutCard.missingAll(form.trip, plan, form.contacts,
-        form.roster, form.includeRoster);
-    if (need.length > 0) {
-        ExpeditionPlanner.calloutSay(qsTr("Missing: %1").arg(need.join(", ")));
+    // The start date may have moved, and with it the same-day overlaps.
+    ExpeditionPlanner.refreshTeamHeaders();
+    if (res.error !== "") {
+        ExpeditionPlanner.calloutSay(res.error);
         return "";
     }
-    var problems = [];
-    var why = ExpeditionPlanner.saveTrip(form.trip);
-    if (why !== "") { problems.push(why); }
-    if (!CsCalloutLocal.saveContacts(form.contacts)) { problems.push(qsTr("contacts not saved")); }
-
-    var anchor = null;
-    try {
-        var rec = CsLocationPick.anchorRecord(CsStationSidecar.document());
-        if (rec !== null) { anchor = { lat: rec.lat, lon: rec.lon }; }
-    } catch (eAnchor) {
-    }
-    var wx = CsWeather.lookup(CsCalloutCard.tripDates(form.trip), anchor,
-        form.trip.weatherPlace);
-    if (wx.days === null) {
-        problems.push(qsTr("no forecast (%1)").arg(wx.error));
-    }
-    var html = CsCalloutCard.html(plan, {
-        title: CsCave.nameOf(s.docPath) || qsTr("Cave"),
-        survey: s.drawn.survey, resolved: s.drawn.resolved,
-        trip: form.trip, contacts: form.contacts, roster: form.roster,
-        includeRoster: form.includeRoster,
-        forecast: wx.days === null ? null : { days: wx.days },
-        generated: ExpeditionPlanner.today() });
-    var path = CsCave.folderOf(s.docPath) + "/callout-card.html";
-    if (!CsStationSidecar.writeText(path, html)) {
-        ExpeditionPlanner.calloutSay(qsTr("Could not write callout-card.html beside the drawing."));
+    if (res.missing.length > 0) {
+        ExpeditionPlanner.calloutSay(ExpeditionPlanner.missingText(res.missing, s.teams));
         return "";
     }
-    ExpeditionPlanner.calloutSay(qsTr("Saved callout-card.html") +
-        (problems.length > 0 ? " (" + problems.join("; ") + ")" : ""));
+    if (res.written.indexOf("callout-card.html") < 0) {
+        ExpeditionPlanner.calloutSay(qsTr("Could not write callout-card.html beside " +
+            "the drawing.") + (res.problems.length > 0 ? " (" + res.problems.join("; ") + ")" : ""));
+        return "";
+    }
+    ExpeditionPlanner.calloutSay(ExpeditionPlanner.buildStatusText(res.written,
+        res.conflicts, res.leftovers, res.problems));
+    var path = folder + "/callout-card.html";
     try {
         // Same call CaveShelf.reveal ships.
         QDesktopServices.openUrl(new QUrl("file://" + path));
@@ -2297,7 +3167,8 @@ ExpeditionPlanner.reload = function() {
     var doc = CsStationSidecar.document();
     var before = s.docPath;
     s.docPath = CsStationSidecar.pathOf(doc);
-    // Another drawing: its stops, plan and pace belong to the old one.
+    // Another drawing: its plan and pace belong to the old one (its
+    // teams are loaded by showCalloutSettings).
     var changed = s.docPath !== before;
     if (changed) {
         ExpeditionPlanner.resetPlan();
