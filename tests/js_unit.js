@@ -34611,6 +34611,68 @@ if (typeof ExpeditionPlanner !== "undefined" &&
 }
 
 // ---------------------------------------------------------------------
+// Teams in the trip store.
+// ---------------------------------------------------------------------
+
+(function() {
+    var rt = function(trip) {
+        var st = CsStationStore.empty();
+        st.settings.trip = trip;
+        return CsStationStore.parse(CsStationStore.serialize(st)).store.settings.trip;
+    };
+    var tmE = CsStationStore.emptyTrip();
+    ok(typeof CsStationStore.cleanTeam === "function" &&
+        typeof CsStationStore.cleanDays === "function", "tm store: cleanTeam and cleanDays exist");
+    eqs(JSON.stringify(tmE.teams), "[]", "tm store: emptyTrip has teams []");
+    var tmTrip = { startDate: "2026-10-03", weatherPlace: "X",
+        party: [{ id: "p1", name: "Ana" }],
+        days: [{ entry: "8:00", workHours: 4, night: "camp" }],
+        teams: [
+            { id: "t1", name: "  Alpha ", goal: "  Survey B ", dayOffset: 2,
+              members: [{ id: "a", name: "Ana", medical: "x" }, { id: "", name: "  " },
+                  { id: "a", name: "Other" }, { id: "b", name: " ana " }, { name: "Bo" }],
+              stops: [" B20 ", "", "D8", "B20", "  "],
+              days: [{ entry: "9:30", workHours: 5, night: "bogus" },
+                  { entry: "25:00", workHours: 5 }, { entry: "08:00", workHours: -1 }],
+              packing: "  First aid  ", medical: "x", phone: "y" },
+            { id: "t2", name: "   ", goal: null, dayOffset: -3, members: "no", stops: null,
+              days: null, packing: null } ] };
+    var tmBack = rt(tmTrip);
+    eqs(tmBack.teams.length, 2, "tm store: two teams round trip");
+    var a = tmBack.teams[0], b = tmBack.teams[1];
+    eqs(a.id, "t1", "tm store: id kept");
+    eqs(a.name, "Alpha", "tm store: name trimmed");
+    eqs(a.goal, "Survey B", "tm store: goal trimmed");
+    eqs(a.packing, "First aid", "tm store: packing trimmed");
+    eqs(a.dayOffset, 2, "tm store: dayOffset kept");
+    eqs(JSON.stringify(a.members), JSON.stringify([{ id: "a", name: "Ana" }, { id: "", name: "Bo" }]),
+        "tm store: members cleaned, nameless and duplicates dropped, unknown fields gone");
+    eqs(JSON.stringify(a.stops), JSON.stringify(["B20", "D8"]), "tm store: stops trimmed, deduped, ordered");
+    eqs(JSON.stringify(a.days), JSON.stringify([{ entry: "09:30", workHours: 5, night: "out" }]),
+        "tm store: team days cleaned like trip days");
+    eqs(b.name, "Team 2", "tm store: blank name becomes Team 2 by position");
+    eqs(b.goal, "", "tm store: null goal is blank");
+    eqs(b.dayOffset, 0, "tm store: negative dayOffset is 0");
+    eqs(b.members.length + b.stops.length + b.days.length, 0, "tm store: bad lists are empty");
+    eqs(b.packing, "", "tm store: null packing is blank");
+    eqs(rt({ teams: [{ dayOffset: "3" }] }).teams[0].dayOffset, 0, "tm store: text dayOffset is 0");
+    eqs(rt({ teams: [{ dayOffset: 1.5 }] }).teams[0].dayOffset, 0, "tm store: fractional dayOffset is 0");
+    var nine = [];
+    for (var i = 0; i < 9; i++) { nine.push({ name: "T" + i }); }
+    eqs(rt({ teams: nine }).teams.length, 8, "tm store: at most 8 teams");
+    eqs(rt({ teams: [null, 5, { name: "Z" }] }).teams[0].name, "Z", "tm store: non-object teams skipped");
+    var txt = CsStationStore.serialize((function() { var s = CsStationStore.empty();
+        s.settings.trip = tmTrip; return s; })());
+    ok(txt.indexOf("medical") < 0 && txt.indexOf("phone") < 0, "tm store: medical/phone never serialised");
+    var tmLegacy = rt({ days: [{ entry: "08:00", workHours: 3, night: "out" }], party: [{ id: "p", name: "P" }] });
+    eqs(tmLegacy.teams.length, 0, "tm store: legacy-only trip keeps teams []");
+    eqs(tmLegacy.days.length, 1, "tm store: legacy days kept");
+    eqs(tmLegacy.days[0].entry, "08:00", "tm store: legacy day entry as before");
+    eqs(tmLegacy.party.length, 1, "tm store: legacy party kept");
+    eqs(rt(tmTrip).days[0].entry, "08:00", "tm store: trip day zero-padded");
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

@@ -50,7 +50,7 @@ var csStoreStr = function(v) {
 CsStationStore.NIGHTS = ["out", "camp"];
 
 CsStationStore.emptyTrip = function() {
-    return { startDate: "", weatherPlace: "", days: [], party: [] };
+    return { startDate: "", weatherPlace: "", days: [], party: [], teams: [] };
 };
 
 var csStoreDateOk = function(text) {
@@ -75,20 +75,7 @@ CsStationStore.cleanTrip = function(raw) {
     var date = csStoreStr(raw.startDate);
     trip.startDate = csStoreDateOk(date) ? date : "";
     trip.weatherPlace = csStoreStr(raw.weatherPlace).replace(/^\s+|\s+$/g, "");
-    var list = Object.prototype.toString.call(raw.days) === "[object Array]" ?
-        raw.days : [];
-    for (var i = 0; i < list.length; i++) {
-        var d = list[i];
-        if (d === null || typeof d !== "object") { continue; }
-        var entry = csStoreStr(d.entry);
-        if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(entry)) { continue; }
-        if (entry.length === 4) { entry = "0" + entry; }
-        var hours = d.workHours;
-        if (typeof hours !== "number" || !isFinite(hours) || hours < 0) { continue; }
-        var night = CsStationStore.NIGHTS.indexOf(csStoreStr(d.night)) >= 0 ?
-            csStoreStr(d.night) : "out";
-        trip.days.push({ entry: entry, workHours: hours, night: night });
-    }
+    trip.days = CsStationStore.cleanDays(raw.days);
     // Who is going: id and name ONLY. Details (medical, contacts,
     // skills) live in the per-user people.json (CsPeople), never here.
     var party = Object.prototype.toString.call(raw.party) === "[object Array]" ?
@@ -100,7 +87,76 @@ CsStationStore.cleanTrip = function(raw) {
         if (name === "") { continue; }
         trip.party.push({ id: csStoreStr(p.id).replace(/^\s+|\s+$/g, ""), name: name });
     }
+    var rawTeams = Object.prototype.toString.call(raw.teams) === "[object Array]" ?
+        raw.teams : [];
+    for (var ti = 0; ti < rawTeams.length && trip.teams.length < 8; ti++) {
+        var rt = rawTeams[ti];
+        if (rt === null || typeof rt !== "object") { continue; }
+        trip.teams.push(CsStationStore.cleanTeam(rt, trip.teams.length + 1));
+    }
     return trip;
+};
+
+/**
+ * A list of trip days from whatever the file held (shared by the trip and
+ * every team): bad days are dropped, an unknown night is "out".
+ */
+CsStationStore.cleanDays = function(raw) {
+    var out = [];
+    var list = Object.prototype.toString.call(raw) === "[object Array]" ? raw : [];
+    for (var i = 0; i < list.length; i++) {
+        var d = list[i];
+        if (d === null || typeof d !== "object") { continue; }
+        var entry = csStoreStr(d.entry);
+        if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(entry)) { continue; }
+        if (entry.length === 4) { entry = "0" + entry; }
+        var hours = d.workHours;
+        if (typeof hours !== "number" || !isFinite(hours) || hours < 0) { continue; }
+        var night = CsStationStore.NIGHTS.indexOf(csStoreStr(d.night)) >= 0 ?
+            csStoreStr(d.night) : "out";
+        out.push({ entry: entry, workHours: hours, night: night });
+    }
+    return out;
+};
+
+/**
+ * One team from whatever the file held. Only the known fields survive, so
+ * medical or contact data can never ride into stations.json. `position`
+ * is 1-based and names a nameless team "Team N".
+ */
+CsStationStore.cleanTeam = function(rt, position) {
+    var trim = function(v) { return csStoreStr(v).replace(/^\s+|\s+$/g, ""); };
+    var isArr = function(v) { return Object.prototype.toString.call(v) === "[object Array]"; };
+    var team = { id: trim(rt.id), name: trim(rt.name), goal: trim(rt.goal),
+        dayOffset: 0, members: [], stops: [], days: CsStationStore.cleanDays(rt.days),
+        packing: trim(rt.packing) };
+    if (team.name === "") { team.name = "Team " + position; }
+    var off = rt.dayOffset;
+    if (typeof off === "number" && isFinite(off) && off >= 0 && Math.floor(off) === off) {
+        team.dayOffset = off;
+    }
+    var members = isArr(rt.members) ? rt.members : [];
+    var seenId = {}, seenName = {};
+    for (var i = 0; i < members.length; i++) {
+        var m = members[i];
+        if (m === null || typeof m !== "object") { continue; }
+        var name = trim(m.name);
+        if (name === "") { continue; }
+        var id = trim(m.id), lower = name.toLowerCase();
+        if ((id !== "" && seenId[id] === true) || seenName[lower] === true) { continue; }
+        if (id !== "") { seenId[id] = true; }
+        seenName[lower] = true;
+        team.members.push({ id: id, name: name });
+    }
+    var stops = isArr(rt.stops) ? rt.stops : [];
+    var seenStop = {};
+    for (var k = 0; k < stops.length; k++) {
+        var stop = trim(stops[k]);
+        if (stop === "" || seenStop["s" + stop] === true) { continue; }
+        seenStop["s" + stop] = true;
+        team.stops.push(stop);
+    }
+    return team;
 };
 
 /**
