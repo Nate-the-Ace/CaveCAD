@@ -34432,16 +34432,17 @@ ok(typeof ExpeditionPlanner.startDateText === "function" &&
     typeof ExpeditionPlanner.setStartDateText === "function", "qd: accessors exist");
 if (typeof ExpeditionPlanner.startDateText === "function") {
     (function() {
-        // Behaves as the live QDateEdit was probed to: text shows the
-        // date, or "Pick a date" at the 1970-01-01 minimum; setProperty
-        // ("date", iso) moves it.
-        var fake = { shown: "Pick a date", sets: [],
+        // Behaves as the live QDateEdit: text shows the date;
+        // setProperty("date", iso) moves it. No unset state any more.
+        var fake = { shown: "2026-09-29", sets: [],
             property: function(name) { return name === "text" ? this.shown : undefined; },
             setProperty: function(name, v) {
                 this.sets.push(name + "=" + v);
-                if (name === "date") { this.shown = v === "1970-01-01" ? "Pick a date" : v; }
+                if (name === "date") { this.shown = v; }
             } };
         var realChild = ExpeditionPlanner.child;
+        var realToday = ExpeditionPlanner.todayIso;
+        ExpeditionPlanner.todayIso = function() { return "2026-09-29"; };
         var present = true;
         ExpeditionPlanner.child = function(name) {
             return (present && name === "ExpeditionPlannerCalloutStart") ? fake : null;
@@ -34450,8 +34451,8 @@ if (typeof ExpeditionPlanner.startDateText === "function") {
             var read = function(shown) { fake.shown = shown; return ExpeditionPlanner.startDateText(); };
             eqs(read("2026-10-03"), "2026-10-03", "qd: a valid date reads back");
             eqs(read(" 2026-10-03 "), "2026-10-03", "qd: surrounding space trimmed");
-            eqs(read("Pick a date"), "", "qd: the special text is unset");
-            eqs(read("1970-01-01"), "", "qd: the minimum date is unset");
+            eqs(read("Pick a date"), "", "dd: old placeholder text is junk, reads empty");
+            eqs(read("1970-01-01"), "1970-01-01", "dd: 1970-01-01 is now just a valid date");
             eqs(read("2026-02-30"), "", "qd: an impossible day is unset");
             eqs(read("2026-2-3"), "", "qd: unpadded text is unset");
             eqs(read("junk"), "", "qd: junk is unset");
@@ -34465,17 +34466,20 @@ if (typeof ExpeditionPlanner.startDateText === "function") {
             eqs(ExpeditionPlanner.startDateText(), "2027-01-15", "qd: set then read round-trips");
             fake.sets = [];
             ExpeditionPlanner.setStartDateText("");
-            eqs(fake.sets.join(","), "date=1970-01-01", "qd: empty unsets (minimum date)");
-            eqs(ExpeditionPlanner.startDateText(), "", "qd: unset reads back empty");
+            eqs(fake.sets.join(","), "date=2026-09-29", "dd: empty writes today");
+            eqs(ExpeditionPlanner.startDateText(), "2026-09-29", "dd: empty reads back as today");
             fake.sets = [];
             ExpeditionPlanner.setStartDateText("3/10/2026");
-            eqs(fake.sets.join(","), "date=1970-01-01", "qd: junk text unsets");
+            eqs(fake.sets.join(","), "date=2026-09-29", "dd: junk text writes today");
             fake.sets = [];
             ExpeditionPlanner.setStartDateText(null);
-            eqs(fake.sets.join(","), "date=1970-01-01", "qd: null unsets");
+            eqs(fake.sets.join(","), "date=2026-09-29", "dd: null writes today");
             fake.sets = [];
             ExpeditionPlanner.setStartDateText("2026-13-01");
-            eqs(fake.sets.join(","), "date=1970-01-01", "qd: an impossible month unsets");
+            eqs(fake.sets.join(","), "date=2026-09-29", "dd: an impossible month writes today");
+            fake.sets = [];
+            ExpeditionPlanner.setStartDateText("1970-01-01");
+            eqs(fake.sets.join(","), "date=1970-01-01", "dd: 1970-01-01 is written as is");
 
             present = false;
             eqs(ExpeditionPlanner.startDateText(), "", "qd: no widget reads empty");
@@ -34484,9 +34488,21 @@ if (typeof ExpeditionPlanner.startDateText === "function") {
             eqs(fake.sets.length, 0, "qd: no widget, nothing written");
         } finally {
             ExpeditionPlanner.child = realChild;
+            ExpeditionPlanner.todayIso = realToday;
         }
     })();
 }
+
+// dd: todayIso is the local date, zero padded.
+ok(/^\d{4}-\d{2}-\d{2}$/.test(ExpeditionPlanner.todayIso()) &&
+    csStoreDateOk(ExpeditionPlanner.todayIso()), "dd: todayIso is a valid yyyy-mm-dd");
+ok(ExpeditionPlanner.START_DATE_UNSET === undefined, "dd: the unset placeholder is gone");
+(function() {
+    var ui = readTextFile(repoRoot + "/scripts/CaveSurvey/ExpeditionPlanner/ExpeditionPlannerDate.ui");
+    ok(ui.indexOf("#e8811a") >= 0, "dd: .ui carries the orange accent");
+    ok(ui.indexOf("qt_calendar_navigationbar") >= 0, "dd: .ui styles the calendar navigation bar");
+    ok(ui.indexOf("specialValueText") < 0, "dd: .ui has no specialValueText");
+})();
 
 // A start date typed any other way than yyyy-mm-dd is a gap Build names.
 var qdMissTrip = function(date) {

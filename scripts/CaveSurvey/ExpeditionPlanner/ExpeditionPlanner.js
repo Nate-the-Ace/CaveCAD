@@ -199,7 +199,7 @@ ExpeditionPlanner.buttonRow = function(layout, labels) {
 ExpeditionPlanner.buildTripSection = function(layout) {
     ExpeditionPlanner.heading(layout, qsTr("Trip"));
     var grid = CsPanel.formGrid(1);
-    grid.addWidget(new QLabel(ExpeditionPlanner.labelText(qsTr("Start date"), true)), 0, 0);
+    grid.addWidget(new QLabel(ExpeditionPlanner.labelText(qsTr("Start date"), false)), 0, 0);
     // The bridge has no QDateEdit constructor, so the field comes from
     // ExpeditionPlannerDate.ui (a row holding the QDateEdit, objectName
     // ExpeditionPlannerCalloutStart). Its wrapper exposes no signals and
@@ -208,6 +208,9 @@ ExpeditionPlanner.buildTripSection = function(layout) {
     // main window (null) until the grid takes it.
     grid.addWidget(WidgetFactory.createWidget(ExpeditionPlanner.basePath,
         "ExpeditionPlannerDate.ui", null), 0, 1);
+    // A fresh panel starts on today; showCalloutSettings replaces it
+    // with the drawing's saved start date, when there is one.
+    ExpeditionPlanner.setStartDateText("");
     ExpeditionPlanner.calloutField(grid, 1, qsTr("Forecast place"), false,
         "ExpeditionPlannerCalloutPlace",
         qsTr("Optional: a nearby town. Blank uses the drawing's location " +
@@ -1732,11 +1735,18 @@ ExpeditionPlanner.openPersonDialog = function(existingId) {
 // The Start date field
 // ---------------------------------------------------------------------
 //
-// A QDateEdit built from ExpeditionPlannerDate.ui. Its minimum date,
-// 1970-01-01, shows as "Pick a date" and means NOT SET. These two are
+// A QDateEdit built from ExpeditionPlannerDate.ui. It is never unset: it
+// starts on today, or on the drawing's saved start date. These two are
 // the only code that touches the widget's value.
 
-/** The field's date as yyyy-mm-dd, or "" when unset, invalid or absent. */
+/** Today's LOCAL date as yyyy-mm-dd. Separate so tests can stub it. */
+ExpeditionPlanner.todayIso = function() {
+    var d = new Date();
+    var pad = function(n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+};
+
+/** The field's date as yyyy-mm-dd, or "" when invalid or absent. */
 ExpeditionPlanner.startDateText = function() {
     var w = ExpeditionPlanner.child("ExpeditionPlannerCalloutStart");
     if (w === null) {
@@ -1748,13 +1758,13 @@ ExpeditionPlanner.startDateText = function() {
     } catch (e) {
         return "";
     }
-    if (text === ExpeditionPlanner.START_DATE_UNSET || !csStoreDateOk(text)) {
+    if (!csStoreDateOk(text)) {
         return "";
     }
     return text;
 };
 
-/** Show `text` (yyyy-mm-dd) in the field; anything else unsets it. */
+/** Show `text` (yyyy-mm-dd) in the field; anything else shows today. */
 ExpeditionPlanner.setStartDateText = function(text) {
     var w = ExpeditionPlanner.child("ExpeditionPlannerCalloutStart");
     if (w === null) {
@@ -1762,13 +1772,10 @@ ExpeditionPlanner.setStartDateText = function(text) {
     }
     var t = String(isNull(text) ? "" : text).replace(/^\s+|\s+$/g, "");
     try {
-        w.setProperty("date", csStoreDateOk(t) ? t : ExpeditionPlanner.START_DATE_UNSET);
+        w.setProperty("date", csStoreDateOk(t) ? t : ExpeditionPlanner.todayIso());
     } catch (e) {
     }
 };
-
-/** The field's minimum date, which it shows as "Pick a date": unset. */
-ExpeditionPlanner.START_DATE_UNSET = "1970-01-01";
 
 // ---------------------------------------------------------------------
 // The callout card
