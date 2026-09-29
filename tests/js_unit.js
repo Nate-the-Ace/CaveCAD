@@ -165,6 +165,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsStationSidecar.js",
     "scripts/CaveSurvey/Core/CsTripPlan.js",
     "scripts/CaveSurvey/Core/CsCalloutCard.js",
+    "scripts/CaveSurvey/Core/CsCalendar.js",
     "scripts/CaveSurvey/Core/CsWeather.js",
     "scripts/CaveSurvey/Core/CsCalloutLocal.js",
     "scripts/CaveSurvey/Core/CsPeople.js",
@@ -34415,6 +34416,198 @@ eqs(CsStationStore.cleanTrip({ party: "x" }).party.length, 0,
     "trip party: a non-list party is empty");
 ok(CsStationStore.serialize(ppStore).indexOf("Asthma") < 0,
     "trip party: medical notes never reach stations.json");
+
+// ---------------------------------------------------------------------
+// Calendar -- the Start date picker's pure engine (Core/CsCalendar.js)
+// and the picker's "which month, which day" state (ExpeditionPlanner).
+// ---------------------------------------------------------------------
+
+ok(typeof CsCalendar === "object" && CsCalendar !== null, "cal: CsCalendar loaded");
+if (typeof CsCalendar === "object" && CsCalendar !== null) {
+    (function() {
+        var calP = function(text) {
+            var p = CsCalendar.parse(text);
+            return p === null ? "null" : p.year + "/" + p.month + "/" + p.day;
+        };
+        eqs(calP("2026-10-03"), "2026/10/3", "cal: parse plain date");
+        eqs(calP("  2026-10-03 "), "2026/10/3", "cal: parse trims");
+        eqs(calP("2028-02-29"), "2028/2/29", "cal: parse leap day");
+        eqs(calP("2000-02-29"), "2000/2/29", "cal: parse 2000 leap day");
+        eqs(calP("2026-12-31"), "2026/12/31", "cal: parse last day of year");
+        eqs(calP("2026-02-31"), "null", "cal: impossible Feb 31");
+        eqs(calP("2026-02-29"), "null", "cal: Feb 29 in a common year");
+        eqs(calP("2100-02-29"), "null", "cal: 2100 is not a leap year");
+        eqs(calP("2026-13-01"), "null", "cal: month 13");
+        eqs(calP("2026-00-10"), "null", "cal: month 0");
+        eqs(calP("2026-04-00"), "null", "cal: day 0");
+        eqs(calP("2026-04-31"), "null", "cal: April 31");
+        eqs(calP("2026-1-5"), "null", "cal: unpadded rejected");
+        eqs(calP("3/10/2026"), "null", "cal: US order rejected");
+        eqs(calP("2026-10-03x"), "null", "cal: trailing junk rejected");
+        eqs(calP("junk"), "null", "cal: junk rejected");
+        eqs(calP(""), "null", "cal: empty rejected");
+        eqs(calP(null), "null", "cal: null rejected");
+        eqs(calP(undefined), "null", "cal: undefined rejected");
+
+        eqs(CsCalendar.iso(2026, 3, 5), "2026-03-05", "cal: iso pads month and day");
+        eqs(CsCalendar.iso(2026, 12, 31), "2026-12-31", "cal: iso two-digit parts");
+        eqs(CsCalendar.iso(1970, 1, 1), "1970-01-01", "cal: iso epoch");
+
+        eqs(CsCalendar.daysInMonth(2026, 1), 31, "cal: January 31");
+        eqs(CsCalendar.daysInMonth(2026, 2), 28, "cal: Feb 2026 28");
+        eqs(CsCalendar.daysInMonth(2028, 2), 29, "cal: Feb 2028 29");
+        eqs(CsCalendar.daysInMonth(2100, 2), 28, "cal: Feb 2100 28");
+        eqs(CsCalendar.daysInMonth(2000, 2), 29, "cal: Feb 2000 29");
+        eqs(CsCalendar.daysInMonth(2026, 4), 30, "cal: April 30");
+        eqs(CsCalendar.daysInMonth(2026, 12), 31, "cal: December 31");
+
+        var calM = function(y, m, d) {
+            var r = CsCalendar.addMonths(y, m, d);
+            return r.year + "/" + r.month;
+        };
+        eqs(calM(2026, 12, 1), "2027/1", "cal: Dec + 1 is next January");
+        eqs(calM(2027, 1, -1), "2026/12", "cal: Jan - 1 is last December");
+        eqs(calM(2026, 5, 0), "2026/5", "cal: + 0 stays");
+        eqs(calM(2026, 11, 14), "2028/1", "cal: + 14 crosses two years");
+        eqs(calM(2026, 2, -14), "2024/12", "cal: - 14 crosses two years");
+        eqs(calM(2026, 1, 24), "2028/1", "cal: + 24 is two years on");
+        eqs(calM(2026, 1, -12), "2025/1", "cal: - 12 is a year back");
+
+        var calWeekday = function(cell) {
+            return new Date(Date.UTC(cell.year, cell.month - 1, cell.day)).getUTCDay();
+        };
+        var calCheckGrid = function(y, m, what) {
+            var g = CsCalendar.monthGrid(y, m);
+            eqs(g.length, 6, what + ": six rows");
+            var cells = [];
+            var rowsOk = true;
+            for (var r = 0; r < g.length; r++) {
+                if (g[r].length !== 7) { rowsOk = false; }
+                cells = cells.concat(g[r]);
+            }
+            ok(rowsOk, what + ": seven cells a row");
+            eqs(cells.length, 42, what + ": 42 cells");
+            var inMonth = 0;
+            var inOk = true;
+            for (var i = 0; i < cells.length; i++) {
+                if (cells[i].inMonth === true) {
+                    inMonth++;
+                    if (cells[i].year !== y || cells[i].month !== m) { inOk = false; }
+                } else if (cells[i].year === y && cells[i].month === m) {
+                    inOk = false;
+                }
+            }
+            eqs(inMonth, CsCalendar.daysInMonth(y, m), what + ": inMonth count");
+            ok(inOk, what + ": inMonth means this month exactly");
+            eqs(calWeekday(cells[0]), 0, what + ": first cell is a Sunday");
+            var consecutive = true;
+            var isoOk = true;
+            for (var k = 0; k < cells.length; k++) {
+                if (cells[k].iso !== CsCalendar.iso(cells[k].year, cells[k].month,
+                        cells[k].day)) { isoOk = false; }
+                if (k > 0) {
+                    var a = Date.UTC(cells[k - 1].year, cells[k - 1].month - 1, cells[k - 1].day);
+                    var b = Date.UTC(cells[k].year, cells[k].month - 1, cells[k].day);
+                    if (b - a !== 86400000) { consecutive = false; }
+                }
+            }
+            ok(isoOk, what + ": iso matches each cell");
+            ok(consecutive, what + ": days consecutive, no gaps or repeats");
+            return cells;
+        };
+        // February 2026 starts on a Sunday: the first cell is the 1st.
+        var calFeb26 = calCheckGrid(2026, 2, "cal grid Feb 2026 (starts Sunday)");
+        eqs(calFeb26[0].iso, "2026-02-01", "cal: Sunday start has no leading days");
+        eqs(calFeb26[0].inMonth, true, "cal: Sunday start first cell in month");
+        // August 2026 starts on a Saturday: six leading July days and six rows.
+        var calAug26 = calCheckGrid(2026, 8, "cal grid Aug 2026 (starts Saturday)");
+        eqs(calAug26[0].iso, "2026-07-26", "cal: Saturday start leads with July 26");
+        eqs(calAug26[0].inMonth, false, "cal: leading day is not in month");
+        eqs(calAug26[6].iso, "2026-08-01", "cal: the 1st sits in the Saturday column");
+        eqs(calAug26[41].iso, "2026-09-05", "cal: trailing days run into September");
+        // Needs all six rows: August 2026 has 31 days from a Saturday.
+        ok(calAug26[35].inMonth === true, "cal: a 31-day month from Saturday uses row six");
+        var calFeb28 = calCheckGrid(2028, 2, "cal grid Feb 2028 (leap)");
+        var calHasLeap = false;
+        for (var q = 0; q < calFeb28.length; q++) {
+            if (calFeb28[q].iso === "2028-02-29" && calFeb28[q].inMonth) { calHasLeap = true; }
+        }
+        ok(calHasLeap, "cal: Feb 2028 grid shows the 29th");
+        var calDec = calCheckGrid(2026, 12, "cal grid Dec 2026");
+        eqs(calDec[41].year, 2027, "cal: December's trailing days are next year");
+        var calJan = calCheckGrid(2027, 1, "cal grid Jan 2027");
+        eqs(calJan[0].year, 2026, "cal: January's leading days are last year");
+
+        eqs(CsCalendar.WEEKDAYS.join(","), "Su,Mo,Tu,We,Th,Fr,Sa", "cal: weekday labels");
+        eqs(CsCalendar.MONTHS.length, 12, "cal: twelve months");
+        eqs(CsCalendar.MONTHS[0], "January", "cal: first month");
+        eqs(CsCalendar.MONTHS[11], "December", "cal: last month");
+
+        eqs(CsCalendar.clampYear(1969), 1970, "cal: clamp low");
+        eqs(CsCalendar.clampYear(2101), 2100, "cal: clamp high");
+        eqs(CsCalendar.clampYear(2026), 2026, "cal: clamp inside");
+        eqs(CsCalendar.clampYear(NaN), 1970, "cal: clamp NaN");
+
+        var calToday = CsCalendar.today();
+        ok(calToday.month >= 1 && calToday.month <= 12 && calToday.day >= 1 &&
+            calToday.day <= 31 && calToday.year >= 2000, "cal: today is a date");
+    })();
+}
+
+// The picker's state: which month to open on, what is selected, what
+// is today. ExpeditionPlanner.js is a TOOL file: EAction is stubbed
+// above (SurveyNotebook block) if the real one is absent.
+if (typeof EAction === "undefined") {
+    EAction = function() {};
+    EAction.prototype.beginEvent = function() {};
+    EAction.prototype.terminate = function() {};
+    EAction.handleUserMessage = function() {};
+}
+loadRepoScript("scripts/CaveSurvey/ExpeditionPlanner/ExpeditionPlanner.js");
+ok(typeof ExpeditionPlanner.datePickerState === "function",
+    "cal: datePickerState exists");
+if (typeof ExpeditionPlanner.datePickerState === "function") {
+    (function() {
+        var calNow = { year: 2026, month: 9, day: 29 };
+        var s1 = ExpeditionPlanner.datePickerState("2026-12-05", calNow);
+        eqs(s1.year + "/" + s1.month, "2026/12", "cal state: opens on the typed month");
+        eqs(s1.selectedIso, "2026-12-05", "cal state: typed date selected");
+        eqs(s1.todayIso, "2026-09-29", "cal state: today iso");
+        var s1b = ExpeditionPlanner.datePickerState(" 2027-01-15 ", calNow);
+        eqs(s1b.year + "/" + s1b.month + " " + s1b.selectedIso, "2027/1 2027-01-15",
+            "cal state: typed text is trimmed");
+        var s2 = ExpeditionPlanner.datePickerState("2026-2-3", calNow);
+        eqs(s2.year + "/" + s2.month, "2026/9", "cal state: bad text opens on today's month");
+        eqs(s2.selectedIso, "", "cal state: bad text selects nothing");
+        eqs(s2.todayIso, "2026-09-29", "cal state: bad text still marks today");
+        var s3 = ExpeditionPlanner.datePickerState("", calNow);
+        eqs(s3.year + "/" + s3.month + " [" + s3.selectedIso + "]", "2026/9 []",
+            "cal state: empty text opens on today's month");
+        var s4 = ExpeditionPlanner.datePickerState("1900-05-05", calNow);
+        eqs(s4.year + "/" + s4.month, "1970/5", "cal state: year outside the picker is clamped");
+    })();
+}
+
+// A start date typed any other way than yyyy-mm-dd is a gap Build names.
+var calMissTrip = function(date) {
+    return { startDate: date, days: [ { entry: "08:00", workHours: 6, night: "out" } ] };
+};
+var calMissContacts = { topName: "T", topPhone: "1", escalation: "E" };
+var calMissRoster = [ { name: "A" } ];
+var calMissPlan = { stops: [ { station: "A1" } ] };
+ok(CsCalloutCard.missingAll(calMissTrip("2026-2-3"), calMissPlan, calMissContacts,
+    calMissRoster, true).indexOf("start date") >= 0, "cal: 2026-2-3 is a missing start date");
+ok(CsCalloutCard.missingAll(calMissTrip("3/10/2026"), calMissPlan, calMissContacts,
+    calMissRoster, true).indexOf("start date") >= 0, "cal: 3/10/2026 is a missing start date");
+ok(CsCalloutCard.missingAll(CsStationStore.cleanTrip(calMissTrip("2026-2-3")), calMissPlan,
+    calMissContacts, calMissRoster, true).indexOf("start date") >= 0,
+    "cal: 2026-2-3 through cleanTrip is missing");
+ok(CsCalloutCard.missingAll(CsStationStore.cleanTrip(calMissTrip("3/10/2026")), calMissPlan,
+    calMissContacts, calMissRoster, true).indexOf("start date") >= 0,
+    "cal: 3/10/2026 through cleanTrip is missing");
+ok(CsCalloutCard.missingAll(CsStationStore.cleanTrip(calMissTrip("2026-10-03")), calMissPlan,
+    calMissContacts, calMissRoster, true).indexOf("start date") < 0,
+    "cal: 2026-10-03 is not missing");
 
 
 // ---------------------------------------------------------------------
