@@ -188,7 +188,8 @@ CsCalloutCard.html = function(plan, ctx) {
         ".box{border:3px solid #111;padding:8px 12px;margin:10px 0;font-size:17px}" +
         ".days{display:flex;gap:6px;flex-wrap:wrap}.day{border:1px solid #bbb;" +
         "padding:4px 8px;min-width:110px}.page2{margin-top:32px}" +
-        "@media print{.page2{page-break-before:always;margin-top:0}}</style></head><body>");
+        "@media print{.page2{page-break-before:always;margin-top:0}}" +
+        CsTripPlan.SIGNS_CSS + "</style></head><body>");
     h.push("<h1>" + esc(ctx.title) + " &mdash; callout card</h1>");
     h.push("<p class=\"note\">" + esc(dates.length > 0 ? dates[0] : "") +
         (dates.length > 1 ? " to " + esc(dates[dates.length - 1]) : "") +
@@ -285,19 +286,11 @@ CsCalloutCard.html = function(plan, ctx) {
         h.push(CsTripPlan.routeSvg(ctx.survey, ctx.resolved, plan));
         h.push("<h2>Directions</h2>");
         for (var s = 0; s < plan.stops.length; s++) {
-            h.push("<h3>To " + esc(plan.stops[s].station) + "</h3><ol>");
-            for (var k = 0; k < plan.stops[s].steps.length; k++) {
-                var step = plan.stops[s].steps[k];
-                h.push("<li>" + esc(step.text) + " <span class=\"note\">(" +
-                    CsTripPlan.clock(step.minutes) + ")</span></li>");
-            }
-            h.push("</ol>");
+            h.push("<h3>To " + esc(plan.stops[s].station) + "</h3>");
+            h.push(CsTripPlan.signsHtml(CsTripPlan.signs(plan.stops[s].steps, plan.unit)));
         }
-        h.push("<h3>Back to " + esc(plan.start) + "</h3><ol>");
-        for (var b = 0; b < plan.back.steps.length; b++) {
-            h.push("<li>" + esc(plan.back.steps[b].text) + "</li>");
-        }
-        h.push("</ol>");
+        h.push("<h3>Back to " + esc(plan.start) + "</h3>");
+        h.push(CsTripPlan.signsHtml(CsTripPlan.signs(plan.back.steps, plan.unit)));
     }
     h.push("<h2>Hazards on the route</h2>");
     if (hazards.length === 0) {

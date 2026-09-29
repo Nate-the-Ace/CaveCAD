@@ -33643,6 +33643,93 @@ eqs(CsCalloutLocal.parseContacts(JSON.stringify({ bufferMin: -5 })).bufferMin, 1
 eqs(CsCalloutLocal.KEY_ROSTER, "CaveSurvey/Callout/Roster", "roster: settings key");
 
 // ---------------------------------------------------------------------
+// Highway-sign directions
+// ---------------------------------------------------------------------
+
+function sgWalk(from, to, dx, dy, over) {
+    var st = { kind: "walk", from: from, to: to,
+        length: Math.sqrt(dx * dx + dy * dy), dz: 0, dzKnown: true,
+        dx: dx, dy: dy, heading: (dx === 0 && dy === 0) ? "" : "N",
+        vertical: "", atJunction: false, notes: [], minutes: 3 };
+    for (var k in over) { st[k] = over[k]; }
+    return st;
+}
+function sgPitch(from, to, vertical, dzKnown) {
+    return { kind: "pitch", from: from, to: to, length: 42, dz: dzKnown ? -42 : 0,
+        dzKnown: dzKnown, dx: 0, dy: 0, heading: "", vertical: vertical,
+        atJunction: false, notes: [], minutes: 5 };
+}
+// Second step's bearing relative to a first step heading due north (0, 10).
+function sgTurn(dx, dy) {
+    var r = CsTripPlan.signs([ sgWalk("A", "B", 0, 10), sgWalk("B", "C", dx, dy) ], "ft");
+    return r[1].arrow;
+}
+var sgRad = Math.PI / 180;
+eqs(sgTurn(0, 10), "straight", "signs: straight on");
+eqs(sgTurn(10, 10), "slight-right", "signs: 45 degrees right is slight");
+eqs(sgTurn(10, 0), "right", "signs: 90 degrees right");
+eqs(sgTurn(-10, 0), "left", "signs: 90 degrees left");
+eqs(sgTurn(-10, 0.5 * 10 * 0 + 0), "left", "signs: 90 left again");
+eqs(sgTurn(Math.sin(-150 * sgRad), Math.cos(-150 * sgRad)), "sharp-left",
+    "signs: 150 degrees left is sharp");
+eqs(sgTurn(Math.sin(150 * sgRad), Math.cos(150 * sgRad)), "sharp-right",
+    "signs: 150 degrees right is sharp");
+eqs(sgTurn(0, -10), "uturn", "signs: 180 degrees is a u-turn");
+eqs(sgTurn(-10, 10), "slight-left", "signs: 45 degrees left is slight");
+
+var sgFirst = CsTripPlan.signs([ sgWalk("A", "B", -7, -7, { heading: "SW" }) ], "ft");
+eqs(sgFirst[0].arrow, "start", "signs: the first step is a start");
+eqs(sgFirst[0].headText, "Head SW", "signs: the start says which way to head");
+eqs(sgFirst[0].label, "B", "signs: the label is the destination");
+eqs(sgFirst[0].distance, "10 ft", "signs: walk distance is the length");
+eqs(sgFirst[0].minutes, 3, "signs: minutes carried");
+eqs(sgFirst[0].junction, false, "signs: not a junction");
+
+var sgAfter = CsTripPlan.signs([ sgWalk("A", "B", 0, 10), sgPitch("B", "C", "down", true),
+    sgWalk("C", "D", 10, 0, { heading: "E", atJunction: true }) ], "ft");
+eqs(sgAfter[1].arrow, "down", "signs: a pitch down");
+eqs(sgAfter[1].distance, "42 ft", "signs: a pitch shows its depth");
+eqs(sgAfter[2].arrow, "start", "signs: the step after a pitch is a start");
+eqs(sgAfter[2].headText, "Head E", "signs: and names its heading");
+eqs(sgAfter[2].junction, true, "signs: junction flag carried");
+var sgUp = CsTripPlan.signs([ sgPitch("A", "B", "up", false) ], "ft");
+eqs(sgUp[0].arrow, "up", "signs: a pitch up");
+eqs(sgUp[0].distance, "", "signs: unknown depth prints nothing");
+var sgNoHead = CsTripPlan.signs([ sgWalk("A", "B", 0, 10),
+    sgWalk("B", "C", 0, 0, { heading: "" }) ], "ft");
+eqs(sgNoHead[1].arrow, "start", "signs: no heading means a start");
+eqs(sgNoHead[1].headText, "", "signs: and no head text");
+ok(CsTripPlan.signs([ sgWalk("A", "B", 0, 10, { minutes: undefined }) ], "ft")[0].minutes === null,
+    "signs: missing minutes is null");
+
+var sgRows = CsTripPlan.signsHtml(CsTripPlan.signs([
+    sgWalk("A", "B<i>", 0, 10, { heading: "N", atJunction: true }),
+    sgWalk("B<i>", "C", 10, 0), sgPitch("C", "D", "down", true) ], "ft"));
+eqs(sgRows.split("class=\"sign\"").length - 1, 3, "signsHtml: one row per sign");
+ok(sgRows.indexOf("class=\"signs\"") > 0, "signsHtml: wrapped in a signs list");
+ok(sgRows.indexOf("B&lt;i&gt;") > 0 && sgRows.indexOf("<i>") < 0,
+    "signsHtml: labels are escaped");
+ok(sgRows.indexOf("<svg") > 0, "signsHtml: inline svg arrows");
+ok(sgRows.indexOf("Head N") > 0, "signsHtml: head text shown");
+ok(sgRows.indexOf("junction") > 0, "signsHtml: junction tag shown");
+ok(sgRows.indexOf("10 ft") > 0 && sgRows.indexOf("3 min") > 0,
+    "signsHtml: distance and time shown");
+ok(CsTripPlan.SIGNS_CSS.indexOf("break-inside") > 0, "signsHtml: css avoids page breaks");
+
+var sgP2 = ccHtml.slice(ccHtml.indexOf("class=\"page2\""));
+ok(sgP2.indexOf("class=\"sign\"") > 0, "card: page 2 directions are signs");
+ok(sgP2.indexOf(" heading ") < 0, "card: no verbose heading text");
+ok(sgP2.indexOf("to A3:") < 0, "card: no verbose step text");
+ok(ccHtml.slice(0, ccHtml.indexOf("class=\"page2\"")).indexOf("class=\"sign\"") < 0,
+    "card: no signs on page 1");
+var sgPacket = CsTripPlan.packetHtml(ccRealPlan, { title: "Test Cave",
+    survey: tpSurvey(), resolved: tpResolved, date: "" });
+ok(sgPacket.indexOf("class=\"sign\"") > 0, "packet: directions are signs");
+ok(sgPacket.indexOf("to A3:") < 0, "packet: no verbose step text");
+ok(sgPacket.indexOf("Back to A1") > 0, "packet: back leg kept");
+ok(sgPacket.indexOf("<h2>Gear</h2>") > 0, "packet: gear section kept");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
