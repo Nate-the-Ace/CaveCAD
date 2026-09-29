@@ -59,8 +59,8 @@ will read the same field.
   `{days: [{date, high, low, rainTotal, rainChance}], source, placeLabel}`
   or `null`. 5 s timeout. Kept out of `CsCalloutCard` so the card engine
   stays pure and testable offline. Service: Open-Meteo (no key).
-- **Panel:** a Callout section in the Station Table Plan tab, beside
-  "Build packet". Schedule editor, roster editor, contacts, weather place,
+- **Panel:** a Callout tab in the Station Table dock, beside Stations and
+  Plan (the Plan tab is already full). Schedule editor, roster editor, contacts, weather place,
   "include roster" tick, Build card. Writes `callout-card.html` beside the
   drawing and opens it. Follows the tab-engine rules (build in init, find by
   objectName, no expandos).
@@ -108,16 +108,18 @@ next day's entry gets a warning on the card; the card still builds.
 **Page 2, the route** (print stylesheet page break, own page):
 1. Route SVG, full width.
 2. Turn-by-turn directions from `CsTripPlan.describe`, with per-leg time.
-3. Hazard notes on the route, by station name: notes on the `NOTES-HAZARD`
-   layer plus the keyword matches above.
+3. Hazard notes on the route, by station name: station notes on the way
+   that match the water words above or hazard words (hazard, danger, loose,
+   unstable, rockfall, bad air, co2, slippery, exposed).
 4. Pitch and rope list for the route.
 
 Page 1 alone goes to topside. Page 2 alone goes with the team.
 
 ## Hazards
 
-There is no flood tag in the suite (only the `NOTES-HAZARD` callout layer
-and sump symbols). v1 uses keyword matching over station notes, the same
+There is no flood tag in the suite. The plan carries survey station notes,
+not drawing callouts, so drawn `NOTES-HAZARD` callouts are not visible to
+it. v1 uses keyword matching over the station notes on the route, the same
 approach as leads. The card never states a route is safe.
 
 ## Errors
@@ -136,7 +138,7 @@ Engine (runs through CaveCAD's own engine, per the `js_unit` trap in the
 station-table notes):
 - Window arithmetic: single day, multiday with camp, midnight crossover,
   overrun warning.
-- Keyword hazard match and `NOTES-HAZARD` inclusion.
+- Keyword hazard match (water words set the rain flag, hazard words do not).
 - HTML escaping of roster and contact text.
 - Page 1 contains no route SVG; page 2 contains it.
 - **Privacy:** with a fixture anchor, card output must not contain the
@@ -149,10 +151,11 @@ the open drawing), with the MCP bridge.
 
 ## Risks to check first
 
-1. **Network from the script engine.** Nothing in the add-on does HTTP
-   today. First implementation task: confirm `QNetworkAccessManager` (or an
-   equivalent) is reachable from the JS bridge, GUI-side. Fallback: a
-   `QProcess` call to `curl`. Decide before building the panel.
+1. **Network from the script engine.** Resolved: `CsSurfaceData.fetch`
+   already downloads with a blocking `curl` through `QProcess` (the async
+   `QNetworkAccessManager` path is untested in this bridge). `CsWeather`
+   uses the same pattern with its own 5 s timeout and never touches the
+   shared `CsSurfaceData.TIMEOUT_S`.
 2. **Per-user settings storage.** Confirm `RSettings` round-trips a JSON
    string on the deployed CaveCAD (see the QCAD JS bridge traps note:
    method-vs-property failures are GUI-only).
