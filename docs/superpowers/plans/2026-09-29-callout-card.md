@@ -447,7 +447,7 @@ ok(ccHtml.indexOf("14 in") > 0, "card: squeeze limit printed");
 ok(ccHtml.indexOf("No forecast, check before you go") > 0, "card: forecast null message");
 ok(ccHtml.indexOf("Pat Topside") > 0 && ccHtml.indexOf("555-0199") > 0,
     "card: escalation printed");
-ok(ccHtml.indexOf("16:50") > 0, "card: callout time printed");
+ok(ccHtml.indexOf("14:00") > 0, "card: callout time printed (real plan on the tiny fixture: 08:00 + 4 h + 120 min buffer)");
 
 var ccNoRoster = CsCalloutCard.html(ccRealPlan, ccCtx({ includeRoster: false }));
 ok(ccNoRoster.indexOf("Ana") < 0, "card: include roster off prints no names");
