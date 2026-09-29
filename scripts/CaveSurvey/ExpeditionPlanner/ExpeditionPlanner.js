@@ -216,6 +216,11 @@ ExpeditionPlanner.buildTripSection = function(layout) {
         var todayButton = new QPushButton(qsTr("Today"));
         todayButton.objectName = "ExpeditionPlannerStartToday";
         todayButton.toolTip = qsTr("Set the start date to today.");
+        // Without a cap the layout splits the row evenly with the date field.
+        try {
+            todayButton.setMaximumWidth(84);
+        } catch (eWidth) {
+        }
         dateRow.layout().addWidget(todayButton);
         todayButton.clicked.connect(function() { ExpeditionPlanner.startDateToday(); });
     } catch (eToday) {
