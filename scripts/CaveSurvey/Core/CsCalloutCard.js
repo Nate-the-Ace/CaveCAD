@@ -280,7 +280,7 @@ CsCalloutCard.html = function(plan, ctx) {
         "guarantee that the way is safe or easy: crawls, water, climbs and loose " +
         "ground are only known where someone wrote them down.</p>");
     if (plan.stops.length === 0) {
-        h.push("<p class=\"warn\">No route: pick stops on the Plan tab.</p>");
+        h.push("<p class=\"warn\">No route: pick stops on the Expedition Planner's Trip tab.</p>");
     } else {
         h.push(CsTripPlan.routeSvg(ctx.survey, ctx.resolved, plan));
         h.push("<h2>Directions</h2>");

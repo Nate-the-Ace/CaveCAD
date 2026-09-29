@@ -18,6 +18,29 @@
 
 var CsStationSidecar = {};
 
+/** The open document, or null. Resolved fresh every time. */
+CsStationSidecar.document = function() {
+    try {
+        var doc = EAction.getDocument();
+        return isNull(doc) ? null : doc;
+    } catch (e) {
+        return null;
+    }
+};
+
+/** The open document's file path, or "" (none open, or never saved). */
+CsStationSidecar.pathOf = function(doc) {
+    if (doc === null) {
+        return "";
+    }
+    try {
+        var name = doc.getFileName();
+        return isNull(name) ? "" : String(name);
+    } catch (e) {
+        return "";
+    }
+};
+
 /** Absolute path of stations.json beside the drawing, or "" when unsaved. */
 CsStationSidecar.sidecarPath = function(docPath) {
     var folder = CsCave.folderOf(String(docPath === undefined ||
