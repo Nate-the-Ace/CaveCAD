@@ -33426,6 +33426,40 @@ ok(/leave by the branch heading (N|NE|E|SE|S|SW|W|NW)$/.test(tpJuncSteps[0].text
 
 
 // ---------------------------------------------------------------------
+// Callout card -- trip settings in the station store
+// ---------------------------------------------------------------------
+
+var ccStore0 = CsStationStore.empty();
+eqs(ccStore0.settings.trip.startDate, "", "trip: empty start date");
+eqs(ccStore0.settings.trip.days.length, 0, "trip: empty has no days");
+
+var ccStore1 = CsStationStore.empty();
+ccStore1.settings.packing = "First aid";
+ccStore1.settings.trip = { startDate: "2026-10-03", weatherPlace: " Sewanee, TN ",
+    days: [ { entry: "8:00", workHours: 6, night: "camp" },
+            { entry: "07:30", workHours: 3.5, night: "out" } ] };
+var ccBack1 = CsStationStore.parse(CsStationStore.serialize(ccStore1)).store;
+eqs(ccBack1.settings.packing, "First aid", "trip: packing survives");
+eqs(ccBack1.settings.trip.startDate, "2026-10-03", "trip: start date round trips");
+eqs(ccBack1.settings.trip.weatherPlace, "Sewanee, TN", "trip: place is trimmed");
+eqs(ccBack1.settings.trip.days.length, 2, "trip: two days round trip");
+eqs(ccBack1.settings.trip.days[0].entry, "08:00", "trip: clock is zero padded");
+eqs(ccBack1.settings.trip.days[0].night, "camp", "trip: camp night kept");
+eqs(ccBack1.settings.trip.days[1].workHours, 3.5, "trip: fractional work hours kept");
+
+var ccBad = CsStationStore.parse(JSON.stringify({ settings: { trip: {
+    startDate: "2026-02-31", weatherPlace: 7,
+    days: [ { entry: "25:00", workHours: 4, night: "out" },
+            { entry: "09:00", workHours: -1, night: "out" },
+            { entry: "09:00", workHours: "x", night: "out" },
+            { entry: "09:00", workHours: 4, night: "sideways" },
+            null ] } } })).store;
+eqs(ccBad.settings.trip.startDate, "", "trip: an impossible date is dropped");
+eqs(ccBad.settings.trip.days.length, 1, "trip: only the one good day survives");
+eqs(ccBad.settings.trip.days[0].night, "out", "trip: unknown night becomes out");
+
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

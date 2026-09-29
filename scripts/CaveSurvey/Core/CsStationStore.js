@@ -30,7 +30,7 @@ CsStationStore.DONE_REASONS = ["continues", "ended", "tied in", "dug out"];
 
 CsStationStore.empty = function() {
     return { version: CsStationStore.VERSION, entries: [],
-        settings: { packing: "", pace: {} } };
+        settings: { packing: "", pace: {}, trip: CsStationStore.emptyTrip() } };
 };
 
 CsStationStore.normalize = function(text) {
@@ -44,6 +44,50 @@ CsStationStore.keyOf = function(station, text) {
 
 var csStoreStr = function(v) {
     return (v === undefined || v === null) ? "" : String(v);
+};
+
+/** Nights a trip day may end with: back on the surface, or in camp. */
+CsStationStore.NIGHTS = ["out", "camp"];
+
+CsStationStore.emptyTrip = function() {
+    return { startDate: "", weatherPlace: "", days: [] };
+};
+
+var csStoreDateOk = function(text) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+    if (m === null) { return false; }
+    var y = parseInt(m[1], 10), mo = parseInt(m[2], 10) - 1, d = parseInt(m[3], 10);
+    var t = new Date(Date.UTC(y, mo, d));
+    return t.getUTCFullYear() === y && t.getUTCMonth() === mo && t.getUTCDate() === d;
+};
+
+/**
+ * A trip block from whatever the file held: bad days are dropped, a bad
+ * date is blank, an unknown night is "out". Never throws.
+ */
+CsStationStore.cleanTrip = function(raw) {
+    var trip = CsStationStore.emptyTrip();
+    if (raw === null || typeof raw !== "object") {
+        return trip;
+    }
+    var date = csStoreStr(raw.startDate);
+    trip.startDate = csStoreDateOk(date) ? date : "";
+    trip.weatherPlace = csStoreStr(raw.weatherPlace).replace(/^\s+|\s+$/g, "");
+    var list = Object.prototype.toString.call(raw.days) === "[object Array]" ?
+        raw.days : [];
+    for (var i = 0; i < list.length; i++) {
+        var d = list[i];
+        if (d === null || typeof d !== "object") { continue; }
+        var entry = csStoreStr(d.entry);
+        if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(entry)) { continue; }
+        if (entry.length === 4) { entry = "0" + entry; }
+        var hours = d.workHours;
+        if (typeof hours !== "number" || !isFinite(hours) || hours < 0) { continue; }
+        var night = CsStationStore.NIGHTS.indexOf(csStoreStr(d.night)) >= 0 ?
+            csStoreStr(d.night) : "out";
+        trip.days.push({ entry: entry, workHours: hours, night: night });
+    }
+    return trip;
 };
 
 /**
@@ -86,6 +130,7 @@ CsStationStore.parse = function(text) {
         if (data.settings.pace !== null && typeof data.settings.pace === "object") {
             store.settings.pace = data.settings.pace;
         }
+        store.settings.trip = CsStationStore.cleanTrip(data.settings.trip);
     }
     return { store: store, error: "" };
 };
