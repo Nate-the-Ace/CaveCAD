@@ -2137,8 +2137,9 @@ class TestSheetFileGuard(unittest.TestCase):
         "StationTable": "reads the survey; writes only stations.json "
                         "beside the drawing",
         "ExpeditionPlanner": "reads the survey; writes stations.json "
-                             "settings and trip-plan.html / "
-                             "callout-card.html beside the drawing; reads "
+                             "settings (settings.trip.teams) and "
+                             "trip-plan.html / callout-card.html / "
+                             "team-*.html beside the drawing; reads "
                              "and writes people.json in the per-user data "
                              "folder; contacts to per-user settings only",
     }
