@@ -80,6 +80,7 @@ include(includeBasePath + "/CsTripPlan.js");
 include(includeBasePath + "/CsCalloutCard.js");
 // Forecast lookup for the callout card. Independent of the survey engines.
 include(includeBasePath + "/CsWeather.js");
+include(includeBasePath + "/CsCalloutLocal.js");
 include(includeBasePath + "/CsGhost.js");
 
 // The 3D passage surface. After CsTraverse and CsLrud, whose splay
