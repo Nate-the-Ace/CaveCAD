@@ -287,10 +287,11 @@ CsCalloutCard.html = function(plan, ctx) {
         h.push("<h2>Directions</h2>");
         for (var s = 0; s < plan.stops.length; s++) {
             h.push("<h3>To " + esc(plan.stops[s].station) + "</h3>");
-            h.push(CsTripPlan.signsHtml(CsTripPlan.signs(plan.stops[s].steps, plan.unit)));
+            h.push(CsTripPlan.signsHtml(CsTripPlan.signs(plan.stops[s].steps, plan.unit,
+                plan.stops[s].station)));
         }
         h.push("<h3>Back to " + esc(plan.start) + "</h3>");
-        h.push(CsTripPlan.signsHtml(CsTripPlan.signs(plan.back.steps, plan.unit)));
+        h.push(CsTripPlan.signsHtml(CsTripPlan.signs(plan.back.steps, plan.unit, plan.start)));
     }
     h.push("<h2>Hazards on the route</h2>");
     if (hazards.length === 0) {

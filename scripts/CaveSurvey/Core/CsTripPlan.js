@@ -604,65 +604,83 @@ CsTripPlan.clock = function(minutes) {
 // Highway-sign directions
 // ---------------------------------------------------------------------
 
+/** Classify a signed turn in degrees (positive = right) into an arrow. */
+CsTripPlan.turnArrow = function(d) {
+    while (d > 180) { d -= 360; }
+    while (d <= -180) { d += 360; }
+    var a = Math.abs(d);
+    if (a < 20) { return "straight"; }
+    if (a > 170) { return "uturn"; }
+    var side = d < 0 ? "left" : "right";
+    if (a < 60) { return "slight-" + side; }
+    if (a < 120) { return side; }
+    return "sharp-" + side;
+};
+
+/** "189 ft . 3 min" for the walking steps in a slice of a leg. */
+CsTripPlan.segmentText = function(steps, from, to, unit) {
+    var len = 0;
+    var mins = 0;
+    var haveMins = false;
+    for (var i = from; i < to; i++) {
+        if (steps[i].kind !== "walk") { continue; }
+        len += steps[i].length;
+        if (steps[i].minutes !== undefined && steps[i].minutes !== null) {
+            mins += steps[i].minutes;
+            haveMins = true;
+        }
+    }
+    var parts = [ CsTripPlan.dist(len, unit) ];
+    if (haveMins) { parts.push(CsTripPlan.clock(mins)); }
+    return parts.join(" · ");
+};
+
 /**
- * One sign per step: an arrow, the destination as the label, and a short
- * distance. Turns are worked out from the steps' dx/dy (bearing, 0 =
- * north, clockwise), relative to the previous WALK step. The first step,
- * a step after a pitch (orientation lost) and a step with no heading are
- * a "start" with an absolute heading.
+ * Signs for one leg. A sign exists only at a junction decision: step i
+ * ends at a junction (atJunction) and step i+1 leaves by a branch. The
+ * arrow is the turn from step i's bearing (0 = north, clockwise) to step
+ * i+1's. An outgoing pitch is "down"/"up"; a pitch coming in loses the
+ * orientation, so it is a "start" with the outgoing heading. Pitches are
+ * left out of the distances between signs.
  *
- * \return [{arrow, label, from, to, distance, minutes, junction, vertical,
- *           headText}]
+ * \param destination the station the leg ends at
+ * \return {signs: [{arrow, label, toward, junction, headText}],
+ *          connectors: [text] (one more than signs), destination}
  */
-CsTripPlan.signs = function(steps, unit) {
-    var out = [];
-    var prevBearing = null;
-    for (var i = 0; i < steps.length; i++) {
-        var st = steps[i];
-        var sign = { arrow: "start", label: st.to, from: st.from, to: st.to,
-            distance: "", minutes: (st.minutes === undefined ? null : st.minutes),
-            junction: !!st.atJunction, vertical: st.vertical || "", headText: "" };
-        if (st.kind === "pitch") {
-            sign.arrow = st.vertical === "up" ? "up" : "down";
-            sign.distance = st.dzKnown ? CsTripPlan.dist(Math.abs(st.dz), unit) : "";
-            prevBearing = null;
+CsTripPlan.signs = function(steps, unit, destination) {
+    var signs = [];
+    var connectors = [];
+    var last = 0;
+    var bearingOf = function(st) {
+        if (st.kind !== "walk" || st.heading === "" || st.heading === undefined) {
+            return null;
+        }
+        if (st.dx * st.dx + st.dy * st.dy <= 0) { return null; }
+        return Math.atan2(st.dx, st.dy) * 180 / Math.PI;
+    };
+    for (var i = 0; i < steps.length - 1; i++) {
+        if (!steps[i].atJunction) { continue; }
+        var inc = steps[i];
+        var out = steps[i + 1];
+        var sign = { arrow: "start", label: inc.to, toward: destination,
+            junction: true, headText: "" };
+        if (out.kind === "pitch") {
+            sign.arrow = out.vertical === "up" ? "up" : "down";
         } else {
-            sign.distance = CsTripPlan.dist(st.length, unit);
-            var plan = Math.sqrt(st.dx * st.dx + st.dy * st.dy);
-            if (plan <= 0 || st.heading === "" || st.heading === undefined) {
-                sign.arrow = "start";
-                prevBearing = null;
-            } else {
-                var bearing = Math.atan2(st.dx, st.dy) * 180 / Math.PI;
-                if (prevBearing === null) {
-                    sign.arrow = "start";
-                    sign.headText = "Head " + st.heading;
-                } else {
-                    var d = bearing - prevBearing;
-                    while (d > 180) { d -= 360; }
-                    while (d <= -180) { d += 360; }
-                    var a = Math.abs(d);
-                    var kind;
-                    if (a < 20) { kind = "straight"; }
-                    else if (a < 60) { kind = "slight"; }
-                    else if (a < 120) { kind = "turn"; }
-                    else if (a <= 170) { kind = "sharp"; }
-                    else { kind = "uturn"; }
-                    if (kind === "straight" || kind === "uturn") {
-                        sign.arrow = kind;
-                    } else {
-                        var side = d < 0 ? "left" : "right";
-                        sign.arrow = kind === "turn" ? side : kind + "-" + side;
-                        if (kind === "slight") { sign.arrow = "slight-" + side; }
-                        if (kind === "sharp") { sign.arrow = "sharp-" + side; }
-                    }
-                }
-                prevBearing = bearing;
+            var bi = bearingOf(inc);
+            var bo = bearingOf(out);
+            if (bi !== null && bo !== null) {
+                sign.arrow = CsTripPlan.turnArrow(bo - bi);
+            } else if (out.heading) {
+                sign.headText = "Head " + out.heading;
             }
         }
-        out.push(sign);
+        connectors.push(CsTripPlan.segmentText(steps, last, i + 1, unit));
+        last = i + 1;
+        signs.push(sign);
     }
-    return out;
+    connectors.push(CsTripPlan.segmentText(steps, last, steps.length, unit));
+    return { signs: signs, connectors: connectors, destination: destination };
 };
 
 /** CSS for signsHtml; both printed pages add it to their <style>. */
@@ -675,6 +693,8 @@ CsTripPlan.SIGNS_CSS = ".signs{margin:6px 0}" +
     ".sign .arrow svg{width:40px;height:40px}" +
     ".sign .body{flex:1}.sign .label{font-size:20px;font-weight:bold;line-height:1.2}" +
     ".sign .head,.sign .meta,.sign .snote{font-size:12px;color:#555}" +
+    ".signs .conn{font-size:12px;color:#666;margin:2px 0 2px 24px}" +
+    ".signs .arrive{font-size:16px;font-weight:bold;margin:4px 0 4px 6px}" +
     ".sign .tag{display:inline-block;font-size:11px;font-weight:bold;" +
     "border:1px solid #111;border-radius:4px;padding:0 4px;margin-left:8px;" +
     "vertical-align:middle}";
@@ -708,26 +728,28 @@ CsTripPlan.signArrowSvg = function(arrow) {
     return "<svg viewBox=\"0 0 40 40\" aria-hidden=\"true\">" + body + "</svg>";
 };
 
-/** HTML for a list of signs. Every string goes through esc. */
-CsTripPlan.signsHtml = function(signs) {
+/** HTML for one leg's signs (see signs). Every string goes through esc. */
+CsTripPlan.signsHtml = function(leg) {
     var esc = CsTripPlan.esc;
     var h = [ "<div class=\"signs\">" ];
-    for (var i = 0; i < signs.length; i++) {
-        var sg = signs[i];
-        var meta = [];
-        if (sg.distance !== "") { meta.push(sg.distance); }
-        if (sg.minutes !== null && sg.minutes !== undefined) {
-            meta.push(CsTripPlan.clock(sg.minutes));
-        }
+    if (leg.signs.length === 0) {
+        h.push("<div class=\"conn\">No intersections: follow the passage to " +
+            esc(leg.destination) + " (" + esc(leg.connectors[0]) + ")</div>");
+        h.push("</div>");
+        return h.join("");
+    }
+    for (var i = 0; i < leg.signs.length; i++) {
+        var sg = leg.signs[i];
+        h.push("<div class=\"conn\">" + esc(leg.connectors[i]) + "</div>");
         h.push("<div class=\"sign\"><div class=\"arrow\">" +
             CsTripPlan.signArrowSvg(sg.arrow) + "</div><div class=\"body\">" +
             (sg.headText !== "" ? "<div class=\"head\">" + esc(sg.headText) + "</div>" : "") +
-            "<div class=\"label\">" + esc(sg.label) +
-            (sg.junction ? "<span class=\"tag\">junction</span>" : "") + "</div>" +
-            "<div class=\"meta\">" + esc(meta.join(" · ")) + "</div>" +
-            (sg.note ? "<div class=\"snote\">" + esc(sg.note) + "</div>" : "") +
+            "<div class=\"label\">" + esc(sg.label) + "</div>" +
+            "<div class=\"meta\">toward " + esc(sg.toward) + "</div>" +
             "</div></div>");
     }
+    h.push("<div class=\"conn\">" + esc(leg.connectors[leg.signs.length]) + "</div>");
+    h.push("<div class=\"arrive\">&#9873; Arrive " + esc(leg.destination) + "</div>");
     h.push("</div>");
     return h.join("");
 };
@@ -855,19 +877,17 @@ CsTripPlan.packetHtml = function(plan, ctx) {
     var start = plan.start;
     for (var s = 0; s < plan.stops.length; s++) {
         h.push("<h3>To " + esc(plan.stops[s].station) + "</h3>");
-        var legSigns = CsTripPlan.signs(plan.stops[s].steps, unit);
-        for (var k = 0; k < legSigns.length; k++) {
+        h.push(CsTripPlan.signsHtml(CsTripPlan.signs(plan.stops[s].steps, unit,
+            plan.stops[s].station)));
+        for (var k = 0; k < plan.stops[s].steps.length; k++) {
             var notes = plan.stops[s].steps[k].notes || [];
-            legSigns[k].note = notes.join("; ");
+            for (var n = 0; n < notes.length; n++) {
+                h.push("<div class=\"note\">Note &mdash; " + esc(notes[n]) + "</div>");
+            }
         }
-        h.push(CsTripPlan.signsHtml(legSigns));
     }
     h.push("<h3>Back to " + esc(start) + "</h3>");
-    var backSigns = CsTripPlan.signs(plan.back.steps, unit);
-    for (var b = 0; b < backSigns.length; b++) {
-        backSigns[b].note = (plan.back.steps[b].notes || []).join("; ");
-    }
-    h.push(CsTripPlan.signsHtml(backSigns));
+    h.push(CsTripPlan.signsHtml(CsTripPlan.signs(plan.back.steps, unit, start)));
 
     if (plan.warnings.length > 0) {
         h.push("<h2>Watch for</h2><ul>");
