@@ -62,6 +62,9 @@ StationTable.ZOOM_FEET = 25.0;
  * widget expandos. `drawnPos` is filled lazily on the first zoom after
  * a reload (one scan of the drawing), and dropped on every reload.
  */
+/** Pixels for the Status column: wide enough for its dropdown. */
+StationTable.STATUS_WIDTH = 120;
+
 StationTable.state = { rows: [], shown: [], store: null, orphans: [],
     docPath: "", drawn: null, drawnPos: null, filling: false,
     loadError: "",
@@ -655,7 +658,11 @@ StationTable.fill = function() {
             for (var c = 0; c < cells.length; c++) {
                 // Status is edited through its widget, never as text.
                 var editable = open && (c === C.TEAM || c === C.WHO);
-                table.setItem(r, c, StationTable.itemFor(cells[c], editable));
+                // The widget sits ON the item, and the item's own text
+                // shows through it (a marked row read "opeopen"), so the
+                // Status item carries no text at all.
+                table.setItem(r, c, StationTable.itemFor(
+                    c === C.STATUS ? "" : cells[c], editable));
             }
             table.setCellWidget(r, C.STATUS, StationTable.statusWidget(row));
             if (keep !== null && row.station === keep.station) {
@@ -665,6 +672,9 @@ StationTable.fill = function() {
         try {
             table.resizeColumnToContents(C.STATION);
             table.resizeColumnToContents(C.KINDS);
+            // A cell widget is not measured by resizeColumnToContents;
+            // "(unmarked)" was clipped to "(unmarke".
+            table.setColumnWidth(C.STATUS, StationTable.STATUS_WIDTH);
         } catch (eSize) {
         }
         if (reselect >= 0) {
