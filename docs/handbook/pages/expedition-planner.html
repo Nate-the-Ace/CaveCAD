@@ -74,7 +74,7 @@
 </ul>
 <h2>Where it is saved</h2>
 <p>Pace, the teams (each with its name, goal, start day, members, days, stops and packing list), the forecast place and the trip's start date are saved in <code>stations.json</code> in the cave's folder, the same file Station Table keeps its marks in, so Google Drive carries them to the team and they come back after a restart. For members only the names are saved: no medical notes or contact details. Every save reads the file again first and changes only these settings, so a teammate's marks are never written over. The packet and the cards are written beside the drawing as <code>trip-plan.html</code>, <code>callout-card.html</code> and, for two or more teams, the <code>team-*.html</code> files. The people directory (<code>people.json</code>, in CaveCAD's settings folder) and the topside phone numbers stay on this computer. Save the drawing once first: an unsaved drawing has no folder to keep any of this in.</p>
-<p>The panel follows the drawing it was opened on. If you switch to another cave and press <b>Plan trip</b>, it reads the new drawing and asks you to check the teams' stops again.</p>
+<p>The panel follows the drawing it was opened on. Each drawing keeps its own teams, stops and schedule in its own <code>stations.json</code>, so when you switch to another cave the panel loads that cave's teams (or starts a fresh Team 1 if it has none).</p>
 <h2>See also</h2>
 <ul>
 <li><a href="station-table.html">Station Table</a></li>
