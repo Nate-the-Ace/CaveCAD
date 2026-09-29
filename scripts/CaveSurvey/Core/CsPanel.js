@@ -43,8 +43,12 @@ CsPanel.loadCollapsed = function(settingKey) {
     return set;
 };
 
-/** Records that one section is open or shut. */
+/** Records that one section is open or shut. No key (null or "") is a
+ *  section that folds without remembering, as a dialog's sections do. */
 CsPanel.saveCollapsed = function(settingKey, title, collapsed) {
+    if (settingKey === null || settingKey === undefined || settingKey === "") {
+        return;
+    }
     try {
         var set = CsPanel.loadCollapsed(settingKey);
         if (collapsed) {

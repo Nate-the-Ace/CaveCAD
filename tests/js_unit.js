@@ -33641,19 +33641,8 @@ eqs(ccDown.error, "timed out", "weather: the failure reason is kept");
 eqs(CsWeather.parseForecast("not json"), null, "weather: junk parses to null");
 
 // ---------------------------------------------------------------------
-// Callout card -- local roster and contacts
+// Callout card -- local contacts (the roster is the people directory now)
 // ---------------------------------------------------------------------
-
-var ccRosterText = CsCalloutLocal.serializeRoster([
-    { name: "Ana", role: "Lead", squeeze: "14", medical: "", emergency: "Luis" },
-    { name: "", role: "", squeeze: "", medical: "", emergency: "" },
-    { name: "Bo", role: "", squeeze: "big", medical: "Asthma", emergency: "" } ]);
-var ccRoster = CsCalloutLocal.parseRoster(ccRosterText);
-eqs(ccRoster.length, 2, "roster: the empty row is dropped");
-eqs(ccRoster[0].squeeze, 14, "roster: squeeze text becomes a number");
-eqs(ccRoster[1].squeeze, null, "roster: junk squeeze is null");
-eqs(ccRoster[1].medical, "Asthma", "roster: medical kept");
-eqs(CsCalloutLocal.parseRoster("nonsense").length, 0, "roster: junk is empty");
 
 var ccContacts = CsCalloutLocal.parseContacts(CsCalloutLocal.serializeContacts(
     { topName: "Pat", topPhone: "555", escalation: "Call X", bufferMin: "90" }));
@@ -33662,7 +33651,8 @@ eqs(ccContacts.topName, "Pat", "contacts: name round trips");
 eqs(CsCalloutLocal.parseContacts("").bufferMin, 120, "contacts: default buffer");
 eqs(CsCalloutLocal.parseContacts(JSON.stringify({ bufferMin: -5 })).bufferMin, 120,
     "contacts: a bad buffer falls back to the default");
-eqs(CsCalloutLocal.KEY_ROSTER, "CaveSurvey/Callout/Roster", "roster: settings key");
+eqs(CsCalloutLocal.parseRoster, undefined,
+    "contacts: the old settings roster codec is gone (people.json replaced it)");
 
 // ---------------------------------------------------------------------
 // Highway-sign directions

@@ -20,8 +20,14 @@
 // same file Station Table keeps its marks in (Core/CsStationSidecar.js).
 // Every write reads the file again and changes only its own settings,
 // so a teammate's marks that arrived through Drive are never thrown
-// away. The roster and contacts are personal data and live in this
-// computer's settings only (Core/CsCalloutLocal.js).
+// away. The trip's party (who is going: id and name only) is
+// settings.trip.party there too.
+//
+// PERSONAL DATA STAYS ON THIS COMPUTER. The people directory (medical
+// notes, emergency contacts, skills) is people.json in CaveCAD's
+// per-user data folder (Core/CsPeople.js); the topside contacts are in
+// this computer's settings (Core/CsCalloutLocal.js). Neither ever goes
+// into the cave folder, which Drive syncs.
 //
 // WIDGETS ARE FOUND BY objectName, never stashed on objects or as
 // expandos (cavecad-tab-engine-panels). The action is forceGlobal, so
@@ -55,7 +61,14 @@ ExpeditionPlanner.state = { drawn: null, docPath: null, store: null,
     // The stops picked, the last plan built, and the pace and packing
     // text last PUT INTO the widgets from stations.json (so a reload can
     // tell a caver's unsaved typing from what it showed).
-    planStops: [], plan: null, planShown: null };
+    planStops: [], plan: null, planShown: null,
+    // The people directory as loaded from people.json, why it could not
+    // be (the table is then read-only and nothing is written to it), and
+    // what each roster row is: {id, name, known}. Unknown rows are party
+    // members this computer has no details for.
+    people: [], peopleError: "", rosterRows: [],
+    // Set while the roster is filled by code (FILLING IS NOT EDITING).
+    filling: false };
 
 // ---------------------------------------------------------------------
 // The panel
@@ -75,7 +88,8 @@ ExpeditionPlanner.state = { drawn: null, docPath: null, store: null,
 // no addRow here either, so fields sit in CsPanel.formGrid grids.
 
 ExpeditionPlanner.CALLOUT_DAY_HEADERS = ["Day", "Entry (HH:MM)", "Work hours", "Night (out/camp)"];
-ExpeditionPlanner.CALLOUT_ROSTER_HEADERS = ["Name", "Role", "Squeeze limit (in)", "Medical", "Emergency contact"];
+ExpeditionPlanner.CALLOUT_ROSTER_HEADERS = ["Going", "Name", "Role", "Squeeze (in)",
+    "Skills", "Medical", "Emergency contact"];
 
 /** The objectName of the one scrolling page (the footer sits outside it). */
 ExpeditionPlanner.PAGE_SCROLL_NAME = "ExpeditionPlannerPageScroll";
@@ -109,8 +123,9 @@ ExpeditionPlanner.calloutField = function(grid, row, label, required, name, tip)
 };
 
 /**
- * An editable table with fixed headers. It never connects itemChanged:
- * the form is read on Build card, so filling it by code writes nothing.
+ * A table with fixed headers. The days table never connects
+ * itemChanged: it is read on Build card, so filling it by code writes
+ * nothing. The roster does connect it, behind a fill guard.
  */
 ExpeditionPlanner.calloutTable = function(name, headers, minH, maxH) {
     var t = new QTableWidget(0, headers.length);
@@ -191,28 +206,85 @@ ExpeditionPlanner.buildTripSection = function(layout) {
     layout.addLayout(grid, 0);
 };
 
-/** 2. ROSTER: the people, and whether they go on the card. */
+/**
+ * 2. ROSTER: the people directory (people.json, this computer only) as
+ * a read-only table with a Going tick per person, the buttons that
+ * change it, and whether the roster goes on the card. Details are
+ * typed in the Add/Edit person popup, never in the table.
+ */
 ExpeditionPlanner.buildRosterSection = function(layout) {
     ExpeditionPlanner.heading(layout, qsTr("Roster"));
-    layout.addWidget(new QLabel(qsTr("Saved on this computer only.")), 0, 0);
+    layout.addWidget(new QLabel("<span style=\"color:#777\">" +
+        CsPanel.escapeHtml(qsTr("Saved on this computer only. Tick Going for " +
+            "this trip.")) + "</span>"), 0, 0);
     var roster = ExpeditionPlanner.calloutTable("ExpeditionPlannerCalloutRoster",
-        ExpeditionPlanner.CALLOUT_ROSTER_HEADERS, 90, 170);
+        ExpeditionPlanner.CALLOUT_ROSTER_HEADERS, 90, 200);
+    roster.toolTip = qsTr("Everyone in your people directory. Tick Going " +
+        "for this trip; double-click a person (or Edit person) to change " +
+        "their details.");
+    try {
+        roster.selectionBehavior = QAbstractItemView.SelectRows;
+        roster.selectionMode = QAbstractItemView.SingleSelection;
+        // Read-only: only the Going tick changes here. A checkable item
+        // toggles whatever the edit triggers say.
+        roster.editTriggers = QAbstractItemView.NoEditTriggers;
+    } catch (eSel) {
+    }
     layout.addWidget(roster, 0, 0);
-    var b = ExpeditionPlanner.buttonRow(layout,
-        [qsTr("Add person"), qsTr("Remove person")]);
-    b[0].clicked.connect(function() {
-        ExpeditionPlanner.addTableRow(
-            ExpeditionPlanner.child("ExpeditionPlannerCalloutRoster"),
-            ["", "", "", "", ""]);
-    });
-    b[1].clicked.connect(function() {
-        ExpeditionPlanner.removeTableRow(
-            ExpeditionPlanner.child("ExpeditionPlannerCalloutRoster"));
-    });
+    // FILLING IS NOT EDITING: setItem and setCheckState fire itemChanged
+    // exactly as a click does, so onRosterItemChanged returns while
+    // state.filling is set (the Station Table rule).
+    try {
+        roster["itemChanged(QTableWidgetItem*)"].connect(function(item) {
+            ExpeditionPlanner.onRosterItemChanged(item);
+        });
+    } catch (eChanged) {
+        try {
+            roster.itemChanged.connect(function(item) {
+                ExpeditionPlanner.onRosterItemChanged(item);
+            });
+        } catch (eChanged2) {
+        }
+    }
+    try {
+        roster["cellDoubleClicked(int, int)"].connect(function(row, column) {
+            ExpeditionPlanner.editPerson(row);
+        });
+    } catch (eDbl) {
+        try {
+            roster.cellDoubleClicked.connect(function(row, column) {
+                ExpeditionPlanner.editPerson(row);
+            });
+        } catch (eDbl2) {
+        }
+    }
+    var b = ExpeditionPlanner.buttonRow(layout, [qsTr("Add person"),
+        qsTr("Edit person"), qsTr("Remove person"), qsTr("Show file")]);
+    b[0].objectName = "ExpeditionPlannerPersonAdd";
+    b[0].toolTip = qsTr("Enter someone new in the people directory. They " +
+        "are ticked Going for this trip.");
+    b[1].objectName = "ExpeditionPlannerPersonEdit";
+    b[1].toolTip = qsTr("Change the selected person's details.");
+    b[2].objectName = "ExpeditionPlannerPersonRemove";
+    b[2].toolTip = qsTr("Delete the selected person from the people directory.");
+    b[3].objectName = "ExpeditionPlannerPeopleFile";
+    b[3].toolTip = qsTr("Show the folder holding people.json. Copy that " +
+        "file to back up or move your directory.");
+    b[0].clicked.connect(function() { ExpeditionPlanner.openPersonDialog(""); });
+    b[1].clicked.connect(function() { ExpeditionPlanner.editPerson(-1); });
+    b[2].clicked.connect(function() { ExpeditionPlanner.removePerson(); });
+    b[3].clicked.connect(function() { ExpeditionPlanner.showPeopleFile(); });
+    var status = new QLabel("");
+    status.objectName = "ExpeditionPlannerPeopleStatus";
+    try {
+        status.wordWrap = true;
+    } catch (eWrap) {
+    }
+    layout.addWidget(status, 0, 0);
     var include = new QCheckBox(qsTr("Include roster on the card"));
     include.objectName = "ExpeditionPlannerCalloutInclude";
     include.toolTip = qsTr("While ticked, the card needs at least one " +
-        "person. Untick for a copy that leaves your hands.");
+        "person going. Untick for a copy that leaves your hands.");
     include.checked = true;
     layout.addWidget(include, 0, 0);
 };
@@ -1004,10 +1076,654 @@ ExpeditionPlanner.resetPlan = function() {
 };
 
 // ---------------------------------------------------------------------
+// The people directory (ROSTER section)
+// ---------------------------------------------------------------------
+//
+// people.json (CsPeople) is the directory; the Going ticks are the
+// trip's party, saved in stations.json settings.trip.party (id and name
+// only) whenever a tick changes and again on Build card. Every change to
+// a person goes through applyPerson / removePersonById, which save
+// people.json and repaint; the popup and the buttons only call them, so
+// both can be driven without clicking.
+
+/** Read people.json into state. A damaged file leaves the directory empty and read-only. */
+ExpeditionPlanner.loadPeople = function() {
+    var s = ExpeditionPlanner.state;
+    var got = CsPeople.load();
+    s.people = got.people;
+    s.peopleError = got.error;
+    var editable = got.error === "";
+    var names = ["ExpeditionPlannerPersonAdd", "ExpeditionPlannerPersonEdit",
+        "ExpeditionPlannerPersonRemove"];
+    for (var i = 0; i < names.length; i++) {
+        var b = ExpeditionPlanner.child(names[i]);
+        if (b !== null) {
+            try {
+                b.enabled = editable;
+            } catch (eEn) {
+            }
+        }
+    }
+};
+
+/** The status line under the roster: the damage first, when there is any. */
+ExpeditionPlanner.peopleSay = function(text) {
+    var s = ExpeditionPlanner.state;
+    var label = ExpeditionPlanner.child("ExpeditionPlannerPeopleStatus");
+    if (label === null) {
+        return;
+    }
+    var parts = [];
+    if (s.peopleError !== "") {
+        parts.push("<span style=\"color:#c00\">" + CsPanel.escapeHtml(
+            qsTr("people.json could not be read, so the directory is " +
+                "read-only and will not be overwritten: %1. Fix or move " +
+                "the file (Show file), then press Refresh.").arg(s.peopleError)) +
+            "</span>");
+    }
+    if (text !== undefined && text !== null && String(text) !== "") {
+        parts.push(CsPanel.escapeHtml(String(text)));
+    }
+    label.text = parts.join("<br>");
+};
+
+/** A Going cell: checkable, never typed in. */
+ExpeditionPlanner.goingItem = function(checked) {
+    var it = new QTableWidgetItem("");
+    try {
+        it.setFlags((it.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable);
+    } catch (eFlags) {
+    }
+    try {
+        it.setCheckState(checked ? Qt.Checked : Qt.Unchecked);
+    } catch (eCheck) {
+    }
+    return it;
+};
+
+/** A read-only cell, grey when `grey`, with an optional tooltip. */
+ExpeditionPlanner.readOnlyItem = function(text, grey, tip) {
+    var it = new QTableWidgetItem(String(text));
+    try {
+        it.setFlags(it.flags() & ~Qt.ItemIsEditable);
+    } catch (eFlags) {
+    }
+    if (grey === true) {
+        try {
+            it.setForeground(new QBrush(new QColor("#777777")));
+        } catch (eGrey) {
+        }
+    }
+    if (tip !== undefined && tip !== null && String(tip) !== "") {
+        try {
+            it.setToolTip(String(tip));
+        } catch (eTip) {
+        }
+    }
+    return it;
+};
+
+/**
+ * Repaint the roster: everyone in the directory, ticked when they are
+ * in `party` (matched by id, then name: CsPeople.resolveParty), then the
+ * party members this computer has no details for, ticked, read-only and
+ * grey. Fill-guarded, so it writes nothing.
+ */
+ExpeditionPlanner.fillRoster = function(party) {
+    var s = ExpeditionPlanner.state;
+    var t = ExpeditionPlanner.child("ExpeditionPlannerCalloutRoster");
+    if (t === null) {
+        return;
+    }
+    var resolved = CsPeople.resolveParty(party, s.people);
+    var going = {};
+    var extras = [];
+    for (var r = 0; r < resolved.length; r++) {
+        if (resolved[r].known) {
+            going["#" + resolved[r].id] = true;
+        } else {
+            extras.push({ id: resolved[r].id, name: resolved[r].name });
+        }
+    }
+    s.filling = true;
+    try {
+        t.setRowCount(0);
+        s.rosterRows = [];
+        var row;
+        for (var i = 0; i < s.people.length; i++) {
+            var p = s.people[i];
+            row = t.rowCount;
+            t.setRowCount(row + 1);
+            t.setItem(row, 0, ExpeditionPlanner.goingItem(going["#" + p.id] === true));
+            t.setItem(row, 1, ExpeditionPlanner.readOnlyItem(p.name));
+            t.setItem(row, 2, ExpeditionPlanner.readOnlyItem(p.role));
+            t.setItem(row, 3, ExpeditionPlanner.readOnlyItem(
+                p.squeeze === null ? "" : p.squeeze));
+            t.setItem(row, 4, ExpeditionPlanner.readOnlyItem(
+                CsPeople.skillLabels(p).join(" · "), false, p.skillsNote));
+            t.setItem(row, 5, ExpeditionPlanner.readOnlyItem(p.medical));
+            t.setItem(row, 6, ExpeditionPlanner.readOnlyItem(p.emergency));
+            s.rosterRows.push({ id: p.id, name: p.name, known: true });
+        }
+        for (var x = 0; x < extras.length; x++) {
+            row = t.rowCount;
+            t.setRowCount(row + 1);
+            t.setItem(row, 0, ExpeditionPlanner.goingItem(true));
+            t.setItem(row, 1, ExpeditionPlanner.readOnlyItem(extras[x].name, true,
+                qsTr("On this trip's party, but not in the people directory " +
+                    "on this computer. Add person to enter their details; " +
+                    "untick Going to take them off the trip.")));
+            t.setItem(row, 2, ExpeditionPlanner.readOnlyItem(
+                qsTr("details not on this computer"), true));
+            for (var c = 3; c < ExpeditionPlanner.CALLOUT_ROSTER_HEADERS.length; c++) {
+                t.setItem(row, c, ExpeditionPlanner.readOnlyItem("", true));
+            }
+            s.rosterRows.push({ id: extras[x].id, name: extras[x].name, known: false });
+        }
+    } finally {
+        s.filling = false;
+    }
+};
+
+/** Whether a roster row's Going box is ticked. */
+ExpeditionPlanner.rowGoing = function(t, r) {
+    try {
+        var it = t.item(r, 0);
+        return !isNull(it) && it.checkState() == Qt.Checked;
+    } catch (e) {
+        return false;
+    }
+};
+
+/**
+ * The party the Going ticks say: the directory's ticked people (id and
+ * name, directory order; CsPeople.partyOf), then the ticked people this
+ * computer has no details for. Without the table, what stations.json
+ * held.
+ */
+ExpeditionPlanner.readParty = function() {
+    var s = ExpeditionPlanner.state;
+    var t = ExpeditionPlanner.child("ExpeditionPlannerCalloutRoster");
+    if (t === null) {
+        return (s.store !== null && s.store.settings.trip) ?
+            (s.store.settings.trip.party || []) : [];
+    }
+    var ids = [];
+    var extras = [];
+    var n = Math.min(t.rowCount, s.rosterRows.length);
+    for (var r = 0; r < n; r++) {
+        if (!ExpeditionPlanner.rowGoing(t, r)) {
+            continue;
+        }
+        if (s.rosterRows[r].known) {
+            ids.push(s.rosterRows[r].id);
+        } else {
+            extras.push({ id: s.rosterRows[r].id, name: s.rosterRows[r].name });
+        }
+    }
+    return CsStationStore.cleanTrip({
+        party: CsPeople.partyOf(s.people, ids).concat(extras) }).party;
+};
+
+/**
+ * Put the party into stations.json settings.trip.party, re-reading the
+ * file first like every other write here. An unchanged party writes
+ * nothing. \return "" when saved or nothing to save, else why not
+ */
+ExpeditionPlanner.saveParty = function(party) {
+    var s = ExpeditionPlanner.state;
+    var clean = CsStationStore.cleanTrip({ party: party }).party;
+    var path = CsStationSidecar.sidecarPath(s.docPath);
+    if (path === "") {
+        return qsTr("Going not saved: save the drawing first");
+    }
+    var side = CsStationSidecar.readSidecar(path);
+    if (side.error !== "") {
+        return qsTr("Going not saved: stations.json could not be read") +
+            " (" + side.error + ")";
+    }
+    var trip = side.store.settings.trip || CsStationStore.emptyTrip();
+    if (JSON.stringify(trip.party || []) !== JSON.stringify(clean)) {
+        trip.party = clean;
+        side.store.settings.trip = trip;
+        if (!CsStationSidecar.writeSidecar(path, side.store)) {
+            return qsTr("Going not saved: could not write stations.json");
+        }
+    }
+    if (s.store !== null) {
+        if (!s.store.settings.trip) { s.store.settings.trip = CsStationStore.emptyTrip(); }
+        s.store.settings.trip.party = clean;
+    }
+    return "";
+};
+
+/** A Going tick changed: the party is saved at once (not on fills). */
+ExpeditionPlanner.onRosterItemChanged = function(item) {
+    var s = ExpeditionPlanner.state;
+    if (s.filling) {
+        return;
+    }
+    try {
+        if (isNull(item) || item.column() !== 0) {
+            return;
+        }
+    } catch (eCol) {
+        return;
+    }
+    ExpeditionPlanner.peopleSay(ExpeditionPlanner.saveParty(
+        ExpeditionPlanner.readParty()));
+};
+
+/** The directory index of a person id, or -1. */
+ExpeditionPlanner.personIndex = function(id) {
+    var list = ExpeditionPlanner.state.people;
+    for (var i = 0; id !== "" && i < list.length; i++) {
+        if (list[i].id === id) {
+            return i;
+        }
+    }
+    return -1;
+};
+
+/**
+ * Create or update a person from the popup's fields, save people.json
+ * and repaint, keeping the Going ticks. A new person is ticked Going.
+ * The dialog calls this on OK; it can also be driven directly.
+ *
+ * \param fields {name, role, squeeze (text), medical, emergency,
+ *   skills: [ids], skillsNote}
+ * \param existingId the person to update, or "" to add
+ * \return "" when saved, else why not (nothing changed)
+ */
+ExpeditionPlanner.applyPerson = function(fields, existingId) {
+    var s = ExpeditionPlanner.state;
+    if (s.peopleError !== "") {
+        return qsTr("people.json could not be read, so nothing was changed") +
+            " (" + s.peopleError + ")";
+    }
+    var problems = CsPeople.validate(fields);
+    if (problems.length > 0) {
+        return qsTr("Needed: %1").arg(problems.join(", "));
+    }
+    var trim = function(v) {
+        return (v === undefined || v === null ? "" : String(v)).replace(/^\s+|\s+$/g, "");
+    };
+    var party = ExpeditionPlanner.readParty();
+    var before = JSON.parse(JSON.stringify(s.people));
+    var at = ExpeditionPlanner.personIndex(existingId === undefined ||
+        existingId === null ? "" : String(existingId));
+    var p;
+    if (at >= 0) {
+        p = s.people[at];
+    } else {
+        p = CsPeople.blank();
+        s.people.push(p);
+    }
+    p.name = trim(fields.name);
+    p.role = trim(fields.role);
+    var sq = trim(fields.squeeze);
+    p.squeeze = sq === "" ? null : Number(sq);
+    p.medical = trim(fields.medical);
+    p.emergency = trim(fields.emergency);
+    p.skills = Object.prototype.toString.call(fields.skills) === "[object Array]" ?
+        fields.skills.slice(0) : [];
+    p.skillsNote = trim(fields.skillsNote);
+    var why = CsPeople.save(s.people);
+    if (why !== "") {
+        s.people = before;
+        return why;
+    }
+    // Re-read through the codec: the table shows what the file now holds.
+    s.people = CsPeople.parse(CsPeople.serialize(s.people)).people;
+    if (at < 0) {
+        party.push({ id: p.id, name: p.name });
+    }
+    ExpeditionPlanner.fillRoster(party);
+    ExpeditionPlanner.peopleSay(ExpeditionPlanner.saveParty(
+        ExpeditionPlanner.readParty()));
+    return "";
+};
+
+/**
+ * Delete a person from the directory and untick them from this trip.
+ * No question asked here: removePerson asks first.
+ * \return "" when done, else why not (nothing changed)
+ */
+ExpeditionPlanner.removePersonById = function(id) {
+    var s = ExpeditionPlanner.state;
+    if (s.peopleError !== "") {
+        return qsTr("people.json could not be read, so nothing was changed") +
+            " (" + s.peopleError + ")";
+    }
+    var at = ExpeditionPlanner.personIndex(String(id));
+    if (at < 0) {
+        return qsTr("That person is not in the people directory.");
+    }
+    var party = ExpeditionPlanner.readParty();
+    var keep = [];
+    for (var i = 0; i < party.length; i++) {
+        if (party[i].id !== id) { keep.push(party[i]); }
+    }
+    var before = JSON.parse(JSON.stringify(s.people));
+    s.people.splice(at, 1);
+    var why = CsPeople.save(s.people);
+    if (why !== "") {
+        s.people = before;
+        return why;
+    }
+    ExpeditionPlanner.fillRoster(keep);
+    ExpeditionPlanner.peopleSay(ExpeditionPlanner.saveParty(
+        ExpeditionPlanner.readParty()));
+    return "";
+};
+
+/** The row a button acts on: the one given, else the selected one. */
+ExpeditionPlanner.rosterRowFor = function(row) {
+    var s = ExpeditionPlanner.state;
+    var r = row;
+    if (typeof r !== "number" || r < 0) {
+        var t = ExpeditionPlanner.child("ExpeditionPlannerCalloutRoster");
+        r = t === null ? -1 : ExpeditionPlanner.selectedRowOf(t);
+    }
+    return (r >= 0 && r < s.rosterRows.length) ? s.rosterRows[r] : null;
+};
+
+/** Edit person (the button, or a double-click on row `row`). */
+ExpeditionPlanner.editPerson = function(row) {
+    var s = ExpeditionPlanner.state;
+    if (s.peopleError !== "") {
+        ExpeditionPlanner.peopleSay("");
+        return;
+    }
+    var entry = ExpeditionPlanner.rosterRowFor(row);
+    if (entry === null) {
+        ExpeditionPlanner.peopleSay(qsTr("Pick a person in the table first."));
+        return;
+    }
+    if (!entry.known) {
+        ExpeditionPlanner.peopleSay(qsTr("%1 is not in the people directory " +
+            "on this computer. Add person to enter their details.").arg(entry.name));
+        return;
+    }
+    ExpeditionPlanner.openPersonDialog(entry.id);
+};
+
+/** Remove person: asks first, default No. */
+ExpeditionPlanner.removePerson = function() {
+    var s = ExpeditionPlanner.state;
+    if (s.peopleError !== "") {
+        ExpeditionPlanner.peopleSay("");
+        return;
+    }
+    var entry = ExpeditionPlanner.rosterRowFor(-1);
+    if (entry === null) {
+        ExpeditionPlanner.peopleSay(qsTr("Pick a person in the table first."));
+        return;
+    }
+    if (!entry.known) {
+        ExpeditionPlanner.peopleSay(qsTr("%1 is not in the people directory; " +
+            "untick Going to take them off this trip.").arg(entry.name));
+        return;
+    }
+    // Parented to the main window and compared to QMessageBox.Yes
+    // (qcad-js-bridge-traps: never truthy-test a message box answer).
+    var answer = QMessageBox.question(RMainWindowQt.getMainWindow(),
+        qsTr("Remove person"),
+        qsTr("Remove %1 from the people directory? This deletes their " +
+            "saved details from this computer.").arg(entry.name),
+        QMessageBox.Yes | QMessageBox.No, QMessageBox.No);
+    if (answer !== QMessageBox.Yes) {
+        return;
+    }
+    var why = ExpeditionPlanner.removePersonById(entry.id);
+    if (why !== "") {
+        ExpeditionPlanner.peopleSay(why);
+    }
+};
+
+/** Show file: the folder holding people.json, in the desktop's file manager. */
+ExpeditionPlanner.showPeopleFile = function() {
+    var folder = CsPeople.folder();
+    if (folder === "") {
+        ExpeditionPlanner.peopleSay(qsTr("The per-user data folder is unknown."));
+        return;
+    }
+    var there = false;
+    try {
+        there = (new QFileInfo(CsPeople.path())).exists();
+    } catch (eInfo) {
+    }
+    ExpeditionPlanner.peopleSay(there ?
+        qsTr("people.json is in %1").arg(folder) :
+        qsTr("No one saved yet: people.json appears in %1 after the first " +
+            "Add person.").arg(folder));
+    try {
+        // Same call CaveShelf.reveal ships.
+        QDesktopServices.openUrl(new QUrl("file://" + folder));
+    } catch (eOpen) {
+    }
+};
+
+/**
+ * One collapsible skills category in the person popup: a CsPanel
+ * section (chevron header, never a checkbox) whose header counts the
+ * ticked boxes live, e.g. "Survey (2)". Open when the person already has
+ * one of its skills, shut otherwise. Never remembered between openings.
+ */
+ExpeditionPlanner.addSkillGroup = function(parent, layout, group, person, boxes) {
+    var titleFor = function(n) {
+        return group.label + (n > 0 ? " (" + n + ")" : "");
+    };
+    var had = CsPeople.groupCount(person, group.id);
+    var first = titleFor(had);
+    var shut = {};
+    if (had === 0) { shut[first] = true; }
+    var sec = CsPanel.section(parent, first, "", shut);
+    if (sec.header !== null) {
+        sec.header.objectName = "ExpeditionPlannerPersonSkillGroup_" + group.id;
+    }
+    sec.host.objectName = "ExpeditionPlannerPersonSkillGroup_" + group.id + "_body";
+    var grid = new QGridLayout();
+    var mine = [];
+    var have = {};
+    var list = (person !== null && Object.prototype.toString.call(person.skills) ===
+        "[object Array]") ? person.skills : [];
+    for (var h = 0; h < list.length; h++) { have["#" + list[h]] = true; }
+    for (var i = 0; i < group.skills.length; i++) {
+        var sk = group.skills[i];
+        var cb = new QCheckBox(sk.label);
+        cb.objectName = "ExpeditionPlannerPersonSkill_" + sk.id;
+        cb.checked = have["#" + sk.id] === true;
+        grid.addWidget(cb, Math.floor(i / 2), i % 2);
+        mine.push(cb);
+        boxes.push({ id: sk.id, box: cb });
+    }
+    sec.host.setLayout(grid);
+    var refresh = function() {
+        if (sec.header === null) {
+            return;
+        }
+        var n = 0;
+        for (var k = 0; k < mine.length; k++) {
+            if (mine[k].checked === true) { n++; }
+        }
+        try {
+            sec.header.text = CsPanel.headerText(titleFor(n), sec.open === true);
+        } catch (eText) {
+        }
+    };
+    for (var m = 0; m < mine.length; m++) {
+        try {
+            mine[m]["toggled(bool)"].connect(refresh);
+        } catch (eTog) {
+            try {
+                mine[m].clicked.connect(refresh);
+            } catch (eClick) {
+            }
+        }
+    }
+    // After CsPanel's own handler, which re-titles the header with the
+    // count it was built with: this puts the live count back.
+    if (sec.header !== null) {
+        try {
+            sec.header.clicked.connect(refresh);
+        } catch (eHead) {
+        }
+    }
+    layout.addWidget(sec.box, 0, 0);
+};
+
+/**
+ * The Add / Edit person popup, built but not shown: openPersonDialog
+ * runs it, and a probe can show() it and drive its widgets. OK checks
+ * the fields (CsPeople.validate: name, medical notes and emergency
+ * contact are required) and stays open naming every gap; otherwise it
+ * hands them to applyPerson and closes. Cancel changes nothing.
+ * \param existingId the person to edit, or "" to add one
+ */
+ExpeditionPlanner.buildPersonDialog = function(existingId) {
+    var s = ExpeditionPlanner.state;
+    var at = ExpeditionPlanner.personIndex(existingId === undefined ||
+        existingId === null ? "" : String(existingId));
+    var person = at >= 0 ? s.people[at] : null;
+    var id = person === null ? "" : person.id;
+    var dlg = new QDialog(RMainWindowQt.getMainWindow());
+    dlg.objectName = "ExpeditionPlannerPersonDialog";
+    dlg.windowTitle = person === null ? qsTr("Add person") : qsTr("Edit person");
+    var v = new QVBoxLayout();
+
+    var grid = CsPanel.formGrid(1);
+    var field = function(row, label, required, name, value, tip, hint) {
+        grid.addWidget(new QLabel(ExpeditionPlanner.labelText(label, required)), row, 0);
+        var edit = new QLineEdit();
+        edit.objectName = name;
+        edit.text = value === null || value === undefined ? "" : String(value);
+        edit.toolTip = tip;
+        if (hint !== undefined) {
+            try {
+                edit.placeholderText = hint;
+            } catch (eHint) {
+            }
+        }
+        grid.addWidget(edit, row, 1);
+        return edit;
+    };
+    var nameEdit = field(0, qsTr("Name"), true, "ExpeditionPlannerPersonName",
+        person === null ? "" : person.name, qsTr("As the team knows them."));
+    var roleEdit = field(1, qsTr("Role"), false, "ExpeditionPlannerPersonRole",
+        person === null ? "" : person.role, qsTr("Optional: lead, sketch, book, " +
+            "instruments..."));
+    var squeezeEdit = field(2, qsTr("Squeeze limit (in)"), false,
+        "ExpeditionPlannerPersonSqueeze",
+        person === null || person.squeeze === null ? "" : person.squeeze,
+        qsTr("Optional: the tightest squeeze they fit, in inches."));
+    var medicalEdit = field(3, qsTr("Medical notes"), true,
+        "ExpeditionPlannerPersonMedical", person === null ? "" : person.medical,
+        qsTr("Conditions, allergies, medication. Printed on the callout card."),
+        qsTr("Type None if none: a blank is not an answer"));
+    var emergencyEdit = field(4, qsTr("Emergency contact"), true,
+        "ExpeditionPlannerPersonEmergency", person === null ? "" : person.emergency,
+        qsTr("Name and phone, in one line."));
+    v.addLayout(grid, 0);
+
+    v.addWidget(new QLabel("<b>" + CsPanel.escapeHtml(qsTr("Skills")) + "</b>"), 0, 0);
+    var boxes = [];
+    var groups = CsPeople.skillsByGroup();
+    for (var g = 0; g < groups.length; g++) {
+        try {
+            ExpeditionPlanner.addSkillGroup(dlg, v, groups[g], person, boxes);
+        } catch (eGroup) {
+        }
+    }
+    var noteGrid = CsPanel.formGrid(1);
+    noteGrid.addWidget(new QLabel(qsTr("Other skills / details")), 0, 0);
+    var noteEdit = new QLineEdit();
+    noteEdit.objectName = "ExpeditionPlannerPersonSkillNote";
+    noteEdit.text = person === null ? "" : person.skillsNote;
+    noteEdit.toolTip = qsTr("Anything the checklist does not cover. Printed " +
+        "under their skills on the card.");
+    noteGrid.addWidget(noteEdit, 0, 1);
+    v.addLayout(noteGrid, 0);
+
+    var err = new QLabel("");
+    err.objectName = "ExpeditionPlannerPersonError";
+    try {
+        err.wordWrap = true;
+    } catch (eWrap) {
+    }
+    v.addWidget(err, 0, 0);
+
+    var row = new QHBoxLayout();
+    row.addStretch(1);
+    var ok = new QPushButton(qsTr("OK"));
+    ok.objectName = "ExpeditionPlannerPersonOk";
+    var cancel = new QPushButton(qsTr("Cancel"));
+    cancel.objectName = "ExpeditionPlannerPersonCancel";
+    try {
+        ok["default"] = true;
+    } catch (eDef) {
+    }
+    row.addWidget(cancel, 0, 0);
+    row.addWidget(ok, 0, 0);
+    v.addLayout(row, 0);
+
+    // CLOSURES, NOT SLOT NAMES (SymbolPaletteEdit.askMeta): connect takes
+    // a function in this build.
+    ok.clicked.connect(function() {
+        var skills = [];
+        for (var b = 0; b < boxes.length; b++) {
+            if (boxes[b].box.checked === true) { skills.push(boxes[b].id); }
+        }
+        var keep = [];
+        var known = {};
+        for (var k = 0; k < CsPeople.SKILLS.length; k++) { known["#" + CsPeople.SKILLS[k].id] = true; }
+        // Ids the checklist does not know (a newer file) are kept.
+        var old = person !== null ? person.skills : [];
+        for (var o = 0; o < old.length; o++) {
+            if (known["#" + old[o]] !== true) { keep.push(old[o]); }
+        }
+        var fields = { name: String(nameEdit.text), role: String(roleEdit.text),
+            squeeze: String(squeezeEdit.text), medical: String(medicalEdit.text),
+            emergency: String(emergencyEdit.text), skills: skills.concat(keep),
+            skillsNote: String(noteEdit.text) };
+        var problems = CsPeople.validate(fields);
+        var why = problems.length > 0 ? qsTr("Needed: %1").arg(problems.join(", ")) :
+            ExpeditionPlanner.applyPerson(fields, id);
+        if (why !== "") {
+            err.text = "<span style=\"color:#c00\">" + CsPanel.escapeHtml(why) + "</span>";
+            return;
+        }
+        dlg.accept();
+    });
+    cancel.clicked.connect(function() { dlg.reject(); });
+    dlg.setLayout(v);
+    return dlg;
+};
+
+/** Add person ("" ) or Edit person (an id): the popup, modal. */
+ExpeditionPlanner.openPersonDialog = function(existingId) {
+    var s = ExpeditionPlanner.state;
+    if (s.peopleError !== "") {
+        ExpeditionPlanner.peopleSay("");
+        return;
+    }
+    var dlg = ExpeditionPlanner.buildPersonDialog(existingId);
+    dlg.exec();
+    // destroy() THROWS on every QDialog in this build (SymbolPaletteEdit):
+    // close it and hand it to Qt instead. The OK handler has already
+    // saved whatever was accepted.
+    try {
+        dlg.close();
+        dlg.deleteLater();
+    } catch (eClose) {
+    }
+};
+
+// ---------------------------------------------------------------------
 // The callout card
 // ---------------------------------------------------------------------
 
-/** The form as {trip, contacts, roster, includeRoster}. */
+/** The form as {trip (with its party), contacts, roster (resolved), includeRoster}. */
 ExpeditionPlanner.readCalloutForm = function() {
     var text = function(name) {
         var w = ExpeditionPlanner.child(name);
@@ -1025,14 +1741,8 @@ ExpeditionPlanner.readCalloutForm = function() {
     }
     var trip = CsStationStore.cleanTrip({
         startDate: text("ExpeditionPlannerCalloutStart"),
-        weatherPlace: text("ExpeditionPlannerCalloutPlace"), days: days });
-    var rt = ExpeditionPlanner.child("ExpeditionPlannerCalloutRoster");
-    var roster = [];
-    for (var p = 0; rt !== null && p < rt.rowCount; p++) {
-        roster.push({ name: cell(rt, p, 0), role: cell(rt, p, 1),
-            squeeze: cell(rt, p, 2), medical: cell(rt, p, 3),
-            emergency: cell(rt, p, 4) });
-    }
+        weatherPlace: text("ExpeditionPlannerCalloutPlace"), days: days,
+        party: ExpeditionPlanner.readParty() });
     var include = ExpeditionPlanner.child("ExpeditionPlannerCalloutInclude");
     return { trip: trip,
         contacts: CsCalloutLocal.parseContacts(CsCalloutLocal.serializeContacts({
@@ -1040,14 +1750,16 @@ ExpeditionPlanner.readCalloutForm = function() {
             topPhone: text("ExpeditionPlannerCalloutTopPhone"),
             escalation: text("ExpeditionPlannerCalloutEscalation"),
             bufferMin: text("ExpeditionPlannerCalloutBuffer") })),
-        roster: CsCalloutLocal.parseRoster(CsCalloutLocal.serializeRoster(roster)),
+        // What the card prints: the party with the directory's details.
+        roster: CsPeople.resolveParty(trip.party, ExpeditionPlanner.state.people),
         includeRoster: include === null ? true : include.checked === true };
 };
 
 /**
- * Fill the form from stations.json (trip) and local settings (people).
- * The roster and days tables connect no itemChanged handler, so filling writes
- * nothing.
+ * Fill the form from stations.json (trip and party), people.json (the
+ * directory) and local settings (contacts). The days table connects no
+ * itemChanged handler, and the roster's is fill-guarded, so filling
+ * writes nothing.
  */
 ExpeditionPlanner.showCalloutSettings = function() {
     var s = ExpeditionPlanner.state;
@@ -1056,8 +1768,7 @@ ExpeditionPlanner.showCalloutSettings = function() {
         if (w !== null) { w.text = String(v); }
     };
     var dt = ExpeditionPlanner.child("ExpeditionPlannerCalloutDays");
-    var rt = ExpeditionPlanner.child("ExpeditionPlannerCalloutRoster");
-    if (dt === null || rt === null) {
+    if (dt === null) {
         return;
     }
     var trip = (s.store !== null && s.store.settings.trip) ?
@@ -1074,13 +1785,9 @@ ExpeditionPlanner.showCalloutSettings = function() {
     set("ExpeditionPlannerCalloutTopPhone", c.topPhone);
     set("ExpeditionPlannerCalloutEscalation", c.escalation);
     set("ExpeditionPlannerCalloutBuffer", c.bufferMin);
-    rt.setRowCount(0);
-    var people = CsCalloutLocal.loadRoster();
-    for (var p = 0; p < people.length; p++) {
-        ExpeditionPlanner.addTableRow(rt, [people[p].name, people[p].role,
-            people[p].squeeze === null ? "" : people[p].squeeze,
-            people[p].medical, people[p].emergency]);
-    }
+    ExpeditionPlanner.loadPeople();
+    ExpeditionPlanner.fillRoster(trip.party || []);
+    ExpeditionPlanner.peopleSay("");
 };
 
 /**
@@ -1142,7 +1849,6 @@ ExpeditionPlanner.buildCard = function() {
     var problems = [];
     var why = ExpeditionPlanner.saveTrip(form.trip);
     if (why !== "") { problems.push(why); }
-    if (!CsCalloutLocal.saveRoster(form.roster)) { problems.push(qsTr("roster not saved")); }
     if (!CsCalloutLocal.saveContacts(form.contacts)) { problems.push(qsTr("contacts not saved")); }
 
     var anchor = null;
