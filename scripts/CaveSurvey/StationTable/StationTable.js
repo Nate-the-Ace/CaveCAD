@@ -8,7 +8,8 @@
 // WHAT IT IS. A working table over the whole map: one row per station,
 // badges for what kind of place it is (lead, open end, junction,
 // control, loop, noted, flagged), and the team's own status and notes
-// beside them. Leads are just one kind. Double-clicking a row goes there.
+// beside them, typed straight into the row. Leads are just one kind.
+// Double-clicking a station goes there.
 //
 // NOTHING DERIVED IS STORED. Rows are computed from the survey on
 // every refresh (Core/CsStationTable.js). What the team writes -- a
@@ -67,7 +68,9 @@ StationTable.state = { rows: [], shown: [], store: null, orphans: [],
     // The Plan tab: the stops picked, the last plan built, and the pace
     // and packing text last PUT INTO the widgets from stations.json (so
     // a reload can tell a caver's unsaved typing from what it showed).
-    planStops: [], plan: null, planShown: null };
+    planStops: [], plan: null, planShown: null,
+    // Jobs run once the signal that queued them has returned (later()).
+    laterJobs: [], laterTimer: null };
 
 // ---------------------------------------------------------------------
 // Reading the drawing
@@ -189,7 +192,7 @@ StationTable.writeSidecar = function(path, store) {
 // ---------------------------------------------------------------------
 
 /**
- * The table page: filters, the table, the editing strip and the footer,
+ * The table page: filters, the table (edited in place) and the footer,
  * as one widget. Kept separate from buildDock so a later page (the trip
  * plan) can sit beside it in a QTabWidget without this moving.
  */
@@ -234,14 +237,17 @@ StationTable.buildTablePage = function() {
     search.textChanged.connect(function() { StationTable.fill(); });
     statusFilter.activated.connect(function() { StationTable.fill(); });
 
-    // The table.
+    // The table. Status, Team notes and Assigned are typed straight
+    // into the row and saved as each cell is (commitCell /
+    // commitStatus); every other cell is read-only, cell by cell, not by
+    // switching editing off for the whole table (the CaveShelf idiom).
     var table = new QTableWidget(0, StationTable.HEADERS.length);
     table.objectName = "StationTableTable";
     table.setHorizontalHeaderLabels(StationTable.HEADERS);
     try {
         table.selectionBehavior = QAbstractItemView.SelectRows;
         table.selectionMode = QAbstractItemView.SingleSelection;
-        table.editTriggers = QAbstractItemView.NoEditTriggers;
+        table.editTriggers = StationTable.editTriggers();
     } catch (eSel) {
     }
     try {
@@ -254,52 +260,37 @@ StationTable.buildTablePage = function() {
     } catch (eH) {
     }
     layout.addWidget(table, 1, 0);
-    table.itemSelectionChanged.connect(function() {
-        StationTable.onSelection();
-    });
-    table.itemDoubleClicked.connect(function() {
-        StationTable.zoomToSelected();
-    });
-
-    // Editing strip for the selected row.
-    var editRow = new QHBoxLayout();
-    var statusEdit = new QComboBox();
-    statusEdit.objectName = "StationTableStatusEdit";
-    statusEdit.addItem(qsTr("(unmarked)"));
-    for (var s2 = 0; s2 < statuses.length; s2++) {
-        statusEdit.addItem(qsTr(statuses[s2]));
-    }
-    var whoEdit = new QLineEdit();
-    whoEdit.objectName = "StationTableWho";
-    var teamEdit = new QLineEdit();
-    teamEdit.objectName = "StationTableTeam";
+    // FILLING IS NOT EDITING: setItem/setText fire itemChanged exactly
+    // as typing does, so commitCell returns while state.filling is set.
     try {
-        whoEdit.placeholderText = qsTr("Assigned to");
-        teamEdit.placeholderText = qsTr("Team notes (objective, what to look at)");
-    } catch (ePh2) {
+        table["itemChanged(QTableWidgetItem*)"].connect(function(item) {
+            StationTable.commitCell(item);
+        });
+    } catch (eChanged) {
+        try {
+            table.itemChanged.connect(function(item) {
+                StationTable.commitCell(item);
+            });
+        } catch (eChanged2) {
+        }
     }
-    var saveButton = new QPushButton(qsTr("Save row"));
-    saveButton.objectName = "StationTableSave";
-    saveButton.toolTip = qsTr("Write this row's mark and notes to " +
-        "stations.json beside the drawing.");
-    var goButton = new QPushButton(qsTr("Go to"));
-    goButton.objectName = "StationTableGo";
-    goButton.toolTip = qsTr("Frame the drawing on this station " +
-        "(or double-click the row).");
-    var relinkButton = new QPushButton(qsTr("Re-link"));
-    relinkButton.objectName = "StationTableRelink";
-    relinkButton.toolTip = qsTr("The note in the survey changed. Keep this " +
-        "row's marks with the new note.");
-    editRow.addWidget(statusEdit, 0, 0);
-    editRow.addWidget(whoEdit, 1, 0);
-    editRow.addWidget(teamEdit, 2, 0);
-    editRow.addWidget(saveButton, 0, 0);
-    editRow.addWidget(relinkButton, 0, 0);
-    editRow.addWidget(goButton, 0, 0);
-    layout.addLayout(editRow, 0);
-    saveButton.clicked.connect(function() { StationTable.saveSelected(false); });
-    relinkButton.clicked.connect(function() { StationTable.saveSelected(true); });
-    goButton.clicked.connect(function() { StationTable.zoomToSelected(); });
+    // A double-click on a read-only cell (the station, above all) goes
+    // there; on an editable one it opens the editor instead.
+    try {
+        table["cellDoubleClicked(int, int)"].connect(function(row, column) {
+            StationTable.onDoubleClick(row, column);
+        });
+    } catch (eDbl) {
+        try {
+            table.cellDoubleClicked.connect(function(row, column) {
+                StationTable.onDoubleClick(row, column);
+            });
+        } catch (eDbl2) {
+            table.itemDoubleClicked.connect(function() {
+                StationTable.zoomToSelected();
+            });
+        }
+    }
 
     // Footer. One line, deliberately: a wrapping label under a
     // stretching table is drawn clipped (qcad-js-bridge-traps).
@@ -535,9 +526,105 @@ StationTable.cellsOf = function(row) {
         elev, status, noteCell, row.team || "", row.who || ""];
 };
 
+/** The columns a caver types in. Everything else is read from the survey. */
+StationTable.isEditableColumn = function(column) {
+    var C = StationTable.COL;
+    return column === C.STATUS || column === C.TEAM || column === C.WHO;
+};
+
+/**
+ * Double-click, typing, or F2 opens an editable cell. Read by name with
+ * the plain numbers as a fallback: some enum names are not bound on
+ * this bridge (qcad-js-bridge-traps), and an undefined in the OR would
+ * silently make the table edit nothing.
+ */
+StationTable.editTriggers = function() {
+    var dbl = QAbstractItemView.DoubleClicked;
+    var key = QAbstractItemView.EditKeyPressed;
+    var any = QAbstractItemView.AnyKeyPressed;
+    return (typeof dbl === "number" ? dbl : 2) |
+        (typeof key === "number" ? key : 8) |
+        (typeof any === "number" ? any : 16);
+};
+
+/**
+ * One cell as a QTableWidgetItem, editable or not. The flags are set
+ * per cell, so Station, Kinds, Trips, Elev and the survey's note can
+ * never be typed over.
+ */
+StationTable.itemFor = function(text, editable) {
+    var item = new QTableWidgetItem(String(text));
+    try {
+        var flags = item.flags();
+        item.setFlags(editable === true ? (flags | Qt.ItemIsEditable) :
+            (flags & ~Qt.ItemIsEditable));
+    } catch (eFlags) {
+    }
+    return item;
+};
+
+/** What the status combo's tooltip says for a row. */
+StationTable.statusTip = function(row) {
+    var tip = qsTr("This row's mark, saved to stations.json as soon as " +
+        "you pick it.");
+    if (row.status === undefined || row.status === "") {
+        var shown = "";
+        var eff = CsStationTable.effectiveStatus(row);
+        var suggest = CsStationTable.suggest(row);
+        if (eff !== "") {
+            shown = qsTr("Unmarked, reads as \"%1\".").arg(eff);
+        }
+        if (suggest !== "") {
+            shown += (shown === "" ? "" : " ") +
+                qsTr("Looks %1: a later trip surveyed on from here.")
+                    .arg(suggest);
+        }
+        if (shown !== "") {
+            tip = shown + "\n" + tip;
+        }
+    }
+    return tip;
+};
+
+/**
+ * The Status cell's widget: a dropdown for a normal row, a Re-link
+ * button for a row whose survey note changed. Index 0 is "(unmarked)",
+ * index i is CsStationStore.STATUSES[i - 1] (statusAt/indexOfStatus).
+ * The closures carry only the station's NAME, a plain string -- never a
+ * row object or a widget -- and find the row when they fire.
+ */
+StationTable.statusWidget = function(row) {
+    var station = String(row.station);
+    if (row.link === "relink") {
+        var button = new QPushButton(qsTr("Re-link"));
+        button.toolTip = qsTr("The note in the survey changed. Keep this " +
+            "row's marks with the new note.");
+        button.clicked.connect(function() {
+            StationTable.relink(station);
+        });
+        return button;
+    }
+    var combo = new QComboBox();
+    combo.addItem(qsTr("(unmarked)"));
+    var statuses = CsStationStore.STATUSES;
+    for (var i = 0; i < statuses.length; i++) {
+        combo.addItem(qsTr(statuses[i]));
+    }
+    combo.setCurrentIndex(StationTable.indexOfStatus(row.status));
+    combo.toolTip = StationTable.statusTip(row);
+    // activated, not currentIndexChanged: it fires only for a caver's
+    // pick, never for setCurrentIndex, so building the table saves
+    // nothing (the LinetypeMaker idiom).
+    combo.activated.connect(function(index) {
+        StationTable.commitStatus(station, index);
+    });
+    return combo;
+};
+
 /**
  * Repaint the table from state.rows and the current filters, keeping
- * the selected station selected when it is still shown.
+ * the selected station selected (and the current column current) when
+ * it is still shown.
  */
 StationTable.fill = function() {
     var table = StationTable.child("StationTableTable");
@@ -545,36 +632,59 @@ StationTable.fill = function() {
         return;
     }
     var s = StationTable.state;
+    var C = StationTable.COL;
     var keep = StationTable.selectedRow();
+    var keepColumn = -1;
+    try {
+        keepColumn = table.currentColumn();
+    } catch (eCol) {
+        keepColumn = -1;
+    }
     var shown = StationTable.visibleRows();
     s.shown = shown;
     s.filling = true;
     var reselect = -1;
     try {
+        // 0 first, so the old rows' dropdowns and buttons go with them
         table.setRowCount(0);
         table.setRowCount(shown.length);
         for (var r = 0; r < shown.length; r++) {
-            var cells = StationTable.cellsOf(shown[r]);
+            var row = shown[r];
+            var cells = StationTable.cellsOf(row);
+            var open = row.link !== "relink";
             for (var c = 0; c < cells.length; c++) {
-                table.setItem(r, c, new QTableWidgetItem(String(cells[c])));
+                // Status is edited through its widget, never as text.
+                var editable = open && (c === C.TEAM || c === C.WHO);
+                table.setItem(r, c, StationTable.itemFor(cells[c], editable));
             }
-            if (keep !== null && shown[r].station === keep.station) {
+            table.setCellWidget(r, C.STATUS, StationTable.statusWidget(row));
+            if (keep !== null && row.station === keep.station) {
                 reselect = r;
             }
         }
         try {
-            table.resizeColumnToContents(StationTable.COL.STATION);
-            table.resizeColumnToContents(StationTable.COL.KINDS);
+            table.resizeColumnToContents(C.STATION);
+            table.resizeColumnToContents(C.KINDS);
         } catch (eSize) {
         }
         if (reselect >= 0) {
-            table.selectRow(reselect);
+            var done = false;
+            if (typeof keepColumn === "number" && keepColumn >= 0) {
+                try {
+                    table.setCurrentCell(reselect, keepColumn);
+                    done = true;
+                } catch (eCur) {
+                    done = false;
+                }
+            }
+            if (!done) {
+                table.selectRow(reselect);
+            }
         }
     } finally {
         s.filling = false;
     }
     StationTable.updateSummary(shown.length);
-    StationTable.onSelection();
 };
 
 StationTable.updateSummary = function(shownCount) {
@@ -642,42 +752,6 @@ StationTable.selectedRow = function() {
         shown[idx] : null;
 };
 
-/** Load the selected row into the editing strip. */
-StationTable.onSelection = function() {
-    if (StationTable.state.filling) {
-        return;
-    }
-    var row = StationTable.selectedRow();
-    var statusEdit = StationTable.child("StationTableStatusEdit");
-    var who = StationTable.child("StationTableWho");
-    var team = StationTable.child("StationTableTeam");
-    var relink = StationTable.child("StationTableRelink");
-    var save = StationTable.child("StationTableSave");
-    var go = StationTable.child("StationTableGo");
-    if (statusEdit === null || who === null || team === null ||
-            relink === null || save === null) {
-        return;
-    }
-    var enabled = row !== null;
-    statusEdit.enabled = enabled;
-    who.enabled = enabled;
-    team.enabled = enabled;
-    save.enabled = enabled;
-    if (go !== null) {
-        go.enabled = enabled;
-    }
-    relink.visible = enabled && row.link === "relink";
-    if (!enabled) {
-        statusEdit.currentIndex = 0;
-        who.text = "";
-        team.text = "";
-        return;
-    }
-    statusEdit.currentIndex = StationTable.indexOfStatus(row.status);
-    who.text = row.who || "";
-    team.text = row.team || "";
-};
-
 /**
  * True when the drawing on screen is still the one the table was read
  * from. The panel is one dock across every tab; switching tabs does not
@@ -688,34 +762,87 @@ StationTable.sameDrawing = function() {
         StationTable.state.docPath;
 };
 
-/** Write the editing strip into the sidecar for the selected row. */
-StationTable.saveSelected = function(confirmRelink) {
-    var row = StationTable.selectedRow();
+/** The row for a station name, or null. */
+StationTable.rowOf = function(station) {
+    var rows = StationTable.state.rows || [];
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].station === station) {
+            return rows[i];
+        }
+    }
+    return null;
+};
+
+/**
+ * Run fn after the current signal has returned. A refill deletes every
+ * cell widget and item, so doing one inside the combo's, the button's or
+ * the item's own signal would delete the thing still emitting it. The
+ * job is plain JS and resolves everything when it fires.
+ */
+StationTable.later = function(fn) {
+    var s = StationTable.state;
+    s.laterJobs.push(fn);
+    try {
+        if (s.laterTimer === null) {
+            s.laterTimer = new QTimer();
+            s.laterTimer.singleShot = true;
+            s.laterTimer.timeout.connect(function() {
+                StationTable.runLater();
+            });
+        }
+        s.laterTimer.start(0);
+    } catch (eTimer) {
+        StationTable.runLater();
+    }
+};
+
+StationTable.runLater = function() {
+    var jobs = StationTable.state.laterJobs;
+    StationTable.state.laterJobs = [];
+    for (var i = 0; i < jobs.length; i++) {
+        try {
+            jobs[i]();
+        } catch (e) {
+            EAction.handleUserMessage("Station Table: " + e);
+        }
+    }
+};
+
+/**
+ * Write one row's fields into stations.json, the safe way: same drawing,
+ * drawing saved, file re-read first (a teammate's marks may have arrived
+ * through Drive), never over a file that will not parse. Only the fields
+ * passed are changed; the rest come from the file as re-read.
+ *
+ * A relink row is refused unless `confirmRelink` -- the Re-link button
+ * is the only way its entry moves to the new note.
+ *
+ * \return the entry as saved ({status, team, who}), or null when
+ *   nothing was written (the caver has been told why)
+ */
+StationTable.commitRow = function(row, fields, confirmRelink) {
     var s = StationTable.state;
     if (row === null) {
-        return;
+        return null;
+    }
+    if (row.link === "relink" && confirmRelink !== true) {
+        CsTell.warn(qsTr("Station Table: this row's note changed since its " +
+            "marks were saved. Press Re-link to keep them with the new note."));
+        return null;
     }
     if (!StationTable.sameDrawing()) {
-        StationTable.reload();
+        StationTable.later(function() { StationTable.reload(); });
         CsTell.warn(qsTr("Station Table: the drawing changed under the " +
-            "table, so it has been read again. Pick the row and save once more."));
-        return;
+            "table, so it has been read again and nothing was saved. " +
+            "Make the change once more."));
+        return null;
     }
     var path = StationTable.sidecarPath(s.docPath);
     if (path === "") {
         CsTell.warn(qsTr("Station Table: save the drawing first. The team " +
             "marks are stored beside it in stations.json."));
-        return;
+        return null;
     }
-    if (row.link === "relink" && confirmRelink !== true) {
-        // Saving a row whose note changed must not silently move the
-        // old entry: say so, and leave it for the Re-link button.
-        CsTell.warn(qsTr("Station Table: this row's note changed since its " +
-            "marks were saved. Press Re-link to keep them with the new note."));
-        return;
-    }
-    // Re-read: Drive may have brought a teammate's marks since the panel
-    // last looked, and writing the stale copy would erase them.
     var side = StationTable.readSidecar(path);
     if (side.error !== "") {
         s.loadError = side.error;
@@ -724,23 +851,168 @@ StationTable.saveSelected = function(confirmRelink) {
             "could not be read, so nothing was saved -- saving now would " +
             "replace everyone's marks. Look at the file first.") +
             "\n\n" + side.error);
-        return;
+        return null;
     }
-    var edit = StationTable.child("StationTableStatusEdit");
-    var whoEdit = StationTable.child("StationTableWho");
-    var teamEdit = StationTable.child("StationTableTeam");
-    var fields = {
-        status: StationTable.statusAt(edit === null ? 0 : edit.currentIndex),
-        who: whoEdit === null ? "" : String(whoEdit.text),
-        team: teamEdit === null ? "" : String(teamEdit.text)
-    };
     CsStationStore.setEntry(side.store, row, fields);
     if (!StationTable.writeSidecar(path, side.store)) {
         CsTell.warn(qsTr("Station Table: could not write stations.json " +
             "beside the drawing."));
+        return null;
+    }
+    s.store = side.store;
+    var key = CsStationStore.keyOf(row.station, row.keyText);
+    var saved = { status: "", team: "", who: "" };
+    var found = false;
+    for (var i = 0; i < side.store.entries.length; i++) {
+        var e = side.store.entries[i];
+        if (CsStationStore.keyOf(e.station, e.note) === key) {
+            saved = { status: e.status || "", team: e.team || "",
+                who: e.who || "" };
+            found = true;
+        }
+    }
+    // The row now shows what the file holds for it, a teammate's other
+    // fields included.
+    row.status = saved.status;
+    row.team = saved.team;
+    row.who = saved.who;
+    if (row.link !== "relink") {
+        row.link = found ? "ok" : "";
+    }
+    return saved;
+};
+
+/** The shown table row index for a station, or -1. */
+StationTable.shownIndex = function(station) {
+    var shown = StationTable.state.shown || [];
+    for (var i = 0; i < shown.length; i++) {
+        if (shown[i].station === station) {
+            return i;
+        }
+    }
+    return -1;
+};
+
+/**
+ * Put a row's Team notes and Assigned text back into its cells without
+ * the change being taken for typing, and the status widget's pick.
+ */
+StationTable.showRowMarks = function(row) {
+    var table = StationTable.child("StationTableTable");
+    var r = StationTable.shownIndex(row.station);
+    if (table === null || r < 0) {
         return;
     }
-    StationTable.reload();
+    var C = StationTable.COL;
+    var s = StationTable.state;
+    var was = s.filling;
+    s.filling = true;
+    try {
+        var cells = StationTable.cellsOf(row);
+        var cols = [C.STATUS, C.TEAM, C.WHO];
+        for (var k = 0; k < cols.length; k++) {
+            var item = table.item(r, cols[k]);
+            if (!isNull(item) && String(item.text()) !== String(cells[cols[k]])) {
+                item.setText(String(cells[cols[k]]));
+            }
+        }
+        var combo = table.cellWidget(r, C.STATUS);
+        if (!isNull(combo) && row.link !== "relink") {
+            try {
+                if (combo.currentIndex !== StationTable.indexOfStatus(row.status)) {
+                    combo.setCurrentIndex(StationTable.indexOfStatus(row.status));
+                }
+                combo.toolTip = StationTable.statusTip(row);
+            } catch (eCombo) {
+            }
+        }
+    } finally {
+        s.filling = was;
+    }
+};
+
+/**
+ * True when a status filter is picked, so a status just changed may
+ * take its row out of the table. (A text edit is left shown even when
+ * the search no longer matches it: the row stays under the caver's
+ * hands until the filters next change.)
+ */
+StationTable.statusFilterActive = function() {
+    var statusFilter = StationTable.child("StationTableStatusFilter");
+    return statusFilter !== null && Number(statusFilter.currentIndex) > 0;
+};
+
+/**
+ * A Team notes or Assigned cell was typed in: save it. The table is not
+ * rebuilt -- the caver's place and focus stay where they are.
+ */
+StationTable.commitCell = function(item) {
+    var s = StationTable.state;
+    if (s.filling || isNull(item)) {
+        return;
+    }
+    var r = -1, c = -1, typed = "";
+    try {
+        r = item.row();
+        c = item.column();
+        typed = String(item.text());
+    } catch (eAt) {
+        return;
+    }
+    var C = StationTable.COL;
+    var field = c === C.TEAM ? "team" : (c === C.WHO ? "who" : "");
+    var shown = s.shown || [];
+    if (field === "" || r < 0 || r >= shown.length) {
+        return;
+    }
+    var row = shown[r];
+    if (String(row[field] || "") === typed) {
+        return;
+    }
+    var fields = {};
+    fields[field] = typed;
+    StationTable.commitRow(row, fields, false);
+    // Saved or not, the cell shows what the row holds: the value as
+    // written, or the old one when the write was refused.
+    StationTable.showRowMarks(row);
+    StationTable.updateSummary(shown.length);
+};
+
+/** A status was picked in a row's dropdown: save it. */
+StationTable.commitStatus = function(station, index) {
+    var row = StationTable.rowOf(station);
+    if (row === null) {
+        return;
+    }
+    var status = StationTable.statusAt(index);
+    if (String(row.status || "") !== status) {
+        StationTable.commitRow(row, { status: status }, false);
+    }
+    StationTable.showRowMarks(row);
+    // Only a status filter can drop the row; then refill, once the
+    // combo's own signal has returned.
+    if (StationTable.statusFilterActive()) {
+        StationTable.later(function() { StationTable.fill(); });
+    } else {
+        StationTable.updateSummary((StationTable.state.shown || []).length);
+    }
+};
+
+/**
+ * The Re-link button: pressing it IS the confirmation. The row's marks
+ * are written against the survey's new note, the old entry goes, and
+ * the table is read again.
+ */
+StationTable.relink = function(station) {
+    var row = StationTable.rowOf(station);
+    if (row === null || row.link !== "relink") {
+        return;
+    }
+    var saved = StationTable.commitRow(row, { status: row.status || "",
+        team: row.team || "", who: row.who || "" }, true);
+    if (saved !== null) {
+        StationTable.later(function() { StationTable.reload(); });
+    }
 };
 
 /**
@@ -768,10 +1040,28 @@ StationTable.drawnPositions = function(doc) {
     return out;
 };
 
+/**
+ * A double-click: on a read-only cell it goes to that row's station; an
+ * editable cell's double-click is the caver opening its editor.
+ */
+StationTable.onDoubleClick = function(r, column) {
+    if (StationTable.isEditableColumn(column)) {
+        return;
+    }
+    var shown = StationTable.state.shown || [];
+    if (typeof r === "number" && r >= 0 && r < shown.length) {
+        StationTable.zoomTo(shown[r]);
+    }
+};
+
 /** Frame the drawing on the selected station. */
 StationTable.zoomToSelected = function() {
-    var row = StationTable.selectedRow();
-    if (row === null) {
+    StationTable.zoomTo(StationTable.selectedRow());
+};
+
+/** Frame the drawing on one row's station. */
+StationTable.zoomTo = function(row) {
+    if (row === null || row === undefined) {
         return;
     }
     if (!StationTable.sameDrawing()) {
