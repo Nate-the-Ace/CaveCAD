@@ -192,13 +192,34 @@ ExpeditionPlanner.buttonRow = function(layout, labels) {
     return out;
 };
 
-/** 1. TRIP: start date, forecast place. */
+/**
+ * 1. TRIP: start date (typed, or picked from the calendar popup beside
+ * it), forecast place.
+ */
 ExpeditionPlanner.buildTripSection = function(layout) {
     ExpeditionPlanner.heading(layout, qsTr("Trip"));
     var grid = CsPanel.formGrid(1);
-    ExpeditionPlanner.calloutField(grid, 0, qsTr("Start date"), true,
-        "ExpeditionPlannerCalloutStart",
-        qsTr("First day of the trip, YYYY-MM-DD. Saved in stations.json."));
+    grid.addWidget(new QLabel(ExpeditionPlanner.labelText(qsTr("Start date"), true)), 0, 0);
+    // The field and its Pick date button share the field column: a
+    // plain QWidget holding a row, since addWidget is the grid call
+    // this bridge is known to take. Field first, so Tab reaches it
+    // before the button.
+    var dateRow = new QWidget();
+    var dateLayout = new QHBoxLayout();
+    dateLayout.setContentsMargins(0, 0, 0, 0);
+    dateLayout.setSpacing(4);
+    var start = new QLineEdit();
+    start.objectName = "ExpeditionPlannerCalloutStart";
+    start.toolTip = qsTr("First day of the trip, YYYY-MM-DD. Type it, or " +
+        "press Pick date. Saved in stations.json.");
+    var pick = new QPushButton(qsTr("Pick date"));
+    pick.objectName = "ExpeditionPlannerDatePick";
+    pick.toolTip = qsTr("Choose the start date on a calendar.");
+    dateLayout.addWidget(start, 1, 0);
+    dateLayout.addWidget(pick, 0, 0);
+    dateRow.setLayout(dateLayout);
+    grid.addWidget(dateRow, 0, 1);
+    pick.clicked.connect(function() { ExpeditionPlanner.pickStartDate(); });
     ExpeditionPlanner.calloutField(grid, 1, qsTr("Forecast place"), false,
         "ExpeditionPlannerCalloutPlace",
         qsTr("Optional: a nearby town. Blank uses the drawing's location " +
@@ -1716,6 +1737,277 @@ ExpeditionPlanner.openPersonDialog = function(existingId) {
         dlg.close();
         dlg.deleteLater();
     } catch (eClose) {
+    }
+};
+
+// ---------------------------------------------------------------------
+// The Start date calendar
+// ---------------------------------------------------------------------
+//
+// This bridge has no QCalendarWidget, QDate or QDateEdit, so the
+// calendar is 42 plain day buttons in a QDialog, built ONCE and
+// relabelled by renderGrid whenever the month changes. Which day each
+// button is comes from Core/CsCalendar.js; which month to open on and
+// what to mark from datePickerState, both testable without a dialog.
+// Clicking a day returns it at once; there is no OK.
+
+/** The picker's accent: the app's orange (the checkbox tick). */
+ExpeditionPlanner.DATE_ACCENT = "#e8811a";
+
+/**
+ * What the picker opens on: the month of `currentText` when it is a
+ * valid yyyy-mm-dd, else today's month; the date to mark selected ("" when
+ * none) and today's date.
+ * \param todayObj {year, month, day}; omitted means the local clock
+ * \return {year, month, selectedIso, todayIso}
+ */
+ExpeditionPlanner.datePickerState = function(currentText, todayObj) {
+    var today = (todayObj !== null && typeof todayObj === "object") ?
+        todayObj : CsCalendar.today();
+    var p = CsCalendar.parse(currentText);
+    var base = p !== null ? p : today;
+    return { year: CsCalendar.clampYear(base.year), month: base.month,
+        selectedIso: p !== null ? CsCalendar.iso(p.year, p.month, p.day) : "",
+        todayIso: CsCalendar.iso(today.year, today.month, today.day) };
+};
+
+/** The style sheet of one day button. */
+ExpeditionPlanner.dayStyle = function(inMonth, isToday, isSelected) {
+    var a = ExpeditionPlanner.DATE_ACCENT;
+    var rules = ["padding: 0px", "border-radius: 3px"];
+    rules.push(isToday ? "border: 2px solid " + a : "border: 1px solid palette(mid)");
+    if (isToday) { rules.push("font-weight: bold"); }
+    if (isSelected) {
+        rules.push("background-color: " + a);
+        rules.push("color: #ffffff");
+    } else {
+        rules.push("background-color: palette(base)");
+        rules.push(inMonth ? "color: palette(text)" : "color: #999999");
+    }
+    return "QPushButton { " + rules.join("; ") + "; } " +
+        "QPushButton:hover { border-color: " + a + "; }";
+};
+
+/**
+ * The calendar popup, built but not run: pickDate execs it. A day click
+ * (or Today) writes its date into `result.iso` and accepts; Cancel,
+ * Esc and the close box reject and leave it "".
+ * \param result a plain {iso: ""} the buttons write into (never a
+ *   widget expando)
+ */
+ExpeditionPlanner.buildDateDialog = function(currentText, todayObj, result) {
+    var st = ExpeditionPlanner.datePickerState(currentText, todayObj);
+    var view = { year: st.year, month: st.month };
+    // Set while renderGrid moves the combo and spin box, so their
+    // signals do not render again from inside a render.
+    var guard = { rendering: false };
+    var cells = [];
+
+    var dlg = new QDialog(RMainWindowQt.getMainWindow());
+    dlg.objectName = "ExpeditionPlannerDateDialog";
+    dlg.windowTitle = qsTr("Pick a date");
+    var v = new QVBoxLayout();
+
+    var head = new QHBoxLayout();
+    var prev = new QPushButton("<");
+    prev.objectName = "ExpeditionPlannerDatePrev";
+    prev.toolTip = qsTr("Previous month");
+    var month = new QComboBox();
+    month.objectName = "ExpeditionPlannerDateMonth";
+    for (var m = 0; m < CsCalendar.MONTHS.length; m++) {
+        month.addItem(qsTr(CsCalendar.MONTHS[m]));
+    }
+    var year = new QSpinBox();
+    year.objectName = "ExpeditionPlannerDateYear";
+    try {
+        year.setRange(CsCalendar.YEAR_MIN, CsCalendar.YEAR_MAX);
+    } catch (eRange) {
+        try {
+            year.minimum = CsCalendar.YEAR_MIN;
+            year.maximum = CsCalendar.YEAR_MAX;
+        } catch (eRange2) {
+        }
+    }
+    var next = new QPushButton(">");
+    next.objectName = "ExpeditionPlannerDateNext";
+    next.toolTip = qsTr("Next month");
+    try {
+        prev.setFixedWidth(32);
+        next.setFixedWidth(32);
+    } catch (eW) {
+    }
+    head.addWidget(prev, 0, 0);
+    head.addWidget(month, 1, 0);
+    head.addWidget(year, 0, 0);
+    head.addWidget(next, 0, 0);
+    v.addLayout(head, 0);
+
+    var grid = new QGridLayout();
+    try {
+        grid.setHorizontalSpacing(2);
+        grid.setVerticalSpacing(2);
+    } catch (eSp) {
+    }
+    for (var w = 0; w < CsCalendar.WEEKDAYS.length; w++) {
+        var wl = new QLabel(qsTr(CsCalendar.WEEKDAYS[w]));
+        try {
+            wl.alignment = Qt.AlignCenter;
+        } catch (eAl) {
+        }
+        grid.addWidget(wl, 0, w);
+    }
+    var buttons = [];
+    var dayClick = function(i) {
+        return function() {
+            if (i < cells.length) {
+                result.iso = cells[i].iso;
+                dlg.accept();
+            }
+        };
+    };
+    for (var b = 0; b < 42; b++) {
+        var btn = new QPushButton("");
+        try {
+            btn.setFixedSize(36, 30);
+        } catch (eSize) {
+        }
+        try {
+            btn.autoDefault = false;
+        } catch (eAuto) {
+        }
+        grid.addWidget(btn, 1 + Math.floor(b / 7), b % 7);
+        btn.clicked.connect(dayClick(b));
+        buttons.push(btn);
+    }
+    v.addLayout(grid, 0);
+
+    var foot = new QHBoxLayout();
+    var todayBtn = new QPushButton(qsTr("Today"));
+    todayBtn.objectName = "ExpeditionPlannerDateToday";
+    todayBtn.toolTip = qsTr("Pick today's date.");
+    var cancel = new QPushButton(qsTr("Cancel"));
+    cancel.objectName = "ExpeditionPlannerDateCancel";
+    foot.addWidget(todayBtn, 0, 0);
+    foot.addStretch(1);
+    foot.addWidget(cancel, 0, 0);
+    v.addLayout(foot, 0);
+
+    // THE ONE RENDER: relabel the 42 buttons for `view`, and move the
+    // month combo and year spin to match, under the guard.
+    var renderGrid = function() {
+        guard.rendering = true;
+        try {
+            try {
+                month.setCurrentIndex(view.month - 1);
+            } catch (eIdx) {
+            }
+            try {
+                year.setValue(view.year);
+            } catch (eVal) {
+            }
+            var rows = CsCalendar.monthGrid(view.year, view.month);
+            cells = [];
+            for (var r = 0; r < rows.length; r++) {
+                cells = cells.concat(rows[r]);
+            }
+            for (var i = 0; i < buttons.length && i < cells.length; i++) {
+                var c = cells[i];
+                buttons[i].text = String(c.day);
+                buttons[i].objectName = "ExpeditionPlannerDateDay_" + c.iso;
+                buttons[i].toolTip = c.iso;
+                try {
+                    buttons[i].styleSheet = ExpeditionPlanner.dayStyle(c.inMonth,
+                        c.iso === st.todayIso, c.iso === st.selectedIso);
+                } catch (eStyle) {
+                }
+            }
+        } finally {
+            guard.rendering = false;
+        }
+    };
+    var go = function(delta) {
+        var to = CsCalendar.addMonths(view.year, view.month, delta);
+        if (to.year < CsCalendar.YEAR_MIN || to.year > CsCalendar.YEAR_MAX) {
+            return;
+        }
+        view.year = to.year;
+        view.month = to.month;
+        renderGrid();
+    };
+    var spinValue = function() {
+        try {
+            return Number(typeof year.value === "function" ? year.value() : year.value);
+        } catch (eRead) {
+            return view.year;
+        }
+    };
+
+    // CLOSURES, NOT SLOT NAMES (buildPersonDialog).
+    prev.clicked.connect(function() { go(-1); });
+    next.clicked.connect(function() { go(1); });
+    // activated, not currentIndexChanged: only a caver's choice.
+    month.activated.connect(function(index) {
+        if (guard.rendering) { return; }
+        var n = Number(index);
+        if (isFinite(n) && n >= 0 && n < 12) {
+            view.month = n + 1;
+            renderGrid();
+        }
+    });
+    var onYear = function() {
+        if (guard.rendering) { return; }
+        var y = CsCalendar.clampYear(spinValue());
+        if (y !== view.year) {
+            view.year = y;
+            renderGrid();
+        }
+    };
+    try {
+        year["valueChanged(int)"].connect(onYear);
+    } catch (eYear) {
+        try {
+            year.valueChanged.connect(onYear);
+        } catch (eYear2) {
+        }
+    }
+    todayBtn.clicked.connect(function() {
+        result.iso = st.todayIso;
+        dlg.accept();
+    });
+    cancel.clicked.connect(function() { dlg.reject(); });
+
+    renderGrid();
+    dlg.setLayout(v);
+    return dlg;
+};
+
+/**
+ * The calendar popup, modal. \return the date picked as yyyy-mm-dd, or
+ * "" when cancelled
+ */
+ExpeditionPlanner.pickDate = function(currentText) {
+    var result = { iso: "" };
+    var dlg = ExpeditionPlanner.buildDateDialog(currentText, null, result);
+    var answer = dlg.exec();
+    // destroy() THROWS on every QDialog in this build: close and hand
+    // it to Qt, as openPersonDialog does.
+    try {
+        dlg.close();
+        dlg.deleteLater();
+    } catch (eClose) {
+    }
+    return (answer === 0 || CsCalendar.parse(result.iso) === null) ? "" : result.iso;
+};
+
+/** Pick date: the calendar, opened on the field's date; a pick fills the field. */
+ExpeditionPlanner.pickStartDate = function() {
+    var field = ExpeditionPlanner.child("ExpeditionPlannerCalloutStart");
+    if (field === null) {
+        return;
+    }
+    var got = ExpeditionPlanner.pickDate(String(field.text));
+    if (got !== "") {
+        field.text = got;
     }
 };
 
