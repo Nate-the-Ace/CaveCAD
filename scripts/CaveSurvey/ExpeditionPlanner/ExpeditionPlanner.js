@@ -208,6 +208,18 @@ ExpeditionPlanner.buildTripSection = function(layout) {
     // main window (null) until the grid takes it.
     var dateRow = WidgetFactory.createWidget(ExpeditionPlanner.basePath,
         "ExpeditionPlannerDate.ui", null);
+    // Qt's calendar dropdown has no Today button and the bridge cannot
+    // reach it, so Today sits beside the field: one click puts today's
+    // date in, and the dropdown then opens on today's month. Added to
+    // the row's own layout (probed live); a failure just loses the button.
+    try {
+        var todayButton = new QPushButton(qsTr("Today"));
+        todayButton.objectName = "ExpeditionPlannerStartToday";
+        todayButton.toolTip = qsTr("Set the start date to today.");
+        dateRow.layout().addWidget(todayButton);
+        todayButton.clicked.connect(function() { ExpeditionPlanner.startDateToday(); });
+    } catch (eToday) {
+    }
     grid.addWidget(dateRow, 0, 1);
     // A fresh panel starts on today; showCalloutSettings replaces it
     // with the drawing's saved start date, when there is one. Written on
@@ -1795,6 +1807,11 @@ ExpeditionPlanner.writeStartDate = function(w, text) {
         w.setProperty("date", csStoreDateOk(t) ? t : ExpeditionPlanner.todayIso());
     } catch (e) {
     }
+};
+
+/** The Today button: put today's date in the field. */
+ExpeditionPlanner.startDateToday = function() {
+    ExpeditionPlanner.setStartDateText("");
 };
 
 /** Show `text` (yyyy-mm-dd) in the field; anything else shows today. */

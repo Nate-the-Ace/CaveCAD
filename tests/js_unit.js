@@ -34584,6 +34584,33 @@ if (typeof ExpeditionPlanner !== "undefined" &&
 }
 
 // ---------------------------------------------------------------------
+// Start date Today button
+// ---------------------------------------------------------------------
+
+if (typeof ExpeditionPlanner !== "undefined" &&
+        typeof ExpeditionPlanner.startDateToday === "function") {
+    (function() {
+        var wrote = [];
+        var fake = { setProperty: function(n, v) { wrote.push(n + "=" + v); } };
+        var realChild = ExpeditionPlanner.child;
+        var realToday = ExpeditionPlanner.todayIso;
+        ExpeditionPlanner.todayIso = function() { return "2026-09-29"; };
+        ExpeditionPlanner.child = function(name) {
+            return name === "ExpeditionPlannerCalloutStart" ? fake : null;
+        };
+        try {
+            ExpeditionPlanner.startDateToday();
+        } finally {
+            ExpeditionPlanner.child = realChild;
+            ExpeditionPlanner.todayIso = realToday;
+        }
+        eqs(wrote.join("|"), "date=2026-09-29", "today: the Today button writes today's date into the field");
+    })();
+} else {
+    ok(false, "today: ExpeditionPlanner.startDateToday exists");
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
