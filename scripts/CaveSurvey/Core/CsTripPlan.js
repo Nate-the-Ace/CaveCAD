@@ -232,7 +232,8 @@ CsTripPlan.dist = function(value, unit) {
  * \param ctx {degree: {station: legs}, notes: {station: [{text}]},
  *             pitchOfEdge: function(edge) -> pitch index or -1, unit}
  * \return [{kind: "walk"|"pitch", from, to, length, dz, vertical:
- *           "up"|"down"|"", heading, edges, atJunction, notes, text}]
+ *           "up"|"down"|"", heading, edges, atJunction, degreeTo, notes,
+ *           text}] where degreeTo is ctx.degree of `to` (0 if unknown)
  */
 CsTripPlan.describe = function(edges, ctx) {
     var unit = ctx.unit === "m" ? "m" : "ft";
@@ -286,6 +287,9 @@ CsTripPlan.describe = function(edges, ctx) {
     for (s = 0; s < steps.length; s++) {
         st = steps[s];
         st.atJunction = isJunction(st.to) && s < steps.length - 1;
+        // How many surveyed legs meet at the step's end: the "3-way" on
+        // an intersection sign. 0 when the survey does not say.
+        st.degreeTo = ctx.degree[st.to] || 0;
         st.notes = [];
         var stations = [];
         for (var q = 0; q < st.edges.length; q++) { stations.push(st.edges[q].to); }
@@ -656,9 +660,19 @@ CsTripPlan.JOG_FT = 5;
  * orientation, so it is a "start" with the outgoing heading. Pitches are
  * left out of the distances between signs.
  *
+ * INTERSECTIONS, NOT STATIONS. Underground nobody can tell which station
+ * they are at; they can count intersections and estimate distance
+ * (Nathan, 2026-09-29). So each sign is numbered: `index` is its place
+ * in the leg counted AFTER jog merging, `total` the leg's count. `ways`
+ * is how many passages meet there (the arriving step's degreeTo; a
+ * merged chain of n stations is sum(degrees) - 2 * (n - 1)), or null
+ * when a degree is unknown or under 3. `ref` is the first station of
+ * the sign: a small map reference only. `label` is kept equal to ref.
+ *
  * \param destination the station the leg ends at
- * \return {signs: [{arrow, label, toward, junction, headText}],
- *          connectors: [text] (one more than signs), destination}
+ * \return {signs: [{arrow, index, total, ways, ref, label, toward,
+ *          junction, headText}], connectors: [text] (one more than
+ *          signs), destination}
  */
 CsTripPlan.signs = function(steps, unit, destination) {
     var signs = [];
@@ -695,6 +709,7 @@ CsTripPlan.signs = function(steps, unit, destination) {
                 sign.headText = "Head " + out.heading;
             }
         }
+        sign.ref = inc.to;
         decisions.push({ i: i, sign: sign, turn: turn });
     }
     // Merge zigzag jogs: a decision whose turn is known and that follows the
@@ -710,15 +725,33 @@ CsTripPlan.signs = function(steps, unit, destination) {
                 prev.net = norm(prev.net + cur.turn);
                 prev.last = cur.i;
                 prev.sign.arrow = CsTripPlan.turnArrow(prev.net);
+                prev.degrees.push(steps[cur.i].degreeTo);
                 continue;
             }
         }
-        kept.push({ i: cur.i, last: cur.i, sign: cur.sign, net: cur.turn });
+        kept.push({ i: cur.i, last: cur.i, sign: cur.sign, net: cur.turn,
+            degrees: [ steps[cur.i].degreeTo ] });
     }
+    // Passages meeting at a (merged) intersection: each joined pair of
+    // stations shares one leg, counted once from each end.
+    var waysOf = function(degrees) {
+        var sum = 0;
+        for (var w = 0; w < degrees.length; w++) {
+            var dg = degrees[w];
+            if (typeof dg !== "number" || !isFinite(dg) || dg < 3) { return null; }
+            sum += dg;
+        }
+        var ways = sum - 2 * (degrees.length - 1);
+        return ways >= 3 ? ways : null;
+    };
     var last = 0;
     for (var k = 0; k < kept.length; k++) {
         connectors.push(CsTripPlan.segmentText(steps, last, kept[k].i + 1, unit));
         last = kept[k].i + 1;
+        kept[k].sign.index = k + 1;
+        kept[k].sign.total = kept.length;
+        kept[k].sign.ways = waysOf(kept[k].degrees);
+        kept[k].sign.label = kept[k].sign.ref;
         signs.push(kept[k].sign);
     }
     connectors.push(CsTripPlan.segmentText(steps, last, steps.length, unit));
@@ -740,6 +773,7 @@ CsTripPlan.SIGNS_CSS = ".signs{margin:4px 0}" +
     ".sign .arrow svg{width:26px;height:26px}" +
     ".sign .body{flex:1}.sign .label{font-size:16px;font-weight:bold;line-height:1.15}" +
     ".sign .head,.sign .meta,.sign .snote{font-size:11px;color:#555}" +
+    ".legsum{font-size:12px;color:#444;margin:0 0 2px}" +
     ".sign .reach{flex:none;width:90px;text-align:right;font-size:11px;color:#666}" +
     ".sign .tag{display:inline-block;font-size:10px;font-weight:bold;" +
     "border:1px solid #111;border-radius:4px;padding:0 4px;margin-left:8px;" +
@@ -774,13 +808,30 @@ CsTripPlan.signArrowSvg = function(arrow) {
     return "<svg viewBox=\"0 0 40 40\" aria-hidden=\"true\">" + body + "</svg>";
 };
 
-/** HTML for one leg's signs (see signs). Every string goes through esc. */
+/** "of 7 · 3-way · map ref A11": the small line under "Intersection 3". */
+CsTripPlan.signMeta = function(sg) {
+    var parts = [ "of " + sg.total ];
+    if (typeof sg.ways === "number" && sg.ways >= 3) { parts.push(sg.ways + "-way"); }
+    parts.push("map ref " + sg.ref);
+    return parts.join(" · ");
+};
+
+/** The one line for a leg with no intersections (see signs). */
+CsTripPlan.noSignsText = function(leg) {
+    return "No intersections: follow the passage to " + leg.destination +
+        " (" + leg.connectors[0] + ")";
+};
+
+/**
+ * HTML for one leg's signs (see signs). A row is: the walk to reach it,
+ * the arrow, "Intersection N" in large type and "of 7 · 3-way · map ref
+ * A11" small under it. Every string goes through esc.
+ */
 CsTripPlan.signsHtml = function(leg) {
     var esc = CsTripPlan.esc;
     var h = [ "<div class=\"signs" + (leg.signs.length === 0 ? " solo" : "") + "\">" ];
     if (leg.signs.length === 0) {
-        h.push("<div class=\"none\">No intersections: follow the passage to " +
-            esc(leg.destination) + " (" + esc(leg.connectors[0]) + ")</div>");
+        h.push("<div class=\"none\">" + esc(CsTripPlan.noSignsText(leg)) + "</div>");
         h.push("</div>");
         return h.join("");
     }
@@ -791,12 +842,13 @@ CsTripPlan.signsHtml = function(leg) {
     };
     for (var i = 0; i < leg.signs.length; i++) {
         var sg = leg.signs[i];
-        h.push("<div class=\"sign\">" + reach(leg.connectors[i], sg.label) +
+        h.push("<div class=\"sign\">" +
+            reach(leg.connectors[i], "intersection " + sg.index) +
             "<div class=\"arrow\">" + CsTripPlan.signArrowSvg(sg.arrow) +
             "</div><div class=\"body\">" +
             (sg.headText !== "" ? "<div class=\"head\">" + esc(sg.headText) + "</div>" : "") +
-            "<div class=\"label\">" + esc(sg.label) + "</div>" +
-            "<div class=\"meta\">toward " + esc(sg.toward) + "</div>" +
+            "<div class=\"label\">" + esc("Intersection " + sg.index) + "</div>" +
+            "<div class=\"meta\">" + esc(CsTripPlan.signMeta(sg)) + "</div>" +
             "</div></div>");
     }
     h.push("<div class=\"sign arrive\">" +
@@ -805,9 +857,96 @@ CsTripPlan.signsHtml = function(leg) {
         "<path d=\"M12 6 V34 M12 8 H32 L24 15 L32 22 H12\" fill=\"#fff\" " +
         "stroke=\"#fff\" stroke-width=\"3\"/></svg></div>" +
         "<div class=\"body\"><div class=\"label\">Arrive " + esc(leg.destination) +
-        "</div></div></div>");
+        "</div><div class=\"meta\">your stop</div></div></div>");
     h.push("</div>");
     return h.join("");
+};
+
+/**
+ * One line under a leg's heading: "7 intersections · 1240 ft · about
+ * 6 min". The distance is the leg's walking (pitches left out, as in the
+ * connectors); the time is every step's minutes, pitches included, which
+ * is the plan's time for the leg. A time that rounds under a minute is
+ * "under a minute", never "0 min".
+ */
+CsTripPlan.legSummary = function(leg, steps, unit) {
+    var n = leg.signs.length;
+    var count = n === 0 ? "No intersections, straight through" :
+        n + " intersection" + (n === 1 ? "" : "s");
+    var info = CsTripPlan.segmentInfo(steps, 0, steps.length);
+    var mins = 0;
+    for (var i = 0; i < steps.length; i++) {
+        if (typeof steps[i].minutes === "number" && isFinite(steps[i].minutes)) {
+            mins += steps[i].minutes;
+        }
+    }
+    var time = Math.round(mins) >= 1 ? "about " + CsTripPlan.clock(mins) : "under a minute";
+    return [ count, CsTripPlan.dist(info.len, unit), time ].join(" · ");
+};
+
+/** The leg summary as a page line, for both printed pages. */
+CsTripPlan.legSummaryHtml = function(leg, steps, unit) {
+    return "<div class=\"legsum\">" +
+        CsTripPlan.esc(CsTripPlan.legSummary(leg, steps, unit)) + "</div>";
+};
+
+/** 1st, 2nd, 3rd, 4th ... 11th, 12th, 13th ... 21st, 101st, 111th. */
+CsTripPlan.ordinal = function(n) {
+    var h = n % 100;
+    var t = n % 10;
+    var suffix = "th";
+    if (h < 11 || h > 13) {
+        if (t === 1) { suffix = "st"; }
+        else if (t === 2) { suffix = "nd"; }
+        else if (t === 3) { suffix = "rd"; }
+    }
+    return String(n) + suffix;
+};
+
+/** What to do at a sign, in words. */
+CsTripPlan.SIGN_WORDS = { "straight": "keep straight",
+    "slight-left": "go slight left", "left": "turn left",
+    "sharp-left": "turn sharp left", "slight-right": "go slight right",
+    "right": "turn right", "sharp-right": "turn sharp right",
+    "uturn": "turn back", "down": "climb down the pitch",
+    "up": "climb up the pitch" };
+
+/**
+ * One leg's signs as plain-text lines (the panel's plan text):
+ * "  1. Walk 251 ft, then at the 1st intersection (3-way, map ref A11)
+ * go slight left" ... "  Arrive B20 after 63 ft". A walk of nothing
+ * (only a pitch before the sign) is left out rather than printed as 0.
+ */
+CsTripPlan.signsText = function(leg) {
+    var lines = [];
+    if (leg.signs.length === 0) {
+        return [ "  " + CsTripPlan.noSignsText(leg) ];
+    }
+    var walked = function(text) {
+        var d = String(text).split(" · ")[0];
+        return /^0 /.test(d) ? "" : d;
+    };
+    for (var i = 0; i < leg.signs.length; i++) {
+        var sg = leg.signs[i];
+        var what;
+        if (sg.arrow === "start") {
+            what = sg.headText !== "" ?
+                sg.headText.charAt(0).toLowerCase() + sg.headText.slice(1) : "continue";
+        } else {
+            what = CsTripPlan.SIGN_WORDS[sg.arrow] || "continue";
+        }
+        var where = [];
+        if (typeof sg.ways === "number" && sg.ways >= 3) { where.push(sg.ways + "-way"); }
+        where.push("map ref " + sg.ref);
+        var at = "the " + CsTripPlan.ordinal(sg.index) + " intersection (" +
+            where.join(", ") + ") " + what;
+        var d = walked(leg.connectors[i]);
+        lines.push("  " + sg.index + ". " + (d === "" ? "At " + at :
+            "Walk " + d + ", then at " + at));
+    }
+    var end = walked(leg.connectors[leg.signs.length]);
+    lines.push("  Arrive " + leg.destination + (end === "" ? "" : " after " + end));
+    return lines;
 };
 
 /**
@@ -933,8 +1072,9 @@ CsTripPlan.packetHtml = function(plan, ctx) {
     var start = plan.start;
     for (var s = 0; s < plan.stops.length; s++) {
         h.push("<h3>To " + esc(plan.stops[s].station) + "</h3>");
-        h.push(CsTripPlan.signsHtml(CsTripPlan.signs(plan.stops[s].steps, unit,
-            plan.stops[s].station)));
+        var legIn = CsTripPlan.signs(plan.stops[s].steps, unit, plan.stops[s].station);
+        h.push(CsTripPlan.legSummaryHtml(legIn, plan.stops[s].steps, unit));
+        h.push(CsTripPlan.signsHtml(legIn));
         for (var k = 0; k < plan.stops[s].steps.length; k++) {
             var notes = plan.stops[s].steps[k].notes || [];
             for (var n = 0; n < notes.length; n++) {
@@ -943,7 +1083,9 @@ CsTripPlan.packetHtml = function(plan, ctx) {
         }
     }
     h.push("<h3>Back to " + esc(start) + "</h3>");
-    h.push(CsTripPlan.signsHtml(CsTripPlan.signs(plan.back.steps, unit, start)));
+    var legOut = CsTripPlan.signs(plan.back.steps, unit, start);
+    h.push(CsTripPlan.legSummaryHtml(legOut, plan.back.steps, unit));
+    h.push(CsTripPlan.signsHtml(legOut));
 
     if (plan.warnings.length > 0) {
         h.push("<h2>Watch for</h2><ul>");

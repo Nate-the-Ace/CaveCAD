@@ -33698,7 +33698,7 @@ var sgTwoHtml = CsTripPlan.signsHtml(sgTwo);
 eqs(sgTwoHtml.split("class=\"sign\"").length - 1, 2, "signsHtml: one row per junction");
 ok(sgTwoHtml.indexOf("class=\"conn\"") < 0, "signsHtml: connectors are inside the rows");
 ok(sgTwoHtml.indexOf("Arrive E") > 0, "signsHtml: arrive row");
-ok(sgTwoHtml.indexOf("toward E") > 0, "signsHtml: toward line");
+ok(sgTwoHtml.indexOf("toward") < 0, "signsHtml: no toward line (intersections restructure)");
 ok(sgTwoHtml.indexOf("<svg") > 0, "signsHtml: inline svg arrow");
 
 // No junctions: a single line.
@@ -33767,12 +33767,12 @@ ok(sg2Html.indexOf("class=\"conn\"") < 0 && sg2Html.indexOf("class=\"blk\"") < 0
     "signs2: no standalone connector elements");
 var sg2Rows = sg2Html.split(/<div class="sign[ "]/);
 ok(sg2Rows[1].indexOf("class=\"reach\"") > 0 && sg2Rows[1].indexOf("60 ft · 3 min") > 0 &&
-    sg2Rows[1].indexOf(">B</div>") > 0, "signs2: first row carries its own reach text");
-ok(sg2Rows[2].indexOf("70 ft · 6 min") > 0 && sg2Rows[2].indexOf(">D</div>") > 0,
+    sg2Rows[1].indexOf("map ref B") > 0, "signs2: first row carries its own reach text");
+ok(sg2Rows[2].indexOf("70 ft · 6 min") > 0 && sg2Rows[2].indexOf("map ref D") > 0,
     "signs2: second row carries the walk between signs");
 ok(sg2Rows[3].indexOf("arrive") === 0 && sg2Rows[3].indexOf("20 ft · 3 min") > 0 &&
     sg2Rows[3].indexOf("Arrive E") > 0, "signs2: Arrive row carries the last distance");
-ok(sg2Html.indexOf("aria-label=\"distance and time to reach B\"") > 0 &&
+ok(sg2Html.indexOf("aria-label=\"distance and time to reach intersection 1\"") > 0 &&
     sg2Html.indexOf("title=\"distance and time to reach E\"") > 0, "signs2: reach cell labelled");
 ok(CsTripPlan.SIGNS_CSS.indexOf("width:90px") > 0, "signs2: fixed reach column");
 ok(CsTripPlan.SIGNS_CSS.indexOf(".sign{") >= 0 && /\.sign\{[^}]*break-inside:avoid/.test(CsTripPlan.SIGNS_CSS),
@@ -33921,6 +33921,171 @@ eqs(CsCalloutCard.missingAll(undefined, undefined, undefined, undefined, true).l
 // The old single-answer form still works for its callers.
 eqs(CsCalloutCard.missing({ startDate: "", days: [] }, ccPlan), "start date",
     "missing: still answers the first gap");
+
+// ---------------------------------------------------------------------
+// Intersection directions: count intersections, not stations
+// (Nathan, 2026-09-29: nobody underground knows which station they
+// are at; they can count intersections and estimate distance).
+// ---------------------------------------------------------------------
+
+// degreeTo on every step, straight from ctx.degree.
+var sg3Steps = CsTripPlan.describe(tpJuncEdges, { degree: tpDeg, notes: {},
+    pitchOfEdge: function() { return -1; }, unit: "ft" });
+eqs(sg3Steps[0].degreeTo, tpDeg[sg3Steps[0].to], "intersections: degreeTo is ctx.degree of the end");
+eqs(sg3Steps[0].degreeTo, 3, "intersections: A3 is a 3-way");
+eqs(sg3Steps[1].degreeTo, tpDeg[sg3Steps[1].to] || 0, "intersections: degreeTo on the last step");
+var sg3NoDeg = CsTripPlan.describe(tpJuncEdges, { degree: {}, notes: {},
+    pitchOfEdge: function() { return -1; }, unit: "ft" });
+eqs(sg3NoDeg[0].degreeTo, 0, "intersections: an unknown degree is 0");
+ok(sg3Steps[0].text.indexOf("A1 to A3") === 0, "intersections: step text unchanged");
+
+// Three raw junctions, the first two a 1 ft jog: two intersections.
+var sg3Merge = CsTripPlan.signs([
+    sgWalk("A", "B", 0, 40, { atJunction: true, degreeTo: 3 }),
+    sgWalk("B", "C", 1, 0, { atJunction: true, degreeTo: 3 }),
+    sgWalk("C", "D", 0, 40, { atJunction: true, degreeTo: 4 }),
+    sgWalk("D", "E", 10, 0) ], "ft", "E");
+eqs(sg3Merge.signs.length, 2, "intersections: a jog pair counts once");
+eqs(sg3Merge.signs[0].index, 1, "intersections: first index is 1");
+eqs(sg3Merge.signs[1].index, 2, "intersections: second index is 2");
+eqs(sg3Merge.signs[0].total, 2, "intersections: total on the first sign");
+eqs(sg3Merge.signs[1].total, 2, "intersections: total on the last sign");
+eqs(sg3Merge.signs[0].ways, 4, "intersections: merged 3-way + 3-way is a 4-way");
+eqs(sg3Merge.signs[0].ref, "B", "intersections: merged ref is the first station");
+eqs(sg3Merge.signs[0].label, "B", "intersections: label kept, equal to ref");
+eqs(sg3Merge.signs[1].ways, 4, "intersections: a plain 4-way");
+eqs(sg3Merge.signs[1].ref, "D", "intersections: plain ref");
+var sg3Plain = CsTripPlan.signs([ sgWalk("A", "B", 0, 10, { atJunction: true, degreeTo: 3 }),
+    sgWalk("B", "C", 10, 0) ], "ft", "C");
+eqs(sg3Plain.signs[0].ways, 3, "intersections: a plain 3-way");
+eqs(sg3Plain.signs[0].index, 1, "intersections: a lone sign is 1");
+eqs(sg3Plain.signs[0].total, 1, "intersections: of 1");
+eqs(sgTwo.signs[0].ways, null, "intersections: no degree, no ways");
+var sg3Low = CsTripPlan.signs([ sgWalk("A", "B", 0, 10, { atJunction: true, degreeTo: 2 }),
+    sgWalk("B", "C", 10, 0) ], "ft", "C");
+eqs(sg3Low.signs[0].ways, null, "intersections: a degree under 3 prints no ways");
+var sg3MergeUnk = CsTripPlan.signs([
+    sgWalk("A", "B", 0, 40, { atJunction: true, degreeTo: 3 }),
+    sgWalk("B", "C", 1, 0, { atJunction: true }),
+    sgWalk("C", "D", 0, 40) ], "ft", "D");
+eqs(sg3MergeUnk.signs[0].ways, null, "intersections: a merge with an unknown degree has no ways");
+
+// The row: "Intersection 3" big, "of 7 · 3-way · map ref A11" small.
+var sg3Seven = [];
+for (var sg3i = 0; sg3i < 7; sg3i++) {
+    sg3Seven.push(sgWalk("A" + (8 + sg3i), "A" + (9 + sg3i), (sg3i % 2 === 0) ? 30 : 0,
+        (sg3i % 2 === 0) ? 0 : 30, { atJunction: true, degreeTo: 3 }));
+}
+sg3Seven.push(sgWalk("A15", "B20", 30, 0));
+var sg3SevenLeg = CsTripPlan.signs(sg3Seven, "ft", "B20");
+eqs(sg3SevenLeg.signs.length, 7, "intersections: seven signs");
+var sg3Html = CsTripPlan.signsHtml(sg3SevenLeg);
+var sg3Rows = sg3Html.split(/<div class="sign[ "]/);
+ok(sg3Rows[3].indexOf("Intersection 3") > 0, "intersections html: Intersection 3");
+ok(sg3Rows[3].indexOf("of 7") > 0, "intersections html: of 7");
+ok(sg3Rows[3].indexOf("3-way") > 0, "intersections html: 3-way");
+ok(sg3Rows[3].indexOf("map ref A11") > 0, "intersections html: map ref A11");
+ok(sg3Rows[3].indexOf("of 7 · 3-way · map ref A11") > 0, "intersections html: small line order");
+ok(sg3Html.indexOf("toward") < 0, "intersections html: no toward text");
+ok(sg3Rows[8].indexOf("Arrive B20") > 0 && sg3Rows[8].indexOf("your stop") > 0,
+    "intersections html: arrive row says your stop");
+ok(sg3Html.indexOf(">A11</div>") < 0, "intersections html: no station-only label");
+var sg3NoWay = CsTripPlan.signsHtml(sgTwo);
+ok(sg3NoWay.indexOf("of 2 · map ref B") > 0 && sg3NoWay.indexOf("-way") < 0,
+    "intersections html: unknown ways prints no -way");
+ok(CsTripPlan.signsHtml(sgNone).indexOf(
+    "No intersections: follow the passage to B (240 ft · 5 min)") > 0,
+    "intersections html: the no-intersection line is unchanged");
+ok(CsTripPlan.signsHtml(sgPu).indexOf("Head E") > 0 &&
+    CsTripPlan.signsHtml(sgPu).indexOf("Intersection 1") > 0,
+    "intersections html: head text kept above the big text");
+
+// Leg summary.
+eqs(CsTripPlan.legSummary(sg3SevenLeg, sg3Seven, "ft"),
+    "7 intersections · 240 ft · about 24 min", "legSummary: plural");
+eqs(CsTripPlan.legSummary(sg3Plain, [ sgWalk("A", "B", 0, 10, { atJunction: true, degreeTo: 3 }),
+    sgWalk("B", "C", 10, 0) ], "ft"), "1 intersection · 20 ft · about 6 min",
+    "legSummary: singular");
+eqs(CsTripPlan.legSummary(sgNone, [ sgWalk("A", "B", 0, 240, { minutes: 5 }) ], "ft"),
+    "No intersections, straight through · 240 ft · about 5 min", "legSummary: none");
+ok(CsTripPlan.legSummary(sg2C, [ sgWalk("A", "B", 0, 61, { minutes: 0.2 }) ], "ft")
+    .indexOf("0 min") < 0, "legSummary: never 0 min");
+eqs(CsTripPlan.legSummary(sgPo, [ sgWalk("A", "B", 0, 10, { atJunction: true }),
+    sgPitch("B", "C", "down", true) ], "ft"), "1 intersection · 10 ft · about 8 min",
+    "legSummary: pitch time counts, pitch length does not");
+
+// Ordinals.
+var sg3Ord = [ [1, "1st"], [2, "2nd"], [3, "3rd"], [4, "4th"], [11, "11th"], [12, "12th"],
+    [13, "13th"], [21, "21st"], [22, "22nd"], [101, "101st"], [111, "111th"] ];
+for (var sg3o = 0; sg3o < sg3Ord.length; sg3o++) {
+    eqs(CsTripPlan.ordinal(sg3Ord[sg3o][0]), sg3Ord[sg3o][1], "ordinal: " + sg3Ord[sg3o][0]);
+}
+
+// Plain text lines.
+var sg3Text = CsTripPlan.signsText(sg3SevenLeg);
+eqs(sg3Text.length, 8, "signsText: a line per intersection plus arrive");
+eqs(sg3Text[0], "  1. Walk 30 ft, then at the 1st intersection (3-way, map ref A9) turn left",
+    "signsText: first line");
+eqs(sg3Text[2], "  3. Walk 30 ft, then at the 3rd intersection (3-way, map ref A11) turn left",
+    "signsText: third line");
+eqs(sg3Text[7], "  Arrive B20 after 30 ft", "signsText: arrive line");
+var sg3Words = function(dx, dy) {
+    var leg = CsTripPlan.signs([ sgWalk("A", "B", 0, 10, { atJunction: true }),
+        sgWalk("B", "C", dx, dy) ], "ft", "C");
+    var line = CsTripPlan.signsText(leg)[0];
+    return line.slice(line.indexOf("map ref B) ") + 11);
+};
+eqs(sg3Words(0, 10), "keep straight", "signsText: straight");
+eqs(sg3Words(-10, 10), "go slight left", "signsText: slight left");
+eqs(sg3Words(10, 10), "go slight right", "signsText: slight right");
+eqs(sg3Words(10, 0), "turn right", "signsText: right");
+eqs(sg3Words(-10, 0), "turn left", "signsText: left");
+eqs(sg3Words(Math.sin(-150 * sgRad), Math.cos(-150 * sgRad)), "turn sharp left",
+    "signsText: sharp left");
+eqs(sg3Words(Math.sin(150 * sgRad), Math.cos(150 * sgRad)), "turn sharp right",
+    "signsText: sharp right");
+eqs(sg3Words(0, -10), "turn back", "signsText: u-turn");
+ok(CsTripPlan.signsText(sgPu)[0].indexOf("head E") > 0, "signsText: start names the heading");
+eqs(CsTripPlan.signsText(sgPo)[0],
+    "  1. Walk 10 ft, then at the 1st intersection (map ref B) climb down the pitch",
+    "signsText: pitch down, unknown ways left out");
+var sg3Up = CsTripPlan.signs([ sgWalk("A", "B", 0, 10, { atJunction: true }),
+    sgPitch("B", "C", "up", true) ], "ft", "C");
+ok(/climb up the pitch$/.test(CsTripPlan.signsText(sg3Up)[0]), "signsText: pitch up");
+var sg3Cont = CsTripPlan.signs([ sgPitch("A", "B", "up", true, { atJunction: true }),
+    sgPitch("B", "C", "up", true) ], "ft", "C");
+ok(/climb up the pitch$/.test(CsTripPlan.signsText(sg3Cont)[0]), "signsText: pitch to pitch");
+var sg3Lost = CsTripPlan.signs([ sgPitch("A", "B", "up", true, { atJunction: true }),
+    sgWalk("B", "C", 0, 0) ], "ft", "C");
+ok(/continue$/.test(CsTripPlan.signsText(sg3Lost)[0]), "signsText: no heading continues");
+ok(CsTripPlan.signsText(sg3Lost)[0].indexOf("Walk 0") < 0, "signsText: no walk of 0");
+var sg3NoneText = CsTripPlan.signsText(sgNone);
+eqs(sg3NoneText.length, 1, "signsText: no intersections is one line");
+eqs(sg3NoneText[0], "  No intersections: follow the passage to B (240 ft · 5 min)",
+    "signsText: the no-intersection line");
+
+// Card page 2 and packet: a leg summary under each heading, no station rows.
+var sg3JPlan = CsTripPlan.build(tpSurvey(), tpResolved,
+    { start: "A1", targets: ["A5"], unit: "ft" });
+var sg3JCard = CsCalloutCard.html(sg3JPlan, ccCtx({}));
+var sg3JP2 = sg3JCard.slice(sg3JCard.indexOf("class=\"page2\""));
+ok(sg3JP2.indexOf("class=\"legsum\"") > 0, "card: leg summary line present");
+ok(sg3JP2.indexOf(CsTripPlan.esc(CsTripPlan.legSummary(
+    CsTripPlan.signs(sg3JPlan.stops[0].steps, "ft", "A5"), sg3JPlan.stops[0].steps, "ft"))) > 0,
+    "card: the summary is legSummary's");
+ok(sg3JP2.indexOf("1 intersection ·") > 0, "card: the way in counts one intersection");
+ok(sg3JP2.indexOf("Intersection 1") > 0 && sg3JP2.indexOf("map ref A3") > 0,
+    "card: rows are intersections with a map ref");
+ok(!/class="label">A\d+<\/div>/.test(sg3JP2), "card: no station-only rows");
+ok(sg3JP2.indexOf(" heading ") < 0, "card: still no verbose heading text");
+ok(sg3JP2.indexOf("toward") < 0, "card: no toward");
+ok(sgP2.indexOf("No intersections, straight through") > 0, "card: straight leg summary");
+var sg3JPacket = CsTripPlan.packetHtml(sg3JPlan, { title: "Test Cave",
+    survey: tpSurvey(), resolved: tpResolved, date: "" });
+ok(sg3JPacket.indexOf("class=\"legsum\"") > 0, "packet: leg summary line present");
+ok(sg3JPacket.indexOf("1 intersection ·") > 0, "packet: counts the intersection");
+ok(!/class="label">A\d+<\/div>/.test(sg3JPacket), "packet: no station-only rows");
+ok(sg3JPacket.indexOf("toward") < 0, "packet: no toward");
 
 // ---------------------------------------------------------------------
 // Report.
