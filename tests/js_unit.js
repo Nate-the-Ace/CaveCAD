@@ -33509,6 +33509,68 @@ eqs(CsCalloutCard.missing({ startDate: "2026-10-03", days: [ {} ] }, ccPlan),
     "", "missing: complete is blank");
 
 // ---------------------------------------------------------------------
+// Callout card -- hazards and the page
+// ---------------------------------------------------------------------
+
+var ccHazPlan = { stops: [ { station: "A3", steps: [
+    { notes: ["A2: knee-deep water crossing", "A2: nice formations"] },
+    { notes: ["A3: loose rock overhead", "A2: knee-deep water crossing"] } ] } ] };
+var ccHaz = CsCalloutCard.hazards(ccHazPlan);
+eqs(ccHaz.length, 2, "hazards: two distinct hits, the duplicate and the pretty note ignored");
+eqs(ccHaz[0].station, "A2", "hazards: station parsed");
+eqs(ccHaz[0].water, true, "hazards: water is water");
+eqs(ccHaz[1].water, false, "hazards: loose rock is a hazard, not water");
+
+var ccRealPlan = CsTripPlan.build(tpSurvey(), tpResolved,
+    { start: "A1", targets: ["A3"], unit: "ft" });
+var ccTrip = { startDate: "2026-10-03", weatherPlace: "",
+    days: [ { entry: "08:00", workHours: 4, night: "out" } ] };
+var ccCtx = function(over) {
+    var c = { title: "Test Cave", survey: tpSurvey(), resolved: tpResolved,
+        trip: ccTrip,
+        contacts: { topName: "Pat Topside", topPhone: "555-0100",
+            escalation: "Call the rescue coordinator, 555-0199.", bufferMin: 120 },
+        roster: [ { name: "Ana <b>Ruiz</b>", role: "Lead", squeeze: 14,
+            medical: "Asthma", emergency: "Luis 555-0111" } ],
+        includeRoster: true, forecast: null, generated: "2026-09-29" };
+    for (var k in over) { c[k] = over[k]; }
+    return c;
+};
+var ccHtml = CsCalloutCard.html(ccRealPlan, ccCtx({}));
+var ccSplit = ccHtml.indexOf("class=\"page2\"");
+ok(ccSplit > 0, "card: page 2 marker present");
+ok(ccHtml.slice(0, ccSplit).indexOf("<svg") < 0, "card: page 1 has no route drawing");
+ok(ccHtml.slice(ccSplit).indexOf("<svg") > 0, "card: page 2 has the route drawing");
+ok(ccHtml.indexOf("Roster") < ccHtml.indexOf("Schedule"),
+    "card: roster comes before the schedule");
+ok(ccHtml.indexOf("Ana &lt;b&gt;Ruiz&lt;/b&gt;") > 0, "card: roster text is escaped");
+ok(ccHtml.indexOf("<b>Ruiz") < 0, "card: no raw markup from the roster");
+ok(ccHtml.indexOf("14 in") > 0, "card: squeeze limit printed");
+ok(ccHtml.indexOf("No forecast, check before you go") > 0, "card: forecast null message");
+ok(ccHtml.indexOf("Pat Topside") > 0 && ccHtml.indexOf("555-0199") > 0,
+    "card: escalation printed");
+ok(ccHtml.indexOf("14:00") > 0, "card: callout time printed");
+
+var ccNoRoster = CsCalloutCard.html(ccRealPlan, ccCtx({ includeRoster: false }));
+ok(ccNoRoster.indexOf("Ana") < 0, "card: include roster off prints no names");
+ok(ccNoRoster.indexOf("Roster not included") > 0, "card: roster-off line");
+
+var ccWaterPlan = JSON.parse(JSON.stringify(ccRealPlan));
+ccWaterPlan.stops[0].steps[0].notes = ["A2: creek crossing"];
+var ccRain = { days: [ { date: "2026-10-03", high: 70, low: 50, rainTotal: 0.8,
+    rainChance: 90 } ], placeLabel: "Somewhere, TN" };
+var ccWet = CsCalloutCard.html(ccWaterPlan, ccCtx({ forecast: ccRain }));
+ok(ccWet.indexOf("Rain forecast + water noted on route") > 0,
+    "card: rain plus water note raises the flag");
+ok(ccWet.indexOf("Somewhere") < 0, "card: the forecast place label is never printed");
+var ccDry = CsCalloutCard.html(ccRealPlan, ccCtx({ forecast: ccRain }));
+ok(ccDry.indexOf("Rain forecast + water noted on route") < 0,
+    "card: rain without a water note raises no flag");
+ok(ccDry.indexOf("90%") > 0, "card: rain chance printed");
+ok(!/-?\d{2}\.\d{3,}/.test(ccHtml.slice(0, ccSplit)),
+    "card: page 1 has no long decimal that could be a coordinate");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
