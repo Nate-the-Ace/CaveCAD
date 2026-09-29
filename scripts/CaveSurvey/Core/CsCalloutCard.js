@@ -538,3 +538,190 @@ CsCalloutCard.html = function(plan, ctx) {
     h.push("</div></body></html>");
     return h.join("\n");
 };
+
+// ---------------------------------------------------------------------
+// Several teams: the topside sheet and one file per team. CsTeams must be
+// loaded by the caller (CsAll loads it after this file; it includes this
+// file, so this file cannot include it back).
+// ---------------------------------------------------------------------
+
+var csCardArr = function(v) {
+    return Object.prototype.toString.call(v) === "[object Array]" ? v : [];
+};
+
+/** A team's display name: its name, or "Team N" when blank. */
+var csCardTeamName = function(team, index0) {
+    var n = team === null || team === undefined || team.name === undefined ||
+        team.name === null ? "" : String(team.name);
+    return n.replace(/^\s+|\s+$/g, "") === "" ? "Team " + (index0 + 1) : n;
+};
+
+/** A plan, or an empty one (no stops) so a team without a route renders. */
+var csCardPlan = function(plan) {
+    return plan !== null && plan !== undefined && typeof plan === "object" &&
+        Object.prototype.toString.call(plan.stops) === "[object Array]" ?
+        plan : { stops: [], back: { steps: [] }, gear: null, start: "", unit: "ft" };
+};
+
+var csCardWin = function(win) {
+    return win !== null && win !== undefined && typeof win === "object" ?
+        { rows: csCardArr(win.rows), warnings: csCardArr(win.warnings) } :
+        { rows: [], warnings: [] };
+};
+
+/** "A and B", "A, B and C", each escaped. */
+var csCardAnd = function(names) {
+    var e = [];
+    for (var i = 0; i < names.length; i++) { e.push(CsTripPlan.esc(names[i])); }
+    if (e.length < 2) { return e.join(""); }
+    return e.slice(0, e.length - 1).join(", ") + " and " + e[e.length - 1];
+};
+
+/**
+ * The topside sheet for a trip with several teams: who is where and when
+ * to act. No route drawing and no directions (those are in the team files).
+ *
+ * \param ctx {title, trip (startDate, teams), teams: [{team, plan, windows
+ *   (CsTeams.windows), members (CsTeams.memberRows)}], contacts: {topName,
+ *   topPhone, escalation, bufferMin}, includeRoster, forecast, generated,
+ *   fileNames: [the team files, in team order]}
+ */
+CsCalloutCard.topsideHtml = function(ctx) {
+    var esc = CsTripPlan.esc;
+    var trip = ctx.trip || {};
+    var teams = csCardArr(ctx.teams);
+    var files = csCardArr(ctx.fileNames);
+    var contacts = ctx.contacts || {};
+    var buffer = typeof contacts.bufferMin === "number" ? contacts.bufferMin : 120;
+    var t;
+
+    // Every date any team is underground, in order.
+    var dates = [];
+    var seen = {};
+    for (t = 0; t < teams.length; t++) {
+        var td = CsTeams.dates(trip, teams[t].team);
+        for (var i = 0; i < td.length; i++) {
+            if (seen[td[i]] !== true) { seen[td[i]] = true; dates.push(td[i]); }
+        }
+    }
+    dates.sort();
+
+    var h = [];
+    csCardHead(h, ctx.title + " topside sheet");
+    h.push("<h1>" + esc(ctx.title) + " &mdash; topside sheet</h1>");
+    csCardDatesLine(h, dates, ctx.generated);
+
+    // Next callouts, every team, by time.
+    var byTeam = [];
+    for (t = 0; t < teams.length; t++) {
+        byTeam.push({ team: csCardTeamName(teams[t].team, t),
+            rows: csCardWin(teams[t].windows).rows });
+    }
+    var strip = CsTeams.calloutStrip(byTeam);
+    h.push("<h2>Next callouts</h2>");
+    if (strip.length === 0) {
+        h.push("<p class=\"warn\">No callouts: no team day ends on the surface.</p>");
+    } else {
+        h.push("<table>");
+        for (var s = 0; s < strip.length; s++) {
+            h.push("<tr><td><b>" + esc(csCardWhen(strip[s].stamp)) + "</b></td><td>" +
+                esc(strip[s].team) + " callout</td></tr>");
+        }
+        h.push("</table>");
+    }
+
+    // Roster by team; a person on several teams is under each.
+    h.push("<h2>Roster</h2>");
+    if (ctx.includeRoster === false) {
+        h.push("<p class=\"note\">Roster not included on this copy.</p>");
+    } else {
+        for (t = 0; t < teams.length; t++) {
+            h.push("<h3>" + esc(csCardTeamName(teams[t].team, t)) + "</h3>");
+            var members = csCardArr(teams[t].members);
+            if (members.length === 0) {
+                h.push("<p class=\"warn\">No one on this team yet.</p>");
+            } else {
+                csCardRosterTable(h, members, true);
+            }
+        }
+        var clash = CsTeams.sameDayConflicts(trip);
+        for (var c = 0; c < clash.length; c++) {
+            h.push("<p class=\"warn\"><b>" + esc(clash[c].person) + " is on " +
+                csCardAnd(clash[c].teams) + " on " + esc(clash[c].date) + "</b></p>");
+        }
+    }
+
+    // A schedule per team, with where to find its route.
+    var hazards = [];
+    for (t = 0; t < teams.length; t++) {
+        var team = teams[t].team || {};
+        var goal = team.goal === undefined || team.goal === null ? "" : String(team.goal);
+        var bits = [];
+        if (goal.replace(/\s+/g, "") !== "") { bits.push("Goal: " + esc(goal)); }
+        if (files[t] !== undefined && files[t] !== null && String(files[t]) !== "") {
+            bits.push("Team file: " + esc(files[t]));
+        }
+        csCardSchedule(h, csCardWin(teams[t].windows), "<h2>Schedule &mdash; " +
+            esc(csCardTeamName(team, t)) + "</h2>" +
+            (bits.length > 0 ? "<p class=\"note\">" + bits.join(" &middot; ") + "</p>" : ""));
+        hazards = hazards.concat(CsCalloutCard.hazards(csCardPlan(teams[t].plan)));
+    }
+
+    csCardEscalation(h, contacts, buffer);
+    var anyWet = csCardForecast(h, ctx.forecast, dates);
+    csCardWaterFlag(h, anyWet, hazards);
+    h.push("</body></html>");
+    return h.join("\n");
+};
+
+/**
+ * One team's file: who, when, its own forecast, then (after a print page
+ * break) its route, directions, hazards, rope and packing. Medical notes
+ * are here (the team needs them); emergency contacts are NOT (topside only).
+ *
+ * \param ctx {title, trip, team, plan, windows (CsTeams.windows), members
+ *   (CsTeams.memberRows), forecast, generated, survey, resolved}
+ */
+CsCalloutCard.teamHtml = function(ctx) {
+    var esc = CsTripPlan.esc;
+    var team = ctx.team || {};
+    var plan = csCardPlan(ctx.plan);
+    var name = csCardTeamName(team, 0);
+    var dates = CsTeams.dates(ctx.trip, team);
+    var hazards = CsCalloutCard.hazards(plan);
+    var h = [];
+    csCardHead(h, ctx.title + " " + name);
+    h.push("<h1>" + esc(ctx.title) + " &mdash; " + esc(name) + "</h1>");
+    var goal = team.goal === undefined || team.goal === null ? "" : String(team.goal);
+    if (goal.replace(/\s+/g, "") !== "") {
+        h.push("<p><b>Goal:</b> " + esc(goal) + "</p>");
+    }
+    csCardDatesLine(h, dates, ctx.generated);
+
+    h.push("<h2>Members</h2>");
+    var members = csCardArr(ctx.members);
+    if (members.length === 0) {
+        h.push("<p class=\"warn\">No one on this team yet.</p>");
+    } else {
+        csCardRosterTable(h, members, false);
+    }
+
+    csCardSchedule(h, csCardWin(ctx.windows), "<h2>Schedule</h2>");
+    var anyWet = csCardForecast(h, ctx.forecast, dates);
+    csCardWaterFlag(h, anyWet, hazards);
+
+    csCardRouteIntro(h, esc(ctx.title) + " &mdash; " + esc(name) + " route");
+    csCardRoute(h, plan, ctx.survey, ctx.resolved, "No route: add stops under this team.");
+    csCardHazards(h, hazards);
+    csCardRope(h, plan);
+    h.push("<h2>Team packing list</h2>");
+    var packing = team.packing === undefined || team.packing === null ? "" :
+        String(team.packing);
+    if (packing.replace(/\s+/g, "") === "") {
+        h.push("<p class=\"note\">No packing list for this team.</p>");
+    } else {
+        h.push("<p>" + esc(packing).replace(/\r\n|\r|\n/g, "<br>") + "</p>");
+    }
+    h.push("</div></body></html>");
+    return h.join("\n");
+};

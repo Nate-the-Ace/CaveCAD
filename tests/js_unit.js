@@ -34880,6 +34880,453 @@ if (typeof ExpeditionPlanner !== "undefined" &&
 })();
 
 // ---------------------------------------------------------------------
+// Teams -- topside sheet and team file (CsCalloutCard.topsideHtml, teamHtml)
+// ---------------------------------------------------------------------
+
+(function() {
+    // FROZEN copy of CsCalloutCard.html exactly as it was before the team
+    // renderers (at 0b2a1da), with its two private helpers inlined. The
+    // single-team card must stay byte-identical to this for every context.
+    var tmWhen = function(stamp) { return stamp.date + " " + stamp.time; };
+    var tmWet = function(day) {
+        return day !== null && ((typeof day.rainChance === "number" &&
+                day.rainChance >= CsCalloutCard.RAIN_CHANCE) ||
+            (typeof day.rainTotal === "number" &&
+                day.rainTotal >= CsCalloutCard.RAIN_INCHES));
+    };
+    var tmLegacyHtml = function(plan, ctx) {
+        var esc = CsTripPlan.esc;
+        var trip = ctx.trip;
+        var contacts = ctx.contacts || {};
+        var buffer = typeof contacts.bufferMin === "number" ? contacts.bufferMin : 120;
+        var win = CsCalloutCard.windows(plan, trip, buffer);
+        var hazards = CsCalloutCard.hazards(plan);
+        var dates = CsCalloutCard.tripDates(trip);
+        var h = [];
+        h.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
+        h.push("<title>" + esc(ctx.title) + " callout card</title>");
+        h.push("<style>body{font:14px/1.4 -apple-system,Helvetica,Arial,sans-serif;" +
+            "max-width:760px;margin:20px auto;padding:0 16px;color:#111}" +
+            "h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:16px 0 4px;" +
+            "border-bottom:1px solid #999}table{border-collapse:collapse;width:100%}" +
+            "td,th{border:1px solid #bbb;padding:3px 6px;text-align:left;font-size:13px}" +
+            ".note{color:#555}.warn{color:#8a4b00}.flag{font-weight:bold;color:#a00;" +
+            "border:2px solid #a00;padding:4px 8px;margin:6px 0}" +
+            ".box{border:3px solid #111;padding:8px 12px;margin:10px 0;font-size:17px}" +
+            ".days{display:flex;gap:6px;flex-wrap:wrap}.day{border:1px solid #bbb;" +
+            "padding:4px 8px;min-width:110px;display:flex;gap:8px;align-items:center}" +
+            ".day .ico{flex:none;line-height:0}" +
+            ".day .txt{font-size:12px}.day .txt b{font-size:14px}.page2{margin-top:32px}" +
+            "@media print{.page2{page-break-before:always;margin-top:0}}" +
+            CsTripPlan.SIGNS_CSS + "</style></head><body>");
+        h.push("<h1>" + esc(ctx.title) + " &mdash; callout card</h1>");
+        h.push("<p class=\"note\">" + esc(dates.length > 0 ? dates[0] : "") +
+            (dates.length > 1 ? " to " + esc(dates[dates.length - 1]) : "") +
+            (ctx.generated ? " &middot; made " + esc(ctx.generated) : "") + "</p>");
+
+        // Roster: above the fold, straight under the header.
+        h.push("<h2>Roster</h2>");
+        if (ctx.includeRoster === false) {
+            h.push("<p class=\"note\">Roster not included on this copy.</p>");
+        } else if (!ctx.roster || ctx.roster.length === 0) {
+            h.push("<p class=\"warn\">Roster not filled in.</p>");
+        } else {
+            h.push("<table><tr><th>Name</th><th>Role</th><th>Squeeze limit</th>" +
+                "<th>Medical</th><th>Emergency contact</th><th>Skills</th></tr>");
+            for (var r = 0; r < ctx.roster.length; r++) {
+                var p = ctx.roster[r];
+                if (p.known === false) {
+                    // On the party, but not in this computer's directory.
+                    h.push("<tr><td>" + esc(p.name) + "</td><td colspan=\"5\" " +
+                        "class=\"note\">details not on this computer</td></tr>");
+                    continue;
+                }
+                var labels = CsPeople.skillLabels(p);
+                var escLabels = [];
+                for (var sl = 0; sl < labels.length; sl++) { escLabels.push(esc(labels[sl])); }
+                var note = p.skillsNote === undefined || p.skillsNote === null ?
+                    "" : String(p.skillsNote);
+                h.push("<tr><td>" + esc(p.name) + "</td><td>" + esc(p.role) + "</td><td>" +
+                    (typeof p.squeeze === "number" ? esc(p.squeeze) + " in" : "&mdash;") +
+                    "</td><td>" + esc(p.medical) + "</td><td>" + esc(p.emergency) +
+                    "</td><td>" + escLabels.join(" &middot; ") +
+                    (note.replace(/\s+/g, "") !== "" ? (escLabels.length > 0 ? "<br>" : "") +
+                        "<span class=\"note\" style=\"font-size:11px\">" + esc(note) +
+                        "</span>" : "") + "</td></tr>");
+            }
+            h.push("</table>");
+        }
+
+        h.push("<h2>Schedule</h2><table><tr><th>Day</th><th>Entry</th>" +
+            "<th>Turnaround</th><th>Expected out</th><th>Callout</th></tr>");
+        for (var w = 0; w < win.rows.length; w++) {
+            var row = win.rows[w];
+            h.push("<tr><td>" + row.day + "</td><td>" + esc(tmWhen(row.entry)) +
+                "</td><td>" + esc(tmWhen(row.turnaround)) + "</td>");
+            if (row.endsOnSurface) {
+                h.push("<td>" + esc(tmWhen(row.expectedOut)) + "</td><td><b>" +
+                    esc(tmWhen(row.callout)) + "</b></td></tr>");
+            } else {
+                h.push("<td colspan=\"2\" class=\"note\">Camp night, no callout until " +
+                    "the team surfaces</td></tr>");
+            }
+        }
+        h.push("</table>");
+        for (var wn = 0; wn < win.warnings.length; wn++) {
+            h.push("<p class=\"warn\">" + esc(win.warnings[wn]) + "</p>");
+        }
+
+        h.push("<h2>Escalation</h2><div class=\"box\">");
+        if (!contacts.topName && !contacts.topPhone && !contacts.escalation) {
+            h.push("<span class=\"warn\">Contacts not filled in.</span>");
+        } else {
+            h.push("Topside contact: <b>" + esc(contacts.topName) + "</b> " +
+                esc(contacts.topPhone) + "<br>Callout buffer: " + esc(buffer) +
+                " min after expected out.<br>" + esc(contacts.escalation));
+        }
+        h.push("</div>");
+
+        h.push("<h2>Forecast</h2>");
+        var anyWet = false;
+        if (ctx.forecast === null || ctx.forecast === undefined) {
+            h.push("<p class=\"warn\">No forecast, check before you go.</p>");
+        } else {
+            h.push("<div class=\"days\">");
+            for (var d = 0; d < dates.length; d++) {
+                var fd = null;
+                for (var f = 0; f < ctx.forecast.days.length; f++) {
+                    if (ctx.forecast.days[f].date === dates[d]) { fd = ctx.forecast.days[f]; }
+                }
+                if (fd === null) {
+                    h.push("<div class=\"day\"><span class=\"txt\"><span class=\"note\">" +
+                        esc(dates[d]) + "</span><br><span class=\"note\">" +
+                        "outside forecast range</span></span></div>");
+                } else {
+                    var wet = tmWet(fd);
+                    if (wet) { anyWet = true; }
+                    var wxd = CsWeather.describeCode(fd.code) || CsWeather.fallbackKind(fd);
+                    h.push("<div class=\"day\"" + (wet ? " style=\"border:2px solid #111\"" : "") + ">");
+                    if (wxd !== null) {
+                        h.push("<span class=\"ico\">" +
+                            CsCalloutCard.weatherIconSvg(wxd.kind, wxd.label) + "</span>");
+                    }
+                    h.push("<span class=\"txt\"><span class=\"note\">" + esc(dates[d]) +
+                        "</span><br>" + (wxd !== null ? "<b>" + esc(wxd.label) + "</b><br>" : "") +
+                        esc(fd.high) + "&deg; / " + esc(fd.low) + "&deg; F<br>" +
+                        "<span class=\"note\">rain " + esc(fd.rainTotal) + " in &middot; " +
+                        esc(fd.rainChance) + "%</span></span></div>");
+                }
+            }
+            h.push("</div>");
+        }
+        var anyWater = false;
+        for (var hz = 0; hz < hazards.length; hz++) {
+            if (hazards[hz].water) { anyWater = true; }
+        }
+        if (anyWet && anyWater) {
+            h.push("<p class=\"flag\">Rain forecast + water noted on route. Check " +
+                "conditions before going in.</p>");
+        }
+
+        // Page 2: the route.
+        h.push("<div class=\"page2\"><h1>" + esc(ctx.title) + " &mdash; route</h1>");
+        h.push("<p class=\"note\">This route follows the survey line. It is not a " +
+            "guarantee that the way is safe or easy: crawls, water, climbs and loose " +
+            "ground are only known where someone wrote them down.</p>");
+        if (plan.stops.length === 0) {
+            h.push("<p class=\"warn\">No route: add stops under Route in the Expedition Planner.</p>");
+        } else {
+            h.push(CsTripPlan.routeSvg(ctx.survey, ctx.resolved, plan));
+            h.push("<h2>Directions</h2>");
+            for (var s = 0; s < plan.stops.length; s++) {
+                h.push("<h3>To " + esc(plan.stops[s].station) + "</h3>");
+                var legIn = CsTripPlan.signs(plan.stops[s].steps, plan.unit,
+                    plan.stops[s].station);
+                h.push(CsTripPlan.legSummaryHtml(legIn, plan.stops[s].steps, plan.unit));
+                h.push(CsTripPlan.signsHtml(legIn));
+            }
+            h.push("<h3>Back to " + esc(plan.start) + "</h3>");
+            var legOut = CsTripPlan.signs(plan.back.steps, plan.unit, plan.start);
+            h.push(CsTripPlan.legSummaryHtml(legOut, plan.back.steps, plan.unit));
+            h.push(CsTripPlan.signsHtml(legOut));
+        }
+        h.push("<h2>Hazards on the route</h2>");
+        if (hazards.length === 0) {
+            h.push("<p class=\"note\">None noted. Notes only exist where someone wrote them.</p>");
+        } else {
+            h.push("<ul>");
+            for (var z = 0; z < hazards.length; z++) {
+                h.push("<li class=\"warn\">" + esc(hazards[z].station) + ": " +
+                    esc(hazards[z].text) + "</li>");
+            }
+            h.push("</ul>");
+        }
+        if (plan.gear && plan.gear.rope.length > 0) {
+            h.push("<h2>Rope and hardware</h2><ul>");
+            for (var ro = 0; ro < plan.gear.rope.length; ro++) {
+                h.push("<li>" + esc(plan.gear.rope[ro].text) + "</li>");
+            }
+            for (var hw = 0; hw < plan.gear.hardware.length; hw++) {
+                h.push("<li class=\"warn\">" + esc(plan.gear.hardware[hw]) + "</li>");
+            }
+            h.push("</ul>");
+        }
+        h.push("</div></body></html>");
+        return h.join("\n");
+    };
+
+    var firstDiff = function(a, b) {
+        var n = Math.min(a.length, b.length);
+        for (var i = 0; i < n; i++) { if (a.charAt(i) !== b.charAt(i)) { return i; } }
+        return a.length === b.length ? -1 : n;
+    };
+    var parity = function(plan, over, what) {
+        var now = CsCalloutCard.html(plan, ccCtx(over));
+        var then = tmLegacyHtml(plan, ccCtx(over));
+        var at = firstDiff(now, then);
+        ok(at < 0, "tm render: single-team card byte-identical, " + what +
+            (at < 0 ? "" : " (first difference at char " + at + ": now '" +
+                now.slice(Math.max(0, at - 40), at + 40) + "' was '" +
+                then.slice(Math.max(0, at - 40), at + 40) + "')"));
+        ok(then.length > 1500, "tm render: parity reference is a real page, " + what);
+    };
+    var wxFc = { days: [
+        { date: "2026-10-03", high: 73, low: 70, rainTotal: 0.54, rainChance: 57, code: 63 },
+        { date: "2026-10-04", high: 66, low: 51, rainTotal: 0, rainChance: 5, code: 0 },
+        { date: "2026-10-05", high: 64, low: 50, rainTotal: 0, rainChance: 5 } ] };
+    var noRoute = CsTripPlan.build(tpSurvey(), tpResolved, { start: "A1", targets: [], unit: "ft" });
+    parity(ccRealPlan, {}, "roster and no forecast");
+    parity(ccWaterPlan, { includeRoster: false, forecast: wxFc }, "roster off, forecast with icons, water flag");
+    parity(ccRealPlan, { roster: [ { id: "", name: "Stranger & Co", role: "", squeeze: null,
+        medical: "", emergency: "", skills: [], skillsNote: "", known: false } ] }, "unknown member");
+    parity(ccRealPlan, { roster: [] }, "empty roster");
+    parity(ccRealPlan, { contacts: {} }, "no contacts");
+    parity(ccRealPlan, { forecast: wxFc, trip: { startDate: "2026-10-03", days: [
+        { entry: "08:00", workHours: 30, night: "camp" }, { entry: "08:00", workHours: 3, night: "out" },
+        { entry: "09:00", workHours: 2, night: "out" } ] } }, "camp night, overrun warning, three days");
+    parity(noRoute, {}, "no route");
+
+    // Two teams. Alpha: 2 days from the start; Beta: 1 day, a day later, an
+    // early entry, so its callout falls BETWEEN Alpha's two (unsorted input).
+    var dir = [
+        { id: "p-ana", name: "Ana <b>Ruiz</b>", role: "Lead", squeeze: 14, medical: "Asthma",
+          emergency: "Luis 555-0111", skills: ["first_aid"], skillsNote: "SRT <i>2019</i>" },
+        { id: "p-bo", name: "Bo", role: "Sketch", squeeze: "", medical: "None",
+          emergency: "Mum 555-0122", skills: [], skillsNote: "" } ];
+    var trip = { startDate: "2026-10-03", weatherPlace: "", teams: [
+        { id: "t1", name: "Alpha", goal: "Survey the A passage", dayOffset: 0,
+          members: [ { id: "p-ana", name: "Ana" }, { id: "", name: "Stranger" } ], stops: ["A3"],
+          days: [ { entry: "08:00", workHours: 4, night: "out" },
+                  { entry: "09:00", workHours: 4, night: "out" } ],
+          packing: "First aid <b>kit</b>\nSpare batteries" },
+        { id: "t2", name: "Beta", goal: "Push the creek", dayOffset: 1,
+          members: [ { id: "p-ana", name: "Ana" }, { id: "p-bo", name: "Bo" } ], stops: ["A3"],
+          days: [ { entry: "05:00", workHours: 1, night: "out" } ], packing: "" } ] };
+    var contacts = { topName: "Pat Topside", topPhone: "555-0100",
+        escalation: "Call the rescue coordinator, 555-0199.", bufferMin: 120 };
+    var plans = [ccRealPlan, ccWaterPlan];
+    var entry = function(i, plan) {
+        var team = trip.teams[i];
+        return { team: team, plan: plan, windows: CsTeams.windows(plan, trip, team, 120),
+            members: CsTeams.memberRows(team, dir), survey: tpSurvey(), resolved: tpResolved };
+    };
+    var fileNames = [CsTeams.fileName(0, trip.teams[0]), CsTeams.fileName(1, trip.teams[1])];
+    var topCtx = function(over) {
+        var c = { title: "Test Cave", trip: trip, teams: [entry(0, plans[0]), entry(1, plans[1])],
+            contacts: contacts, includeRoster: true, forecast: wxFc, generated: "2026-09-29",
+            fileNames: fileNames };
+        for (var k in over) { c[k] = over[k]; }
+        return c;
+    };
+    var teamCtx = function(i, plan, over) {
+        var e = entry(i, plan);
+        var c = { title: "Test Cave", trip: trip, team: e.team, plan: plan, windows: e.windows,
+            members: e.members, forecast: wxFc, generated: "2026-09-29",
+            survey: tpSurvey(), resolved: tpResolved };
+        for (var k in over) { c[k] = over[k]; }
+        return c;
+    };
+    var top = CsCalloutCard.topsideHtml(topCtx({}));
+    var at = function(s) { return top.indexOf(s); };
+
+    // Order of the sections.
+    ok(at("<h1>") >= 0 && at("<h1>") < at("<h2>Next callouts</h2>") &&
+        at("<h2>Next callouts</h2>") < at("<h2>Roster</h2>") &&
+        at("<h2>Roster</h2>") < at("is on Alpha and Beta") &&
+        at("is on Alpha and Beta") < at("<h2>Schedule") &&
+        at("<h2>Schedule") < at("<h2>Escalation</h2>") &&
+        at("<h2>Escalation</h2>") < at("<h2>Forecast</h2>"),
+        "tm render: topside sections in order: header, strip, roster, conflicts, schedules, escalation, forecast");
+    ok(top.indexOf("<!doctype html>") === 0 && top.indexOf("</body></html>") > 0,
+        "tm render: topside is a whole page");
+
+    // The next-callouts strip, sorted by time across teams.
+    var wA = CsTeams.windows(ccRealPlan, trip, trip.teams[0], 120);
+    var wB = CsTeams.windows(ccWaterPlan, trip, trip.teams[1], 120);
+    ok(wA.rows[0].callout.abs < wB.rows[0].callout.abs &&
+        wB.rows[0].callout.abs < wA.rows[1].callout.abs,
+        "tm render: fixture puts Beta's callout between Alpha's two");
+    var stripPart = top.slice(at("<h2>Next callouts</h2>"), at("<h2>Roster</h2>"));
+    var stripText = stripPart.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")
+        .replace(/^\s+|\s+$/g, "");
+    var want = [];
+    var ws = [wA.rows[0].callout, wB.rows[0].callout, wA.rows[1].callout];
+    var wn = ["Alpha", "Beta", "Alpha"];
+    for (var s = 0; s < ws.length; s++) { want.push(ws[s].date + " " + ws[s].time + " " + wn[s] + " callout"); }
+    eqs(stripText, "Next callouts " + want.join(" "), "tm render: strip lists every callout sorted by time");
+
+    // Roster grouped by team; Ana under both.
+    var rosterPart = top.slice(at("<h2>Roster</h2>"), at("<h2>Schedule"));
+    var alphaAt = rosterPart.indexOf("<h3>Alpha</h3>");
+    var betaAt = rosterPart.indexOf("<h3>Beta</h3>");
+    ok(alphaAt > 0 && betaAt > alphaAt, "tm render: roster has a heading per team, in team order");
+    eqs(rosterPart.split("Ana &lt;b&gt;Ruiz&lt;/b&gt;").length, 3,
+        "tm render: a person on two teams is listed under each");
+    ok(rosterPart.indexOf("<b>Ruiz") < 0, "tm render: member name escaped on the topside");
+    eqs(rosterPart.split("Luis 555-0111").length, 3, "tm render: topside roster has the emergency contact");
+    ok(rosterPart.indexOf("14 in") > 0 && rosterPart.indexOf("Asthma") > 0 &&
+        rosterPart.indexOf("Lead") > 0 && rosterPart.indexOf("First aid trained") > 0 &&
+        rosterPart.indexOf("SRT &lt;i&gt;2019&lt;/i&gt;") > 0,
+        "tm render: topside roster rows carry role, squeeze, skills and note, medical");
+    var stranger = rosterPart.indexOf("Stranger");
+    ok(stranger > alphaAt && stranger < betaAt, "tm render: unknown member under their team");
+    eqs(rosterPart.split("details not on this computer").length, 2,
+        "tm render: unknown member prints the placeholder once");
+    var boAt = rosterPart.indexOf(">Bo<");
+    ok(boAt > betaAt, "tm render: Bo only under Beta");
+
+    // Same-day conflict banner.
+    ok(top.indexOf("<b>Ana is on Alpha and Beta on 2026-10-04</b>") > 0,
+        "tm render: same-day conflict is a bold warning");
+    var soloTrip = JSON.parse(JSON.stringify(trip));
+    soloTrip.teams[1].members = [ { id: "p-bo", name: "Bo" } ];
+    var solo = CsCalloutCard.topsideHtml(topCtx({ trip: soloTrip }));
+    ok(solo.indexOf(" is on ") < 0, "tm render: no conflict, no warning");
+
+    // One schedule table per team with name, goal and file name.
+    var schedPart = top.slice(at("<h2>Schedule"), at("<h2>Escalation</h2>"));
+    eqs(schedPart.split("<th>Callout</th>").length, 3, "tm render: one schedule table per team");
+    var sA = schedPart.indexOf("Alpha");
+    var sB = schedPart.indexOf("Beta");
+    ok(sA >= 0 && sB > sA, "tm render: schedule tables in team order");
+    ok(schedPart.indexOf("Survey the A passage") > 0 && schedPart.indexOf("Push the creek") > 0,
+        "tm render: schedule headings carry the goals");
+    ok(schedPart.indexOf(fileNames[0]) > 0 && schedPart.indexOf(fileNames[1]) > 0 &&
+        schedPart.indexOf(fileNames[0]) < sB && schedPart.indexOf(fileNames[1]) > sB,
+        "tm render: each schedule names its team file");
+    ok(schedPart.indexOf(wB.rows[0].callout.date + " " + wB.rows[0].callout.time) > sB,
+        "tm render: Beta's callout in Beta's table");
+
+    // Escalation, forecast, flag; no route.
+    ok(top.indexOf("Pat Topside") > 0 && top.indexOf("555-0199") > 0, "tm render: escalation box");
+    var fcPart = top.slice(at("<h2>Forecast</h2>"));
+    ok(fcPart.indexOf("role=\"img\"") > 0, "tm render: topside forecast keeps the weather icons");
+    ok(fcPart.indexOf("2026-10-03") > 0 && fcPart.indexOf("2026-10-04") > 0 &&
+        fcPart.indexOf("2026-10-05") < 0, "tm render: topside forecast covers the trip's dates only");
+    ok(top.indexOf("Rain forecast + water noted on route") > 0,
+        "tm render: rain on a trip day plus water on any team's route raises the flag");
+    var dryTop = CsCalloutCard.topsideHtml(topCtx({ teams: [entry(0, ccRealPlan), entry(1, ccRealPlan)] }));
+    ok(dryTop.indexOf("Rain forecast + water noted on route") < 0, "tm render: no water note, no flag");
+    ok(top.indexOf("xmlns=\"http://www.w3.org/2000/svg\"") < 0, "tm render: no route drawing on the topside");
+    ok(top.indexOf("Directions") < 0 && top.indexOf("Back to") < 0, "tm render: no directions on the topside");
+    // Weather icons carry float noise in their static sun-ray paths
+    // (31.799999999999997, same as the single-team card): not coordinates.
+    var noIcons = function(x) { return x.replace(/<span class="ico"><svg[\s\S]*?<\/svg><\/span>/g, ""); };
+    ok(!/-?\d{2}\.\d{3,}/.test(noIcons(top)), "tm render: topside has no long decimal that could be a coordinate");
+    ok(noIcons(top).indexOf("<svg") < 0, "tm render: only the weather icons were set aside for that check");
+    var noFc = CsCalloutCard.topsideHtml(topCtx({ forecast: null }));
+    ok(noFc.indexOf("No forecast, check before you go") > 0, "tm render: topside with no forecast");
+
+    // Roster off.
+    var off = CsCalloutCard.topsideHtml(topCtx({ includeRoster: false }));
+    ok(off.indexOf("Roster not included on this copy.") > 0, "tm render: roster-off line on the topside");
+    ok(off.indexOf("Ana") < 0 && off.indexOf("Luis") < 0 && off.indexOf("Asthma") < 0,
+        "tm render: roster off prints no names or details");
+    ok(off.indexOf("<th>Callout</th>") > 0, "tm render: roster off keeps the schedules");
+
+    // The team file.
+    var fa = CsCalloutCard.teamHtml(teamCtx(0, ccRealPlan, {}));
+    var faSplit = fa.indexOf("class=\"page2\"");
+    var faTop = fa.slice(0, faSplit);
+    ok(fa.indexOf("<!doctype html>") === 0 && faSplit > 0, "tm render: team file is a page with a page-2 marker");
+    ok(faTop.indexOf("Alpha") > 0 && faTop.indexOf("Survey the A passage") > 0,
+        "tm render: team file has team name and goal");
+    ok(faTop.indexOf("2026-10-03") > 0 && faTop.indexOf("2026-10-04") > 0,
+        "tm render: team file has its dates");
+    ok(faTop.indexOf("Ana &lt;b&gt;Ruiz&lt;/b&gt;") > 0 && faTop.indexOf("Asthma") > 0 &&
+        faTop.indexOf("14 in") > 0 && faTop.indexOf("Lead") > 0 && faTop.indexOf("First aid trained") > 0,
+        "tm render: team file members with role, squeeze, skills, medical");
+    ok(fa.indexOf("Luis") < 0 && fa.indexOf("555-0111") < 0 && fa.indexOf("Emergency") < 0 &&
+        fa.indexOf("emergency") < 0, "tm render: team file carries no emergency contact");
+    ok(faTop.indexOf("Stranger") > 0 && faTop.indexOf("details not on this computer") > 0,
+        "tm render: team file unknown member placeholder");
+    eqs(faTop.split("<th>Callout</th>").length, 2, "tm render: team file has its schedule table");
+    ok(faTop.indexOf(tmWhen(wA.rows[1].callout)) > 0, "tm render: team file schedule has its day 2 callout");
+    ok(faTop.indexOf("xmlns=\"http://www.w3.org/2000/svg\"") < 0 &&
+        fa.slice(faSplit).indexOf("xmlns=\"http://www.w3.org/2000/svg\"") > 0,
+        "tm render: the route drawing comes after the page break");
+    ok(fa.slice(faSplit).indexOf("<h2>Directions</h2>") > 0 && fa.indexOf("Back to A1") > 0,
+        "tm render: team file has the directions");
+    ok(fa.indexOf("First aid &lt;b&gt;kit&lt;/b&gt;<br>Spare batteries") > 0,
+        "tm render: team packing printed, escaped, line breaks kept");
+    ok(!/-?\d{2}\.\d{3,}/.test(noIcons(faTop)), "tm render: team file page 1 has no long decimal");
+    ok(fa.indexOf("Pat Topside") < 0, "tm render: team file has no escalation box");
+    var faFc = faTop.slice(faTop.indexOf("<h2>Forecast</h2>"));
+    ok(faFc.indexOf("2026-10-03") > 0 && faFc.indexOf("2026-10-04") > 0 &&
+        faFc.indexOf("2026-10-05") < 0, "tm render: team file forecast is its own dates");
+
+    var fb = CsCalloutCard.teamHtml(teamCtx(1, ccWaterPlan, {}));
+    var fbTop = fb.slice(0, fb.indexOf("class=\"page2\""));
+    var fbFc = fbTop.slice(fbTop.indexOf("<h2>Forecast</h2>"));
+    ok(fbFc.indexOf("2026-10-04") > 0 && fbFc.indexOf("2026-10-03") < 0,
+        "tm render: a day-2 team's forecast leaves out the trip's first day");
+    ok(fb.indexOf("Rain forecast + water noted on route") < 0,
+        "tm render: team file flag only for its own wet days");
+    ok(fb.indexOf("creek crossing") > 0, "tm render: team file lists hazards on its route");
+    ok(fb.indexOf("Mum") < 0 && fb.indexOf("Luis") < 0, "tm render: no emergency contacts for Beta either");
+    var fbOut = CsCalloutCard.teamHtml(teamCtx(1, ccWaterPlan, { forecast: { days: [ wxFc.days[0] ] } }));
+    ok(fbOut.indexOf("outside forecast range") > 0, "tm render: team file day outside the forecast");
+
+    // No route degrades.
+    var fn = CsCalloutCard.teamHtml(teamCtx(0, noRoute, {}));
+    ok(fn.indexOf("No route: add stops under this team") > 0, "tm render: no-route team says so");
+    ok(fn.indexOf("xmlns=\"http://www.w3.org/2000/svg\"") < 0, "tm render: no-route team has no drawing");
+    var tn = CsCalloutCard.topsideHtml(topCtx({ teams: [entry(0, noRoute), entry(1, ccWaterPlan)] }));
+    ok(tn.indexOf("<h2>Forecast</h2>") > 0, "tm render: a no-route team does not break the topside");
+
+    // Escaping everywhere.
+    var evil = JSON.parse(JSON.stringify(trip));
+    evil.teams[0].name = "<b>Deep</b>";
+    evil.teams[0].goal = "<b>go</b> far";
+    evil.teams[0].packing = "<b>rope</b>";
+    evil.teams[0].members = [ { id: "", name: "<b>Zed</b>" } ];
+    evil.teams[1].members = [ { id: "", name: "<b>Zed</b>" } ];
+    var evTeam = function(i, plan) {
+        var t = evil.teams[i];
+        return { team: t, plan: plan, windows: CsTeams.windows(plan, evil, t, 120),
+            members: CsTeams.memberRows(t, dir), survey: tpSurvey(), resolved: tpResolved };
+    };
+    var evTop = CsCalloutCard.topsideHtml(topCtx({ trip: evil, teams: [evTeam(0, ccRealPlan), evTeam(1, ccWaterPlan)],
+        fileNames: [CsTeams.fileName(0, evil.teams[0]), CsTeams.fileName(1, evil.teams[1])] }));
+    var e0 = evTeam(0, ccRealPlan);
+    var evFile = CsCalloutCard.teamHtml({ title: "Test <b>Cave</b>", trip: evil, team: e0.team, plan: ccRealPlan,
+        windows: e0.windows, members: e0.members, forecast: wxFc, generated: "2026-09-29",
+        survey: tpSurvey(), resolved: tpResolved });
+    var raw = ["<b>Deep", "<b>go", "<b>rope", "<b>Zed", "<b>Cave"];
+    for (var r = 0; r < raw.length; r++) {
+        ok(evTop.indexOf(raw[r]) < 0, "tm render: topside has no raw " + raw[r]);
+        ok(evFile.indexOf(raw[r]) < 0, "tm render: team file has no raw " + raw[r]);
+    }
+    ok(evTop.indexOf("&lt;b&gt;Deep&lt;/b&gt;") > 0 && evTop.indexOf("&lt;b&gt;go&lt;/b&gt; far") > 0 &&
+        evTop.indexOf("&lt;b&gt;Zed&lt;/b&gt;") > 0, "tm render: topside escapes team name, goal, member");
+    ok(evTop.indexOf("&lt;b&gt;Zed&lt;/b&gt; is on &lt;b&gt;Deep&lt;/b&gt; and Beta on 2026-10-04") > 0,
+        "tm render: conflict banner escaped");
+    ok(evFile.indexOf("&lt;b&gt;Deep&lt;/b&gt;") > 0 && evFile.indexOf("&lt;b&gt;go&lt;/b&gt; far") > 0 &&
+        evFile.indexOf("&lt;b&gt;rope&lt;/b&gt;") > 0 && evFile.indexOf("&lt;b&gt;Zed&lt;/b&gt;") > 0,
+        "tm render: team file escapes team name, goal, packing, member");
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
