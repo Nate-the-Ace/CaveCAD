@@ -82,6 +82,8 @@ include(includeBasePath + "/CsCalloutCard.js");
 // Forecast lookup for the callout card. Independent of the survey engines.
 include(includeBasePath + "/CsWeather.js");
 include(includeBasePath + "/CsCalloutLocal.js");
+// The people directory (people.json, per-user) and the trip party.
+include(includeBasePath + "/CsPeople.js");
 include(includeBasePath + "/CsGhost.js");
 
 // The 3D passage surface. After CsTraverse and CsLrud, whose splay

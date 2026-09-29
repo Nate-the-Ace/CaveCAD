@@ -50,7 +50,7 @@ var csStoreStr = function(v) {
 CsStationStore.NIGHTS = ["out", "camp"];
 
 CsStationStore.emptyTrip = function() {
-    return { startDate: "", weatherPlace: "", days: [] };
+    return { startDate: "", weatherPlace: "", days: [], party: [] };
 };
 
 var csStoreDateOk = function(text) {
@@ -63,7 +63,9 @@ var csStoreDateOk = function(text) {
 
 /**
  * A trip block from whatever the file held: bad days are dropped, a bad
- * date is blank, an unknown night is "out". Never throws.
+ * date is blank, an unknown night is "out", party entries without a name
+ * are dropped (order kept; id may be "" for a hand-typed name). Never
+ * throws.
  */
 CsStationStore.cleanTrip = function(raw) {
     var trip = CsStationStore.emptyTrip();
@@ -86,6 +88,17 @@ CsStationStore.cleanTrip = function(raw) {
         var night = CsStationStore.NIGHTS.indexOf(csStoreStr(d.night)) >= 0 ?
             csStoreStr(d.night) : "out";
         trip.days.push({ entry: entry, workHours: hours, night: night });
+    }
+    // Who is going: id and name ONLY. Details (medical, contacts,
+    // skills) live in the per-user people.json (CsPeople), never here.
+    var party = Object.prototype.toString.call(raw.party) === "[object Array]" ?
+        raw.party : [];
+    for (var k = 0; k < party.length; k++) {
+        var p = party[k];
+        if (p === null || typeof p !== "object") { continue; }
+        var name = csStoreStr(p.name).replace(/^\s+|\s+$/g, "");
+        if (name === "") { continue; }
+        trip.party.push({ id: csStoreStr(p.id).replace(/^\s+|\s+$/g, ""), name: name });
     }
     return trip;
 };
@@ -143,8 +156,18 @@ CsStationStore.serialize = function(store) {
         if (d !== 0) { return d; }
         return a.note < b.note ? -1 : (a.note > b.note ? 1 : 0);
     });
+    // The trip block is cleaned on the way out too, so a party entry
+    // carrying anything but id and name (medical notes, phone numbers)
+    // can never reach this Drive-synced file.
+    var settings = {};
+    var src = (store.settings !== null && typeof store.settings === "object") ?
+        store.settings : {};
+    for (var key in src) {
+        if (Object.prototype.hasOwnProperty.call(src, key)) { settings[key] = src[key]; }
+    }
+    settings.trip = CsStationStore.cleanTrip(src.trip);
     return JSON.stringify({ version: CsStationStore.VERSION,
-        entries: entries, settings: store.settings }, null, 2) + "\n";
+        entries: entries, settings: settings }, null, 2) + "\n";
 };
 
 /**

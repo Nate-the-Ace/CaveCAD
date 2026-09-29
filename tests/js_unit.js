@@ -167,6 +167,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsCalloutCard.js",
     "scripts/CaveSurvey/Core/CsWeather.js",
     "scripts/CaveSurvey/Core/CsCalloutLocal.js",
+    "scripts/CaveSurvey/Core/CsPeople.js",
     "scripts/CaveSurvey/Core/CsGhost.js",
     "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsSection3d.js",
@@ -34156,6 +34157,179 @@ ok(wxNone.indexOf("<svg") < 0 && wxNone.indexOf("70&deg;") > 0, "wx: a dry day w
 var wxOut = wxCell({ days: [ { date: "2026-10-09", high: 70, low: 50, rainTotal: 0,
     rainChance: 5, code: 0 } ] }, "2026-10-03");
 ok(wxOut.indexOf("<svg") < 0 && wxOut.indexOf("outside forecast range") > 0, "wx: outside the range has no icon");
+
+// ---------------------------------------------------------------------
+// People directory -- CsPeople (pure) and the trip party
+// ---------------------------------------------------------------------
+
+var ppAna = { id: "id-ana", name: "Ana Ruiz", role: "Lead", squeeze: 14,
+    medical: "Asthma", emergency: "Luis 555-0111",
+    skills: ["vertical", "first_aid", "leader"], skillsNote: "SRT since 2019" };
+var ppBo = { id: "id-bo", name: "bo Chen", role: "", squeeze: "big",
+    medical: "", emergency: "", skills: [], skillsNote: "" };
+var ppText = CsPeople.serialize([ppBo, ppAna]);
+var ppBack = CsPeople.parse(ppText);
+eqs(ppBack.error, "", "people: a serialized directory parses clean");
+eqs(ppBack.people.length, 2, "people: two people round trip");
+eqs(ppBack.people[0].name, "Ana Ruiz", "people: sorted by name, case-blind (Ana first)");
+eqs(ppBack.people[1].name, "bo Chen", "people: sorted by name, case-blind (bo second)");
+eqs(ppBack.people[0].id, "id-ana", "people: id round trips");
+eqs(ppBack.people[0].squeeze, 14, "people: squeeze round trips as a number");
+eqs(ppBack.people[1].squeeze, null, "people: junk squeeze is null");
+eqs(ppBack.people[0].skills.join(","), "leader,vertical,first_aid",
+    "people: skill ids round trip, in the checklist's order");
+eqs(ppBack.people[0].skillsNote, "SRT since 2019", "people: the skills note round trips");
+eqs(ppBack.people[1].skills.length, 0, "people: no skills is an empty list");
+eqs(ppBack.people[0].medical, "Asthma", "people: medical round trips");
+eqs(ppBack.people[0].emergency, "Luis 555-0111", "people: emergency round trips");
+eqs(ppBack.people[0].role, "Lead", "people: role round trips");
+eqs(CsPeople.serialize(ppBack.people), ppText, "people: serialize is stable");
+ok(ppText.indexOf("\n  ") > 0, "people: the file is pretty-printed");
+eqs(JSON.parse(ppText).version, 1, "people: the file carries version 1");
+
+var ppSorted = CsPeople.parse(CsPeople.serialize([
+    { id: "b", name: "Cave 10" }, { id: "a", name: "cave 2" },
+    { id: "z", name: "Dee" }, { id: "y", name: "Dee" } ])).people;
+eqs(ppSorted[0].name + "|" + ppSorted[1].name, "cave 2|Cave 10",
+    "people: natural order on names (2 before 10)");
+eqs(ppSorted[2].id + "|" + ppSorted[3].id, "y|z", "people: equal names tie by id");
+
+var ppNoIds = CsPeople.parse(JSON.stringify({ version: 1, people: [
+    { name: "Ana" }, { name: "Bo", id: "" } ] }));
+eqs(ppNoIds.error, "", "people: missing ids are not an error");
+ok(CsUuid.isValid(ppNoIds.people[0].id) && CsUuid.isValid(ppNoIds.people[1].id),
+    "people: missing ids are assigned uuids");
+ok(ppNoIds.people[0].id !== ppNoIds.people[1].id, "people: assigned ids differ");
+var ppAgain = CsPeople.parse(CsPeople.serialize(ppNoIds.people)).people;
+eqs(ppAgain[0].id + "|" + ppAgain[1].id,
+    ppNoIds.people[0].id + "|" + ppNoIds.people[1].id,
+    "people: assigned ids are stable across serialize");
+
+var ppDup = CsPeople.parse(JSON.stringify({ people: [
+    { id: "same", name: "First" }, { id: "same", name: "Second" } ] })).people;
+eqs(ppDup[0].id, "same", "people: the first of a duplicate id keeps it");
+ok(ppDup[1].id !== "same" && CsUuid.isValid(ppDup[1].id),
+    "people: the later duplicate gets a new id");
+
+var ppNameless = CsPeople.parse(JSON.stringify({ people: [
+    { id: "x", name: "  ", medical: "secret" }, null, 7, { name: "Real" } ] }));
+eqs(ppNameless.people.length, 1, "people: nameless and junk rows are skipped");
+eqs(ppNameless.people[0].name, "Real", "people: the named row survives");
+eqs(CsPeople.parse(CsPeople.serialize([ { id: "q", name: "" }, ppAna ])).people.length, 1,
+    "people: a nameless row is dropped on save");
+
+var ppJunk = CsPeople.parse("{ not json");
+eqs(ppJunk.people.length, 0, "people: junk text is an empty directory");
+ok(ppJunk.error !== "", "people: junk text carries an error");
+ok(CsPeople.parse(JSON.stringify({ people: "nope" })).error !== "",
+    "people: a people field that is not a list is an error");
+ok(CsPeople.parse("[1,2]").error !== "", "people: a bare list is not a people file");
+eqs(CsPeople.parse("").error, "", "people: empty text is no error");
+eqs(CsPeople.parse("  \n ").people.length, 0, "people: blank text is empty");
+eqs(CsPeople.parse(null).error, "", "people: null text is no error");
+
+var ppBlank = CsPeople.blank();
+ok(CsUuid.isValid(ppBlank.id), "people: blank has a fresh id");
+eqs(ppBlank.name + ppBlank.role + ppBlank.medical + ppBlank.emergency +
+    ppBlank.skillsNote, "", "people: blank text fields are empty");
+eqs(ppBlank.skills.length, 0, "people: blank has no skills");
+eqs(ppBlank.squeeze, null, "people: blank squeeze is null");
+ok(CsPeople.blank().id !== ppBlank.id, "people: each blank has its own id");
+
+var ppDir = [ppAna, { id: "id-cy", name: "Cy Moss", role: "Sketch", squeeze: null,
+    medical: "", emergency: "", skills: ["survey_lead"], skillsNote: "" }];
+var ppRes = CsPeople.resolveParty([ { id: "id-cy", name: "Old Name" },
+    { id: "", name: "  ana RUIZ " }, { id: "gone", name: "Stranger" } ], ppDir);
+eqs(ppRes.length, 3, "party: three resolved in party order");
+eqs(ppRes[0].name, "Cy Moss", "party: matched by id first (the directory's name)");
+eqs(ppRes[0].known, true, "party: an id match is known");
+eqs(ppRes[0].skills.join(","), "survey_lead", "party: an id match carries skills");
+eqs(ppRes[1].skillsNote, "SRT since 2019", "party: a match carries the skills note");
+eqs(ppRes[1].id, "id-ana", "party: matched by name, case and whitespace blind");
+eqs(ppRes[1].medical, "Asthma", "party: a name match carries the details");
+eqs(ppRes[1].known, true, "party: a name match is known");
+eqs(ppRes[2].name, "Stranger", "party: unknown keeps its name");
+eqs(ppRes[2].known, false, "party: unknown is known:false");
+eqs(ppRes[2].medical + ppRes[2].role + ppRes[2].emergency + ppRes[2].skillsNote, "",
+    "party: unknown has no details");
+eqs(ppRes[2].skills.length, 0, "party: unknown has no skills");
+eqs(ppRes[2].squeeze, null, "party: unknown squeeze is null");
+eqs(CsPeople.resolveParty(null, ppDir).length, 0, "party: null party resolves to nothing");
+eqs(CsPeople.resolveParty([ { id: "id-ana", name: "Ana Ruiz" } ], null)[0].known, false,
+    "party: no directory makes everyone unknown");
+
+var ppOf = CsPeople.partyOf(ppDir, ["id-cy", "id-ana", "nobody"]);
+eqs(ppOf.length, 2, "partyOf: only directory people");
+eqs(ppOf[0].id + "|" + ppOf[1].id, "id-ana|id-cy", "partyOf: directory order");
+eqs(JSON.stringify(ppOf[0]), JSON.stringify({ id: "id-ana", name: "Ana Ruiz" }),
+    "partyOf: id and name only, no medical or contact data");
+
+// Skills: a fixed checklist plus free text.
+eqs(CsPeople.SKILLS.length, 14, "skills: fourteen on the checklist");
+eqs(CsPeople.SKILLS[0].id + "|" + CsPeople.SKILLS[0].label, "leader|Trip leader",
+    "skills: the first is trip leader");
+var ppSkillIds = [];
+for (var ppSi = 0; ppSi < CsPeople.SKILLS.length; ppSi++) { ppSkillIds.push(CsPeople.SKILLS[ppSi].id); }
+eqs(ppSkillIds.join(","), "leader,vertical,rigging,rescue,first_aid,cpr,wfr," +
+    "survey_lead,survey_instruments,survey_book,sketching,diving,radio,digging", "skills: ids are the agreed ones, in order");
+var ppOdd = CsPeople.parse(JSON.stringify({ people: [ { id: "o", name: "Odd",
+    skills: ["telepathy", "cpr", 7, null, "cpr", "leader", ""] } ] }));
+eqs(ppOdd.error, "", "skills: unknown ids do not make an error");
+eqs(ppOdd.people[0].skills.join(","), "leader,cpr,telepathy",
+    "skills: known in checklist order, unknown kept after, junk and repeats dropped");
+ok(CsPeople.serialize(ppOdd.people).indexOf("telepathy") > 0,
+    "skills: an unknown id survives a save");
+eqs(CsPeople.skillLabels(ppOdd.people[0]).join(" | "), "Trip leader | CPR trained",
+    "skillLabels: known labels only, in checklist order");
+eqs(CsPeople.skillLabels({ skills: ["digging", "vertical"] }).join(" | "),
+    "Vertical (SRT / rope) | Digging", "skillLabels: checklist order, not stored order");
+eqs(CsPeople.skillLabels(null).length, 0, "skillLabels: null is no labels");
+eqs(CsPeople.parse(JSON.stringify({ people: [ { name: "Str", skills: "SRT" } ] }))
+    .people[0].skillsNote, "SRT", "skills: an old free-text skills string becomes the note");
+
+// validate: the popup's required fields.
+var ppOkFields = { name: "Ana", role: "", squeeze: "", medical: "None",
+    emergency: "Luis 555-0111", skills: [], skillsNote: "" };
+var ppV = function(over) {
+    var f = JSON.parse(JSON.stringify(ppOkFields));
+    for (var k in over) { f[k] = over[k]; }
+    return CsPeople.validate(f);
+};
+eqs(ppV({}).length, 0, "validate: complete is fine");
+eqs(ppV({ name: "" }).join("|"), "name", "validate: name alone");
+eqs(ppV({ medical: "" }).join("|"), "medical notes (type None if none)",
+    "validate: medical alone");
+eqs(ppV({ emergency: "" }).join("|"), "emergency contact", "validate: emergency alone");
+eqs(ppV({ name: "  \t", medical: " \n ", emergency: "   " }).join("|"),
+    "name|medical notes (type None if none)|emergency contact",
+    "validate: whitespace is blank, and every gap is named at once");
+eqs(ppV({ squeeze: "14" }).length, 0, "validate: squeeze 14 is fine");
+eqs(ppV({ squeeze: " 12.5 " }).length, 0, "validate: squeeze 12.5 with spaces is fine");
+eqs(ppV({ squeeze: 9 }).length, 0, "validate: a numeric squeeze is fine");
+eqs(ppV({ squeeze: "0" }).join("|"),
+    "squeeze limit must be a number of inches above 0, or blank", "validate: squeeze 0");
+eqs(ppV({ squeeze: "-3" }).length, 1, "validate: negative squeeze");
+eqs(ppV({ squeeze: "14in" }).length, 1, "validate: squeeze with units is refused");
+eqs(ppV({ squeeze: "big" }).length, 1, "validate: squeeze words refused");
+eqs(CsPeople.validate(null).length, 3, "validate: null names the three required fields");
+
+// The trip party in stations.json: names and ids only.
+eqs(CsStationStore.empty().settings.trip.party.length, 0, "trip party: empty by default");
+var ppStore = CsStationStore.empty();
+ppStore.settings.trip = { startDate: "2026-10-03", weatherPlace: "", days: [],
+    party: [ { id: "id-ana", name: " Ana Ruiz ", medical: "Asthma" },
+        { id: "", name: "Hand Typed" }, { id: "x", name: "   " }, null,
+        { name: "No Id" } ] };
+var ppParty = CsStationStore.parse(CsStationStore.serialize(ppStore)).store.settings.trip.party;
+eqs(ppParty.length, 3, "trip party: nameless and junk entries dropped");
+eqs(ppParty[0].name, "Ana Ruiz", "trip party: order kept, name trimmed");
+eqs(ppParty[0].medical, undefined, "trip party: no medical data is kept");
+eqs(ppParty[1].id, "", "trip party: a hand-typed name may have no id");
+eqs(ppParty[2].id, "", "trip party: a missing id becomes blank");
+eqs(CsStationStore.cleanTrip({ party: "x" }).party.length, 0,
+    "trip party: a non-list party is empty");
+ok(CsStationStore.serialize(ppStore).indexOf("Asthma") < 0,
+    "trip party: medical notes never reach stations.json");
 
 
 // ---------------------------------------------------------------------
