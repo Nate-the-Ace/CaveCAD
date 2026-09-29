@@ -35358,6 +35358,315 @@ if (typeof ExpeditionPlanner !== "undefined" &&
 })();
 
 // ---------------------------------------------------------------------
+// Teams -- the panel's data layer (ExpeditionPlanner team state, load,
+// edits, write-through). The sidecar and child() are stubbed.
+// ---------------------------------------------------------------------
+(function() {
+    var EP = ExpeditionPlanner;
+    var fns = ["loadTeams", "addTeam", "removeTeam", "setTeamField", "setTeamMember",
+        "teamMemberFlags", "addTeamStop", "removeTeamStop", "clearTeamStops", "setTeamDays",
+        "saveTeams", "teamWarnings"];
+    var absent = [];
+    for (var f = 0; f < fns.length; f++) {
+        if (typeof EP[fns[f]] !== "function") { absent.push(fns[f]); }
+    }
+    eqs(absent.join(","), "", "tm panel: the team functions exist");
+    if (absent.length > 0) { return; }
+    var realState = EP.state;
+    var realChild = EP.child;
+    var realPath = CsStationSidecar.sidecarPath;
+    var realRead = CsStationSidecar.readSidecar;
+    var realWrite = CsStationSidecar.writeSidecar;
+    var disk = { text: "", writes: 0, damaged: false };
+    CsStationSidecar.sidecarPath = function(docPath) {
+        return (docPath === "" || docPath === null || docPath === undefined) ? "" :
+            "/fake/Cave/stations.json";
+    };
+    CsStationSidecar.readSidecar = function(path) {
+        if (disk.damaged) {
+            return { store: CsStationStore.empty(), error: "stations.json could not be read: broken" };
+        }
+        return CsStationStore.parse(disk.text);
+    };
+    CsStationSidecar.writeSidecar = function(path, st) {
+        disk.writes++;
+        disk.text = CsStationStore.serialize(st);
+        return true;
+    };
+    EP.child = function() { return null; };
+    var party = [ { id: "p-ana", name: "Ana" }, { id: "p-bo", name: "Bo" }, { id: "", name: "Cy" } ];
+    var day = function(e, h, n) { return { entry: e, workHours: h, night: n }; };
+    // Put `settings` on the fake disk and load the panel from it, as
+    // reload() + showCalloutSettings() do.
+    var open = function(settings, docPath) {
+        disk.text = JSON.stringify({ version: CsStationStore.VERSION,
+            entries: [ { station: "A2", note: "keep me", status: "", team: "", who: "" } ],
+            settings: settings });
+        disk.writes = 0;
+        disk.damaged = false;
+        var parsed = CsStationStore.parse(disk.text);
+        EP.state = { drawn: null, docPath: docPath === undefined ? "/fake/Cave/Cave.dxf" : docPath,
+            store: parsed.store, loadError: "", stations: ["A1", "A2", "B20", "D8"],
+            planStops: [], plan: null, planShown: null, people: [], peopleError: "",
+            rosterRows: [], filling: false, teams: [] };
+        return EP.loadTeams(parsed.store.settings.trip, parsed.store.settings);
+    };
+    var onDisk = function() { return CsStationStore.parse(disk.text).store.settings; };
+    var stored = function() {
+        return { packing: "old list", pace: { paceFtPerMin: 100, rig: 5 },
+            trip: { startDate: "2026-10-03", party: party, days: [day("07:00", 2, "out")],
+                teams: [ { id: "t1", name: "Alpha", goal: "A", dayOffset: 0,
+                    members: [ { id: "p-ana", name: "Ana" } ], stops: ["B20"],
+                    days: [day("08:00", 4, "out")], packing: "rope" },
+                  { id: "t2", name: "Beta", goal: "", dayOffset: 1, members: [], stops: [],
+                    days: [day("09:00", 3, "out")], packing: "" } ] } };
+    };
+    var team = function(i) { return EP.state.teams[i]; };
+    try {
+        ok(realState.teams !== undefined && realState.teams.length === 0,
+            "tm panel: state.teams starts empty");
+
+        // Load: stored teams as they are.
+        var got = open(stored());
+        ok(got === EP.state.teams, "tm panel: loadTeams returns state.teams");
+        eqs(EP.state.teams.length, 2, "tm panel: stored teams load");
+        eqs(team(0).id + "," + team(0).name + "," + team(0).packing + "," + team(1).dayOffset,
+            "t1,Alpha,rope,1", "tm panel: stored teams load as they are (no migration)");
+        eqs(disk.writes, 0, "tm panel: loading writes nothing");
+        team(0).name = "changed";
+        eqs(EP.state.store.settings.trip.teams[0].name, "Alpha",
+            "tm panel: state.teams is a copy, not the store's own list");
+
+        // Load: legacy days -> Team 1 with the days, packing and party.
+        open({ packing: "Helmet\nLights", trip: { startDate: "2026-10-03", party: party,
+            days: [day("08:00", 5, "out"), day("08:30", 6, "camp")] } });
+        eqs(EP.state.teams.length, 1, "tm panel: a legacy trip becomes one team");
+        eqs(team(0).name, "Team 1", "tm panel: the migrated team is Team 1");
+        eqs(JSON.stringify(team(0).days),
+            JSON.stringify([day("08:00", 5, "out"), day("08:30", 6, "camp")]),
+            "tm panel: the migrated team holds the legacy days");
+        eqs(team(0).packing, "Helmet\nLights", "tm panel: the migrated team holds settings.packing");
+        eqs(JSON.stringify(team(0).members), JSON.stringify(party),
+            "tm panel: the migrated team's members are the party");
+        ok(team(0).id !== "", "tm panel: the migrated team has an id");
+        eqs(disk.writes, 0, "tm panel: migration at load writes nothing");
+        var mid = team(0).id;
+        eqs(EP.saveTeams(), "", "tm panel: the migrated team saves");
+        eqs(onDisk().trip.teams.length, 1, "tm panel: load-then-save of a legacy trip writes exactly one team");
+        var again = CsStationStore.parse(disk.text).store;
+        EP.state.store = again;
+        EP.loadTeams(again.settings.trip, again.settings);
+        eqs(EP.state.teams.length + ":" + team(0).id, "1:" + mid,
+            "tm panel: reloading the saved trip loads that team, no second migration");
+        EP.saveTeams();
+        eqs(onDisk().trip.teams.length, 1, "tm panel: a second load-save cycle still holds one team");
+        eqs(onDisk().trip.days.length, 2, "tm panel: the legacy days are left in the file");
+        eqs(onDisk().packing, "Helmet\nLights", "tm panel: settings.packing is left in the file");
+
+        // Load: an empty trip -> one empty Team 1.
+        open({});
+        eqs(EP.state.teams.length, 1, "tm panel: an empty trip gets one team");
+        eqs(team(0).name + "|" + team(0).members.length + "|" + team(0).stops.length + "|" +
+            team(0).days.length + "|" + team(0).packing + "|" + team(0).dayOffset,
+            "Team 1|0|0|0||0", "tm panel: that team is an empty Team 1");
+        EP.loadTeams(null, null);
+        eqs(EP.state.teams.length + ":" + team(0).name, "1:Team 1",
+            "tm panel: no trip at all still gives one empty Team 1");
+        // A stored team without an id (allowed in the file) gets one.
+        open({ trip: { startDate: "2026-10-03", teams: [ { name: "A" }, { id: "x", name: "B" },
+            { id: "x", name: "C" } ] } });
+        ok(team(0).id !== "" && team(2).id !== "x" && team(2).id !== "" && team(1).id === "x",
+            "tm panel: missing and repeated team ids get fresh ones at load");
+
+        // addTeam / removeTeam.
+        open(stored());
+        var r = EP.addTeam();
+        ok(r.done === true && r.why === "", "tm panel: addTeam adds and saves");
+        eqs(EP.state.teams.length, 3, "tm panel: three teams after an add");
+        var t3 = team(2);
+        ok(r.team === t3, "tm panel: addTeam returns the new team");
+        eqs(t3.name, "Team 3", "tm panel: a new team is named Team N");
+        ok(t3.id !== "" && t3.id !== "t2", "tm panel: a new team has a fresh id");
+        eqs(JSON.stringify(t3.days) + "|" + t3.dayOffset, JSON.stringify([day("09:00", 3, "out")]) + "|1",
+            "tm panel: a new team copies the last team's days and dayOffset");
+        eqs(t3.members.length + t3.stops.length + t3.packing.length + t3.goal.length, 0,
+            "tm panel: a new team has no members, stops, packing or goal");
+        eqs(onDisk().trip.teams.length, 3, "tm panel: the new team is written through");
+        while (EP.state.teams.length < 8) { EP.addTeam(); }
+        var w8 = disk.writes;
+        var r9 = EP.addTeam();
+        ok(r9.done === false && r9.why !== "", "tm panel: a ninth team is refused with a reason");
+        eqs(EP.state.teams.length + ":" + disk.writes, "8:" + w8, "tm panel: the refused add changes and writes nothing");
+        eqs(team(7).name, "Team 8", "tm panel: the eighth team is Team 8");
+        var rr = EP.removeTeam(team(7).id);
+        ok(rr.done === true && rr.why === "", "tm panel: removeTeam removes and saves");
+        eqs(EP.state.teams.length + ":" + onDisk().trip.teams.length, "7:7",
+            "tm panel: the removal is written through");
+        ok(EP.removeTeam("nope").done === false, "tm panel: removing an unknown team is refused");
+        while (EP.state.teams.length > 1) { EP.removeTeam(team(EP.state.teams.length - 1).id); }
+        var wl = disk.writes;
+        var rl = EP.removeTeam(team(0).id);
+        ok(rl.done === false && rl.why !== "", "tm panel: the last team cannot be removed");
+        eqs(EP.state.teams.length + ":" + disk.writes, "1:" + wl, "tm panel: the refused removal writes nothing");
+        open({ trip: { startDate: "2026-10-03", teams: [ { id: "a", name: "Alpha" }, { id: "b", name: "Team 3" } ] } });
+        eqs(EP.addTeam().team.name, "Team 4", "tm panel: a new team's name skips one already taken");
+
+        // Setters validate through cleanTeam.
+        open(stored());
+        EP.setTeamField("t2", "name", "   ");
+        eqs(team(1).name, "Team 2", "tm panel: a blank name becomes Team N");
+        EP.setTeamField("t2", "name", "  Deep  ");
+        eqs(team(1).name, "Deep", "tm panel: the name is trimmed");
+        EP.setTeamField("t2", "goal", "  Push the creek ");
+        eqs(team(1).goal, "Push the creek", "tm panel: the goal is trimmed");
+        EP.setTeamField("t2", "packing", "Rope\nBolts");
+        eqs(team(1).packing, "Rope\nBolts", "tm panel: packing is set");
+        EP.setTeamField("t2", "dayOffset", -2);
+        eqs(team(1).dayOffset, 0, "tm panel: a negative dayOffset is 0");
+        EP.setTeamField("t2", "dayOffset", 2);
+        eqs(team(1).dayOffset, 2, "tm panel: dayOffset is set");
+        EP.setTeamField("t2", "dayOffset", "3");
+        eqs(team(1).dayOffset, 3, "tm panel: a whole-number text dayOffset is read");
+        EP.setTeamField("t2", "dayOffset", 1.5);
+        eqs(team(1).dayOffset, 0, "tm panel: a fractional dayOffset is 0");
+        var rf = EP.setTeamField("t2", "medical", "x");
+        ok(rf.done === false && team(1).medical === undefined, "tm panel: an unknown field is refused");
+        ok(EP.setTeamField("nope", "name", "x").done === false, "tm panel: an unknown team is refused");
+        eqs(onDisk().trip.teams[1].name + "|" + onDisk().trip.teams[1].goal + "|" +
+            onDisk().trip.teams[1].packing, "Deep|Push the creek|Rope\nBolts",
+            "tm panel: field edits are written through");
+        EP.setTeamDays("t2", [day("7:05", 3, "camp"), day("25:00", 1, "out"), day("10:00", 2, "bogus")]);
+        eqs(JSON.stringify(team(1).days), JSON.stringify([day("07:05", 3, "camp"), day("10:00", 2, "out")]),
+            "tm panel: setTeamDays cleans the days like trip days");
+        eqs(JSON.stringify(onDisk().trip.teams[1].days), JSON.stringify(team(1).days),
+            "tm panel: the days are written through");
+        EP.setTeamDays("t2", "junk");
+        eqs(team(1).days.length, 0, "tm panel: junk days are no days");
+
+        // Stops: real stations only, the station's own name, no duplicates.
+        var sr = EP.addTeamStop("t2", " b20 ");
+        ok(sr.done === true, "tm panel: a real station is added");
+        eqs(team(1).stops.join(","), "B20", "tm panel: a case-blind match adds the station's own name");
+        var sd = EP.addTeamStop("t2", "B20");
+        ok(sd.done === false && sd.why === "", "tm panel: a stop already there changes nothing, silently");
+        eqs(team(1).stops.join(","), "B20", "tm panel: stops stay deduped");
+        var sb = EP.addTeamStop("t2", "Z99");
+        ok(sb.done === false && sb.why.indexOf("Z99") >= 0, "tm panel: a station not in the drawing is refused, named");
+        ok(EP.addTeamStop("t2", "  ").done === false, "tm panel: a blank stop is refused");
+        EP.addTeamStop("t2", "D8");
+        eqs(team(1).stops.join(",") + "|" + onDisk().trip.teams[1].stops.join(","), "B20,D8|B20,D8",
+            "tm panel: stops kept in order and written through");
+        EP.removeTeamStop("t2", "b20");
+        eqs(team(1).stops.join(","), "D8", "tm panel: removeTeamStop takes the stop off");
+        ok(EP.removeTeamStop("t2", "A1").done === false, "tm panel: removing a stop not there changes nothing");
+        EP.clearTeamStops("t2");
+        eqs(team(1).stops.length + onDisk().trip.teams[1].stops.length, 0, "tm panel: clearTeamStops empties and saves");
+
+        // Members: only from the party; a member no longer going is kept, flagged.
+        EP.setTeamMember("t2", { id: "p-bo", name: "Bo" }, true);
+        EP.setTeamMember("t2", { id: "", name: " cy " }, true);
+        eqs(JSON.stringify(team(1).members), JSON.stringify([{ id: "p-bo", name: "Bo" }, { id: "", name: "Cy" }]),
+            "tm panel: party members are added as the party has them");
+        var rz = EP.setTeamMember("t2", { id: "p-zed", name: "Zed" }, true);
+        ok(rz.done === false && rz.why.indexOf("Zed") >= 0, "tm panel: someone not going is refused, named");
+        eqs(team(1).members.length, 2, "tm panel: the refused member is not added");
+        ok(EP.setTeamMember("t2", { id: "p-bo", name: "Bo" }, true).done === false,
+            "tm panel: a member already on the team changes nothing");
+        EP.setTeamMember("t2", { id: "p-bo", name: "Bo" }, false);
+        eqs(JSON.stringify(team(1).members), JSON.stringify([{ id: "", name: "Cy" }]),
+            "tm panel: unticking takes a member off");
+        eqs(JSON.stringify(onDisk().trip.teams[1].members), JSON.stringify(team(1).members),
+            "tm panel: members are written through");
+        EP.state.store.settings.trip.party = [ { id: "p-bo", name: "Bo" }, { id: "", name: "Cy" } ];
+        var fl = EP.teamMemberFlags(team(0));
+        eqs(fl.length + ":" + fl[0].name + ":" + fl[0].going, "1:Ana:false",
+            "tm panel: a member no longer going is flagged");
+        eqs(team(0).members.length, 1, "tm panel: a member no longer going is kept");
+        eqs(EP.teamMemberFlags(team(1))[0].going, true, "tm panel: a going member is not flagged");
+        ok(EP.setTeamMember("t1", { id: "p-ana", name: "Ana" }, false).done === true && team(0).members.length === 0,
+            "tm panel: a flagged member can still be taken off");
+
+        // Save: only teams change; everything else in the file is kept.
+        open(stored());
+        EP.setTeamField("t1", "goal", "New goal");
+        var sv = onDisk();
+        eqs(sv.packing, "old list", "tm panel: saving teams keeps settings.packing");
+        eqs(JSON.stringify(sv.pace), JSON.stringify({ paceFtPerMin: 100, rig: 5 }), "tm panel: saving teams keeps pace");
+        var ent = CsStationStore.parse(disk.text).store.entries;
+        eqs(ent.length + ":" + ent[0].note, "1:keep me", "tm panel: saving teams keeps the entries");
+        eqs(sv.trip.startDate + "|" + sv.trip.party.length + "|" + sv.trip.days.length, "2026-10-03|3|1",
+            "tm panel: saving teams keeps the rest of the trip");
+        eqs(sv.trip.teams[0].goal, "New goal", "tm panel: the edited team is saved");
+        eqs(JSON.stringify(sv.trip.teams[1]), JSON.stringify(CsStationStore.cleanTeam(stored().trip.teams[1], 2)),
+            "tm panel: saving never changes another team's data");
+        var side = CsStationStore.parse(disk.text).store;
+        side.entries.push({ station: "D8", note: "from Drive", status: "", team: "", who: "" });
+        disk.text = CsStationStore.serialize(side);
+        EP.setTeamField("t1", "goal", "Again");
+        ok(disk.text.indexOf("from Drive") > 0, "tm panel: a save re-reads the file first");
+        var wn = disk.writes;
+        eqs(EP.saveTeams(), "", "tm panel: an unchanged save is fine");
+        eqs(disk.writes, wn, "tm panel: an unchanged save writes nothing");
+
+        // A damaged file: refuse, write nothing, keep the edit in memory.
+        open(stored());
+        disk.damaged = true;
+        var before = disk.text;
+        var dm = EP.setTeamField("t1", "name", "X");
+        ok(dm.done === true && dm.why.indexOf("could not be read") >= 0,
+            "tm panel: a damaged stations.json refuses the save and says so");
+        eqs(disk.writes, 0, "tm panel: a damaged file is never written");
+        ok(disk.text === before, "tm panel: a damaged file is left as it was");
+        eqs(team(0).name, "X", "tm panel: the edit stays in memory");
+        ok(EP.saveTeams().indexOf("not saved") >= 0, "tm panel: saveTeams on a damaged file says not saved");
+
+        // An unsaved drawing keeps teams in memory and says so.
+        open(stored(), "");
+        var us = EP.setTeamField("t1", "name", "Y");
+        ok(us.done === true && us.why.indexOf("memory") >= 0, "tm panel: an unsaved drawing keeps teams in memory and says so");
+        eqs(disk.writes + ":" + team(0).name, "0:Y", "tm panel: an unsaved drawing writes nothing");
+
+        // Same-day warnings.
+        open(stored());
+        eqs(EP.teamWarnings().length, 0, "tm panel: no shared person, no warning");
+        EP.setTeamMember("t2", { id: "p-ana", name: "Ana" }, true);
+        eqs(EP.teamWarnings().length, 0, "tm panel: the same person on different dates, no warning");
+        EP.setTeamField("t2", "dayOffset", 0);
+        var tw = EP.teamWarnings();
+        eqs(tw.length === 1 ? tw[0].person + "|" + tw[0].date + "|" + tw[0].teams.join(",") : String(tw.length),
+            "Ana|2026-10-03|Alpha,Beta", "tm panel: teamWarnings reports an overlap");
+
+        // Build's saveTrip never wipes the teams (they are owned by saveTeams).
+        open(stored());
+        EP.saveTrip(CsStationStore.cleanTrip({ startDate: "2026-10-05", days: [], party: party }));
+        eqs(onDisk().trip.startDate + "|" + onDisk().trip.teams.length, "2026-10-05|2",
+            "tm panel: Build card's trip save keeps the stored teams");
+
+        // The populate path loads the teams.
+        open(stored());
+        EP.state.teams = [];
+        var realContacts = CsCalloutLocal.loadContacts;
+        var realLoadPeople = EP.loadPeople;
+        CsCalloutLocal.loadContacts = function() { return { topName: "", topPhone: "", escalation: "", bufferMin: "" }; };
+        EP.loadPeople = function() {};
+        try {
+            EP.showCalloutSettings();
+        } finally {
+            CsCalloutLocal.loadContacts = realContacts;
+            EP.loadPeople = realLoadPeople;
+        }
+        eqs(EP.state.teams.length, 2, "tm panel: showCalloutSettings loads the teams");
+        eqs(disk.writes, 0, "tm panel: populating writes nothing");
+    } finally {
+        EP.state = realState;
+        EP.child = realChild;
+        CsStationSidecar.sidecarPath = realPath;
+        CsStationSidecar.readSidecar = realRead;
+        CsStationSidecar.writeSidecar = realWrite;
+    }
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

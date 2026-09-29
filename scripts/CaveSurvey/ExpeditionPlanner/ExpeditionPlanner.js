@@ -68,7 +68,10 @@ ExpeditionPlanner.state = { drawn: null, docPath: null, store: null,
     // members this computer has no details for.
     people: [], peopleError: "", rosterRows: [],
     // Set while the roster is filled by code (FILLING IS NOT EDITING).
-    filling: false };
+    filling: false,
+    // The trip's teams (CsStationStore.cleanTeam shape), loaded by
+    // loadTeams and changed only through the team edit functions.
+    teams: [] };
 
 // ---------------------------------------------------------------------
 // The panel
@@ -1873,12 +1876,15 @@ ExpeditionPlanner.showCalloutSettings = function() {
         var w = ExpeditionPlanner.child(name);
         if (w !== null) { w.text = String(v); }
     };
+    var trip = (s.store !== null && s.store.settings.trip) ?
+        s.store.settings.trip : CsStationStore.emptyTrip();
+    // The teams, migrated from the legacy single schedule when the file
+    // has none. Loading writes nothing.
+    ExpeditionPlanner.loadTeams(trip, s.store === null ? null : s.store.settings);
     var dt = ExpeditionPlanner.child("ExpeditionPlannerCalloutDays");
     if (dt === null) {
         return;
     }
-    var trip = (s.store !== null && s.store.settings.trip) ?
-        s.store.settings.trip : CsStationStore.emptyTrip();
     ExpeditionPlanner.setStartDateText(trip.startDate);
     set("ExpeditionPlannerCalloutPlace", trip.weatherPlace);
     dt.setRowCount(0);
@@ -1911,12 +1917,303 @@ ExpeditionPlanner.saveTrip = function(trip) {
         return qsTr("trip not saved: stations.json could not be read") +
             " (" + side.error + ")";
     }
-    side.store.settings.trip = trip;
+    // The teams belong to saveTeams: the form's trip carries none, and
+    // writing it as is would wipe every saved team.
+    var old = side.store.settings.trip;
+    var out = {};
+    for (var key in trip) {
+        if (Object.prototype.hasOwnProperty.call(trip, key)) { out[key] = trip[key]; }
+    }
+    out.teams = (old && Object.prototype.toString.call(old.teams) === "[object Array]") ?
+        old.teams : [];
+    side.store.settings.trip = out;
     if (!CsStationSidecar.writeSidecar(path, side.store)) {
         return qsTr("trip not saved: could not write stations.json");
     }
-    if (s.store !== null) { s.store.settings.trip = trip; }
+    if (s.store !== null) { s.store.settings.trip = out; }
     return "";
+};
+
+// ---------------------------------------------------------------------
+// Teams: the data layer
+// ---------------------------------------------------------------------
+//
+// state.teams is the trip's teams. It is filled by loadTeams (which is
+// where a legacy single-team trip is MIGRATED: never in cleanTrip or
+// serialize, so a save can never invent a phantom "Team 1") and changed
+// only by the edit functions below. Every edit re-cleans the team through
+// CsStationStore.cleanTeam and writes through with saveTeams.
+//
+// Every edit returns {done, why}: `done` is true when state.teams changed;
+// `why` is "" when all is well, else a refusal or why the save failed (the
+// edit then stays in memory). done:false with why "" means there was
+// nothing to change.
+
+/** At most this many teams (cleanTrip drops the rest). */
+ExpeditionPlanner.MAX_TEAMS = 8;
+
+/**
+ * Fill state.teams from a stored trip: its teams as they are, else the
+ * legacy days, party and settings.packing as one "Team 1" (an empty trip
+ * gets one empty "Team 1"). Missing or repeated team ids get fresh ones.
+ * Writes nothing. \return state.teams
+ */
+ExpeditionPlanner.loadTeams = function(trip, settings) {
+    var t = (trip !== null && typeof trip === "object") ? trip : CsStationStore.emptyTrip();
+    var st = (settings !== null && typeof settings === "object") ? settings : {};
+    var list = CsTeams.fromLegacy(t, st.packing, t.party);
+    var teams = [];
+    var seen = {};
+    for (var i = 0; i < list.length && teams.length < ExpeditionPlanner.MAX_TEAMS; i++) {
+        if (list[i] === null || typeof list[i] !== "object") { continue; }
+        // cleanTeam builds new objects: state never shares the store's.
+        var team = CsStationStore.cleanTeam(list[i], teams.length + 1);
+        if (team.id === "" || seen["#" + team.id] === true) { team.id = CsUuid.v4(); }
+        seen["#" + team.id] = true;
+        teams.push(team);
+    }
+    if (teams.length === 0) { teams.push(CsTeams.blank("Team 1")); }
+    ExpeditionPlanner.state.teams = teams;
+    return teams;
+};
+
+/** The index of team `id` in state.teams, or -1. */
+ExpeditionPlanner.teamIndex = function(id) {
+    var teams = ExpeditionPlanner.state.teams;
+    for (var i = 0; i < teams.length; i++) {
+        if (teams[i].id === String(id)) { return i; }
+    }
+    return -1;
+};
+
+/** Re-clean team `i` (its position names a blank one) and write through. */
+ExpeditionPlanner.teamEdited = function(i) {
+    var teams = ExpeditionPlanner.state.teams;
+    var id = teams[i].id;
+    teams[i] = CsStationStore.cleanTeam(teams[i], i + 1);
+    teams[i].id = id;
+    return { done: true, why: ExpeditionPlanner.saveTeams() };
+};
+
+var csEpNoTeam = function() {
+    return { done: false, why: qsTr("That team is not in this trip.") };
+};
+
+/**
+ * Put state.teams into stations.json settings.trip.teams, re-reading the
+ * file first and changing nothing else in it. Unchanged teams write
+ * nothing. \return "" when saved or nothing to save, else why not
+ */
+ExpeditionPlanner.saveTeams = function() {
+    var s = ExpeditionPlanner.state;
+    var clean = CsStationStore.cleanTrip({ teams: s.teams }).teams;
+    var path = CsStationSidecar.sidecarPath(s.docPath);
+    if (path === "") {
+        return qsTr("teams kept in memory only: save the drawing first");
+    }
+    var side = CsStationSidecar.readSidecar(path);
+    if (side.error !== "") {
+        s.loadError = side.error;
+        ExpeditionPlanner.updateSummary();
+        return qsTr("teams not saved: stations.json could not be read") +
+            " (" + side.error + ")";
+    }
+    var trip = side.store.settings.trip || CsStationStore.emptyTrip();
+    if (JSON.stringify(trip.teams || []) !== JSON.stringify(clean)) {
+        trip.teams = clean;
+        side.store.settings.trip = trip;
+        if (!CsStationSidecar.writeSidecar(path, side.store)) {
+            return qsTr("teams not saved: could not write stations.json");
+        }
+    }
+    if (s.store !== null) {
+        if (!s.store.settings.trip) { s.store.settings.trip = CsStationStore.emptyTrip(); }
+        s.store.settings.trip.teams = JSON.parse(JSON.stringify(clean));
+    }
+    return "";
+};
+
+/**
+ * Add a team after the last: its days and dayOffset copied (CsTeams.copyOf),
+ * no members, stops or packing, named "Team N" (N its position, or the
+ * next number not already a team's name). Refused at MAX_TEAMS.
+ * \return {done, why, team}
+ */
+ExpeditionPlanner.addTeam = function() {
+    var teams = ExpeditionPlanner.state.teams;
+    if (teams.length >= ExpeditionPlanner.MAX_TEAMS) {
+        return { done: false, why: qsTr("A trip can have at most %1 teams.")
+            .arg(ExpeditionPlanner.MAX_TEAMS), team: null };
+    }
+    var taken = {};
+    for (var i = 0; i < teams.length; i++) { taken["#" + teams[i].name.toLowerCase()] = true; }
+    var n = teams.length + 1;
+    while (taken["#team " + n] === true) { n++; }
+    var team = teams.length > 0 ? CsTeams.copyOf(teams[teams.length - 1], "Team " + n) :
+        CsTeams.blank("Team " + n);
+    teams.push(team);
+    var r = ExpeditionPlanner.teamEdited(teams.length - 1);
+    r.team = teams[teams.length - 1];
+    return r;
+};
+
+/** Remove team `id`; the last team is never removed. \return {done, why} */
+ExpeditionPlanner.removeTeam = function(id) {
+    var teams = ExpeditionPlanner.state.teams;
+    var i = ExpeditionPlanner.teamIndex(id);
+    if (i < 0) { return csEpNoTeam(); }
+    if (teams.length <= 1) {
+        return { done: false, why: qsTr("A trip needs at least one team.") };
+    }
+    teams.splice(i, 1);
+    return { done: true, why: ExpeditionPlanner.saveTeams() };
+};
+
+/**
+ * Set a team's "name", "goal", "packing" or "dayOffset" (a whole number
+ * >= 0; whole-number text is read; anything else is 0). A blank name
+ * becomes "Team N". \return {done, why}
+ */
+ExpeditionPlanner.setTeamField = function(id, field, value) {
+    var i = ExpeditionPlanner.teamIndex(id);
+    if (i < 0) { return csEpNoTeam(); }
+    if (["name", "goal", "packing", "dayOffset"].indexOf(field) < 0) {
+        return { done: false, why: qsTr("A team has no field %1.").arg(String(field)) };
+    }
+    var v = value;
+    if (field === "dayOffset" && typeof v === "string" && /^\s*\d+\s*$/.test(v)) {
+        v = parseInt(v, 10);
+    }
+    ExpeditionPlanner.state.teams[i][field] = v;
+    return ExpeditionPlanner.teamEdited(i);
+};
+
+/** Replace a team's days (cleaned like trip days). \return {done, why} */
+ExpeditionPlanner.setTeamDays = function(id, days) {
+    var i = ExpeditionPlanner.teamIndex(id);
+    if (i < 0) { return csEpNoTeam(); }
+    ExpeditionPlanner.state.teams[i].days = days;
+    return ExpeditionPlanner.teamEdited(i);
+};
+
+/** Whether party/member entries `a` and `b` are one person: id, else name. */
+var csEpSamePerson = function(a, b) {
+    var trim = function(v) {
+        return (v === undefined || v === null ? "" : String(v)).replace(/^\s+|\s+$/g, "");
+    };
+    var ia = trim(a.id), ib = trim(b.id);
+    if (ia !== "" && ib !== "") { return ia === ib; }
+    return trim(a.name).toLowerCase() === trim(b.name).toLowerCase() && trim(a.name) !== "";
+};
+
+/**
+ * Put `person` ({id, name}) on team `id` (on true) or take them off. Only
+ * people in the trip's party (Going) can be added, as the party has them;
+ * anyone can be taken off. \return {done, why}
+ */
+ExpeditionPlanner.setTeamMember = function(id, person, on) {
+    var i = ExpeditionPlanner.teamIndex(id);
+    if (i < 0) { return csEpNoTeam(); }
+    var p = (person !== null && typeof person === "object") ? person : {};
+    var members = ExpeditionPlanner.state.teams[i].members;
+    var at = -1;
+    for (var m = 0; m < members.length; m++) {
+        if (csEpSamePerson(members[m], p)) { at = m; break; }
+    }
+    if (on !== true) {
+        if (at < 0) { return { done: false, why: "" }; }
+        members.splice(at, 1);
+        return ExpeditionPlanner.teamEdited(i);
+    }
+    if (at >= 0) { return { done: false, why: "" }; }
+    var party = ExpeditionPlanner.readParty();
+    var going = null;
+    for (var k = 0; k < party.length; k++) {
+        if (csEpSamePerson(party[k], p)) { going = party[k]; break; }
+    }
+    if (going === null) {
+        return { done: false, why: qsTr("%1 is not going on this trip: tick Going first.")
+            .arg(String(p.name === undefined || p.name === null ? "" : p.name)) };
+    }
+    members.push({ id: going.id, name: going.name });
+    return ExpeditionPlanner.teamEdited(i);
+};
+
+/**
+ * A team's members with whether each is still in the party:
+ * [{id, name, going}]. going false = kept, but "no longer going".
+ * \param party optional; the Going party by default
+ */
+ExpeditionPlanner.teamMemberFlags = function(team, party) {
+    var list = party === undefined || party === null ? ExpeditionPlanner.readParty() : party;
+    var out = [];
+    var members = (team !== null && typeof team === "object" &&
+        Object.prototype.toString.call(team.members) === "[object Array]") ? team.members : [];
+    for (var m = 0; m < members.length; m++) {
+        var going = false;
+        for (var k = 0; k < list.length; k++) {
+            if (csEpSamePerson(list[k], members[m])) { going = true; break; }
+        }
+        out.push({ id: members[m].id, name: members[m].name, going: going });
+    }
+    return out;
+};
+
+/**
+ * Add a stop to team `id`: a station of this drawing, matched as the
+ * picker does (exact, then case-blind), stored under its own name. A stop
+ * already there changes nothing. \return {done, why}
+ */
+ExpeditionPlanner.addTeamStop = function(id, station) {
+    var i = ExpeditionPlanner.teamIndex(id);
+    if (i < 0) { return csEpNoTeam(); }
+    var typed = String(station === undefined || station === null ? "" : station)
+        .replace(/^\s+|\s+$/g, "");
+    if (typed === "") {
+        return { done: false, why: qsTr("Type or pick a station first.") };
+    }
+    var name = ExpeditionPlanner.matchStation(ExpeditionPlanner.state.stations, typed);
+    if (name === null) {
+        return { done: false, why: qsTr("%1 is not a station in this drawing").arg(typed) };
+    }
+    var stops = ExpeditionPlanner.state.teams[i].stops;
+    if (stops.indexOf(name) >= 0) { return { done: false, why: "" }; }
+    stops.push(name);
+    return ExpeditionPlanner.teamEdited(i);
+};
+
+/** Take a stop (exact, then case-blind) off team `id`. \return {done, why} */
+ExpeditionPlanner.removeTeamStop = function(id, station) {
+    var i = ExpeditionPlanner.teamIndex(id);
+    if (i < 0) { return csEpNoTeam(); }
+    var stops = ExpeditionPlanner.state.teams[i].stops;
+    var name = ExpeditionPlanner.matchStation(stops, station);
+    if (name === null) { return { done: false, why: "" }; }
+    stops.splice(stops.indexOf(name), 1);
+    return ExpeditionPlanner.teamEdited(i);
+};
+
+/** Empty team `id`'s stops. \return {done, why} */
+ExpeditionPlanner.clearTeamStops = function(id) {
+    var i = ExpeditionPlanner.teamIndex(id);
+    if (i < 0) { return csEpNoTeam(); }
+    if (ExpeditionPlanner.state.teams[i].stops.length === 0) { return { done: false, why: "" }; }
+    ExpeditionPlanner.state.teams[i].stops = [];
+    return ExpeditionPlanner.teamEdited(i);
+};
+
+/**
+ * People on two teams on the same calendar day (CsTeams.sameDayConflicts)
+ * for the current teams and start date (the field's, else the stored one).
+ * Warnings only: nothing is ever blocked.
+ */
+ExpeditionPlanner.teamWarnings = function() {
+    var s = ExpeditionPlanner.state;
+    var start = ExpeditionPlanner.startDateText();
+    if (start === "" && s.store !== null && s.store.settings.trip) {
+        start = s.store.settings.trip.startDate || "";
+    }
+    return CsTeams.sameDayConflicts({ startDate: start, teams: s.teams });
 };
 
 ExpeditionPlanner.calloutSay = function(text) {
