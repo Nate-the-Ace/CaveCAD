@@ -33696,7 +33696,7 @@ eqs(sgTwo.connectors[1], "70 ft · 6 min", "signs: between signs sums walks");
 eqs(sgTwo.connectors[2], "20 ft · 3 min", "signs: last sign to destination");
 var sgTwoHtml = CsTripPlan.signsHtml(sgTwo);
 eqs(sgTwoHtml.split("class=\"sign\"").length - 1, 2, "signsHtml: one row per junction");
-eqs(sgTwoHtml.split("class=\"conn\"").length - 1, 3, "signsHtml: three connector lines");
+ok(sgTwoHtml.indexOf("class=\"conn\"") < 0, "signsHtml: connectors are inside the rows");
 ok(sgTwoHtml.indexOf("Arrive E") > 0, "signsHtml: arrive row");
 ok(sgTwoHtml.indexOf("toward E") > 0, "signsHtml: toward line");
 ok(sgTwoHtml.indexOf("<svg") > 0, "signsHtml: inline svg arrow");
@@ -33740,6 +33740,87 @@ ok(sgPacket.indexOf("follow the passage to A3") > 0, "packet: directions are sig
 ok(sgPacket.indexOf("to A3:") < 0, "packet: no verbose step text");
 ok(sgPacket.indexOf("Back to A1") > 0, "packet: back leg kept");
 ok(sgPacket.indexOf("<h2>Gear</h2>") > 0, "packet: gear section kept");
+
+// Signs, second pass: no "0 min", two columns, zigzag merge.
+var sg2A = CsTripPlan.signs([ sgWalk("A", "B", 0, 34, { atJunction: true, minutes: 0.13 }),
+    sgWalk("B", "C", 10, 0, { minutes: 0.4 }) ], "ft", "C");
+eqs(sg2A.connectors[0], "34 ft", "signs2: sub-minute connector is distance only");
+eqs(sg2A.connectors[1], "10 ft", "signs2: sub-minute last connector is distance only");
+var sg2B = CsTripPlan.signs([ sgWalk("A", "B", 0, 196, { atJunction: true, minutes: 1.2 }),
+    sgWalk("B", "C", 10, 0) ], "ft", "C");
+eqs(sg2B.connectors[0], "196 ft · 1 min", "signs2: a minute or more prints both");
+ok(CsTripPlan.signsHtml(sgNone).indexOf("(240 ft · 5 min)") > 0, "signs2: single line long form");
+var sg2C = CsTripPlan.signs([ sgWalk("A", "B", 0, 61, { minutes: 0.2 }) ], "ft", "B");
+ok(CsTripPlan.signsHtml(sg2C).indexOf(
+    "No intersections: follow the passage to B (61 ft)") > 0, "signs2: single line short form");
+ok(CsTripPlan.signsHtml(sg2C).indexOf(" min") < 0, "signs2: short single line has no min");
+ok(sgP2.indexOf("0 min") < 0 && sgPacket.indexOf(" 0 min") < 0,
+    "signs2: no 0 min in card page 2 or packet");
+ok(CsTripPlan.SIGNS_CSS.indexOf("column-count:2") > 0, "signs2: two columns css");
+ok(CsTripPlan.SIGNS_CSS.indexOf("column-gap:18px") > 0, "signs2: column gap css");
+var sg2Html = CsTripPlan.signsHtml(sgTwo);
+ok(sg2Html.indexOf("class=\"conn\"") < 0 && sg2Html.indexOf("class=\"blk\"") < 0,
+    "signs2: no standalone connector elements");
+var sg2Rows = sg2Html.split(/<div class="sign[ "]/);
+ok(sg2Rows[1].indexOf("class=\"reach\"") > 0 && sg2Rows[1].indexOf("60 ft · 3 min") > 0 &&
+    sg2Rows[1].indexOf(">B</div>") > 0, "signs2: first row carries its own reach text");
+ok(sg2Rows[2].indexOf("70 ft · 6 min") > 0 && sg2Rows[2].indexOf(">D</div>") > 0,
+    "signs2: second row carries the walk between signs");
+ok(sg2Rows[3].indexOf("arrive") === 0 && sg2Rows[3].indexOf("20 ft · 3 min") > 0 &&
+    sg2Rows[3].indexOf("Arrive E") > 0, "signs2: Arrive row carries the last distance");
+ok(sg2Html.indexOf("aria-label=\"distance and time to reach B\"") > 0 &&
+    sg2Html.indexOf("title=\"distance and time to reach E\"") > 0, "signs2: reach cell labelled");
+ok(CsTripPlan.SIGNS_CSS.indexOf("width:90px") > 0, "signs2: fixed reach column");
+ok(CsTripPlan.SIGNS_CSS.indexOf(".sign{") >= 0 && /\.sign\{[^}]*break-inside:avoid/.test(CsTripPlan.SIGNS_CSS),
+    "signs2: each row avoids breaks");
+// Jog merge.
+var sg2Jog = CsTripPlan.signs([
+    sgWalk("A", "B", 0, 40, { atJunction: true }),
+    sgWalk("B", "C", 1, 0, { atJunction: true }),
+    sgWalk("C", "D", 0, 40, { atJunction: false }) ], "ft", "D");
+eqs(sg2Jog.signs.length, 1, "signs2: a 1 ft jog is one sign");
+eqs(sg2Jog.signs[0].arrow, "straight", "signs2: net of right then left is straight");
+eqs(sg2Jog.signs[0].label, "B", "signs2: merged sign keeps the first label");
+eqs(sg2Jog.connectors.length, 2, "signs2: connectors one more than signs");
+ok(sg2Jog.connectors[1].indexOf("41 ft") === 0, "signs2: jog folded into following connector");
+var sg2Chain = CsTripPlan.signs([
+    sgWalk("A", "B", 0, 40, { atJunction: true }),
+    sgWalk("B", "C", 1, 0, { atJunction: true }),
+    sgWalk("C", "D", 0, 1, { atJunction: true }),
+    sgWalk("D", "E", 1, 0, { atJunction: false }) ], "ft", "E");
+eqs(sg2Chain.signs.length, 1, "signs2: a three-junction chain merges into one");
+eqs(sg2Chain.signs[0].arrow, "right", "signs2: chain net turn is right (+90 -90 +90)");
+eqs(sg2Chain.signs[0].label, "B", "signs2: chain keeps first label");
+var sg2Far = CsTripPlan.signs([
+    sgWalk("A", "B", 0, 40, { atJunction: true }),
+    sgWalk("B", "C", 10, 0, { atJunction: true, length: 100, dx: 100, dy: 0 }),
+    sgWalk("C", "D", 0, 40) ], "ft", "D");
+eqs(sg2Far.signs.length, 2, "signs2: junctions 100 ft apart are not merged");
+var sg2Pitch = CsTripPlan.signs([
+    sgWalk("A", "B", 0, 40, { atJunction: true }),
+    sgWalk("B", "C", 1, 0, { atJunction: true }),
+    sgPitch("C", "D", "down", true) ], "ft", "D");
+eqs(sg2Pitch.signs.length, 2, "signs2: a jog next to a pitch is not merged");
+var sg2Pitch2 = CsTripPlan.signs([
+    sgPitch("A", "B", "up", true, { atJunction: true }),
+    sgWalk("B", "C", 1, 0, { atJunction: true }),
+    sgWalk("C", "D", 0, 10) ], "ft", "D");
+eqs(sg2Pitch2.signs.length, 2, "signs2: a jog after a pitch is not merged");
+var sg2Unk = CsTripPlan.signs([
+    sgWalk("A", "B", 0, 40, { atJunction: true }),
+    sgWalk("B", "C", 1, 0, { atJunction: true, length: undefined }),
+    sgWalk("C", "D", 0, 40) ], "ft", "D");
+eqs(sg2Unk.signs.length, 2, "signs2: unknown distance is not merged");
+var sg2M1 = CsTripPlan.signs([
+    sgWalk("A", "B", 0, 40, { atJunction: true }),
+    sgWalk("B", "C", 1, 0, { atJunction: true }),
+    sgWalk("C", "D", 0, 40) ], "m", "D");
+eqs(sg2M1.signs.length, 1, "signs2: metric 1 m jog merges");
+var sg2M2 = CsTripPlan.signs([
+    sgWalk("A", "B", 0, 40, { atJunction: true }),
+    sgWalk("B", "C", 2, 0, { atJunction: true }),
+    sgWalk("C", "D", 0, 40) ], "m", "D");
+eqs(sg2M2.signs.length, 2, "signs2: metric 2 m jog does not merge");
 
 // ---------------------------------------------------------------------
 // Report.

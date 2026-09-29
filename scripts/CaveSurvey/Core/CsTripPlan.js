@@ -617,23 +617,36 @@ CsTripPlan.turnArrow = function(d) {
     return "sharp-" + side;
 };
 
-/** "189 ft . 3 min" for the walking steps in a slice of a leg. */
-CsTripPlan.segmentText = function(steps, from, to, unit) {
-    var len = 0;
-    var mins = 0;
-    var haveMins = false;
+/** Distance and time of the walking steps in a slice of a leg. */
+CsTripPlan.segmentInfo = function(steps, from, to) {
+    var info = { len: 0, mins: 0, haveMins: false, known: true, pitch: false };
     for (var i = from; i < to; i++) {
-        if (steps[i].kind !== "walk") { continue; }
-        len += steps[i].length;
+        if (steps[i].kind !== "walk") { info.pitch = true; continue; }
+        if (typeof steps[i].length !== "number" || !isFinite(steps[i].length)) {
+            info.known = false;
+            continue;
+        }
+        info.len += steps[i].length;
         if (steps[i].minutes !== undefined && steps[i].minutes !== null) {
-            mins += steps[i].minutes;
-            haveMins = true;
+            info.mins += steps[i].minutes;
+            info.haveMins = true;
         }
     }
-    var parts = [ CsTripPlan.dist(len, unit) ];
-    if (haveMins) { parts.push(CsTripPlan.clock(mins)); }
+    return info;
+};
+
+/** "189 ft · 3 min"; the time is left out when it rounds to under a minute. */
+CsTripPlan.segmentText = function(steps, from, to, unit) {
+    var info = CsTripPlan.segmentInfo(steps, from, to);
+    var parts = [ CsTripPlan.dist(info.len, unit) ];
+    if (info.haveMins && Math.round(info.mins) >= 1) {
+        parts.push(CsTripPlan.clock(info.mins));
+    }
     return parts.join(" · ");
 };
+
+/** Junctions closer than this (feet) are one wiggle, not two decisions. */
+CsTripPlan.JOG_FT = 5;
 
 /**
  * Signs for one leg. A sign exists only at a junction decision: step i
@@ -650,7 +663,6 @@ CsTripPlan.segmentText = function(steps, from, to, unit) {
 CsTripPlan.signs = function(steps, unit, destination) {
     var signs = [];
     var connectors = [];
-    var last = 0;
     var bearingOf = function(st) {
         if (st.kind !== "walk" || st.heading === "" || st.heading === undefined) {
             return null;
@@ -658,44 +670,75 @@ CsTripPlan.signs = function(steps, unit, destination) {
         if (st.dx * st.dx + st.dy * st.dy <= 0) { return null; }
         return Math.atan2(st.dx, st.dy) * 180 / Math.PI;
     };
+    var norm = function(d) {
+        while (d > 180) { d -= 360; }
+        while (d <= -180) { d += 360; }
+        return d;
+    };
+    var decisions = [];
     for (var i = 0; i < steps.length - 1; i++) {
         if (!steps[i].atJunction) { continue; }
         var inc = steps[i];
         var out = steps[i + 1];
         var sign = { arrow: "start", label: inc.to, toward: destination,
             junction: true, headText: "" };
+        var turn = null;
         if (out.kind === "pitch") {
             sign.arrow = out.vertical === "up" ? "up" : "down";
         } else {
             var bi = bearingOf(inc);
             var bo = bearingOf(out);
             if (bi !== null && bo !== null) {
-                sign.arrow = CsTripPlan.turnArrow(bo - bi);
+                turn = norm(bo - bi);
+                sign.arrow = CsTripPlan.turnArrow(turn);
             } else if (out.heading) {
                 sign.headText = "Head " + out.heading;
             }
         }
-        connectors.push(CsTripPlan.segmentText(steps, last, i + 1, unit));
-        last = i + 1;
-        signs.push(sign);
+        decisions.push({ i: i, sign: sign, turn: turn });
+    }
+    // Merge zigzag jogs: a decision whose turn is known and that follows the
+    // previous kept one by a short, fully known, pitch-free walk.
+    var jog = CsUnits.convert(CsTripPlan.JOG_FT, CsUnits.FEET, unit);
+    var kept = [];
+    for (var d = 0; d < decisions.length; d++) {
+        var cur = decisions[d];
+        var prev = kept.length > 0 ? kept[kept.length - 1] : null;
+        if (prev !== null && prev.net !== null && cur.turn !== null) {
+            var gap = CsTripPlan.segmentInfo(steps, prev.last + 1, cur.i + 1);
+            if (gap.known && !gap.pitch && gap.len < jog) {
+                prev.net = norm(prev.net + cur.turn);
+                prev.last = cur.i;
+                prev.sign.arrow = CsTripPlan.turnArrow(prev.net);
+                continue;
+            }
+        }
+        kept.push({ i: cur.i, last: cur.i, sign: cur.sign, net: cur.turn });
+    }
+    var last = 0;
+    for (var k = 0; k < kept.length; k++) {
+        connectors.push(CsTripPlan.segmentText(steps, last, kept[k].i + 1, unit));
+        last = kept[k].i + 1;
+        signs.push(kept[k].sign);
     }
     connectors.push(CsTripPlan.segmentText(steps, last, steps.length, unit));
     return { signs: signs, connectors: connectors, destination: destination };
 };
 
 /** CSS for signsHtml; both printed pages add it to their <style>. */
-CsTripPlan.SIGNS_CSS = ".signs{margin:6px 0}" +
-    ".sign{display:flex;align-items:center;gap:12px;border:2px solid #111;" +
-    "border-radius:10px;margin:6px 0;padding:6px 10px 6px 6px;" +
+CsTripPlan.SIGNS_CSS = ".signs{margin:4px 0;column-count:2;column-gap:18px}" +
+    ".signs.solo{column-count:1}" +
+    ".signs .none{font-size:11px;color:#666}" +
+    ".sign{display:flex;align-items:center;gap:8px;border:2px solid #111;" +
+    "border-radius:8px;margin:2px 0;padding:3px 8px 3px 3px;" +
     "break-inside:avoid;page-break-inside:avoid;background:#fff;color:#111}" +
-    ".sign .arrow{flex:none;width:52px;height:52px;background:#111;" +
-    "border-radius:6px;display:flex;align-items:center;justify-content:center}" +
-    ".sign .arrow svg{width:40px;height:40px}" +
-    ".sign .body{flex:1}.sign .label{font-size:20px;font-weight:bold;line-height:1.2}" +
-    ".sign .head,.sign .meta,.sign .snote{font-size:12px;color:#555}" +
-    ".signs .conn{font-size:12px;color:#666;margin:2px 0 2px 24px}" +
-    ".signs .arrive{font-size:16px;font-weight:bold;margin:4px 0 4px 6px}" +
-    ".sign .tag{display:inline-block;font-size:11px;font-weight:bold;" +
+    ".sign .arrow{flex:none;width:34px;height:34px;background:#111;" +
+    "border-radius:5px;display:flex;align-items:center;justify-content:center}" +
+    ".sign .arrow svg{width:26px;height:26px}" +
+    ".sign .body{flex:1}.sign .label{font-size:16px;font-weight:bold;line-height:1.15}" +
+    ".sign .head,.sign .meta,.sign .snote{font-size:11px;color:#555}" +
+    ".sign .reach{flex:none;width:90px;text-align:right;font-size:11px;color:#666}" +
+    ".sign .tag{display:inline-block;font-size:10px;font-weight:bold;" +
     "border:1px solid #111;border-radius:4px;padding:0 4px;margin-left:8px;" +
     "vertical-align:middle}";
 
@@ -731,25 +774,35 @@ CsTripPlan.signArrowSvg = function(arrow) {
 /** HTML for one leg's signs (see signs). Every string goes through esc. */
 CsTripPlan.signsHtml = function(leg) {
     var esc = CsTripPlan.esc;
-    var h = [ "<div class=\"signs\">" ];
+    var h = [ "<div class=\"signs" + (leg.signs.length === 0 ? " solo" : "") + "\">" ];
     if (leg.signs.length === 0) {
-        h.push("<div class=\"conn\">No intersections: follow the passage to " +
+        h.push("<div class=\"none\">No intersections: follow the passage to " +
             esc(leg.destination) + " (" + esc(leg.connectors[0]) + ")</div>");
         h.push("</div>");
         return h.join("");
     }
+    var reach = function(text, name) {
+        var t = esc("distance and time to reach " + name);
+        return "<div class=\"reach\" title=\"" + t + "\" aria-label=\"" + t + "\">" +
+            esc(text) + "</div>";
+    };
     for (var i = 0; i < leg.signs.length; i++) {
         var sg = leg.signs[i];
-        h.push("<div class=\"conn\">" + esc(leg.connectors[i]) + "</div>");
-        h.push("<div class=\"sign\"><div class=\"arrow\">" +
-            CsTripPlan.signArrowSvg(sg.arrow) + "</div><div class=\"body\">" +
+        h.push("<div class=\"sign\">" + reach(leg.connectors[i], sg.label) +
+            "<div class=\"arrow\">" + CsTripPlan.signArrowSvg(sg.arrow) +
+            "</div><div class=\"body\">" +
             (sg.headText !== "" ? "<div class=\"head\">" + esc(sg.headText) + "</div>" : "") +
             "<div class=\"label\">" + esc(sg.label) + "</div>" +
             "<div class=\"meta\">toward " + esc(sg.toward) + "</div>" +
             "</div></div>");
     }
-    h.push("<div class=\"conn\">" + esc(leg.connectors[leg.signs.length]) + "</div>");
-    h.push("<div class=\"arrive\">&#9873; Arrive " + esc(leg.destination) + "</div>");
+    h.push("<div class=\"sign arrive\">" +
+        reach(leg.connectors[leg.signs.length], leg.destination) +
+        "<div class=\"arrow\"><svg viewBox=\"0 0 40 40\" aria-hidden=\"true\">" +
+        "<path d=\"M12 6 V34 M12 8 H32 L24 15 L32 22 H12\" fill=\"#fff\" " +
+        "stroke=\"#fff\" stroke-width=\"3\"/></svg></div>" +
+        "<div class=\"body\"><div class=\"label\">Arrive " + esc(leg.destination) +
+        "</div></div></div>");
     h.push("</div>");
     return h.join("");
 };
