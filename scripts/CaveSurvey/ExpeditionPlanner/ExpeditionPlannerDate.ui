@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Expedition Planner's Start date field: Qt's own QDateEdit with its
+  built-in calendar dropdown. Built from this file by
+  WidgetFactory.createWidget because the script bridge has no QDateEdit
+  constructor. The date equal to minimumDate shows specialValueText, so
+  1970-01-01 means "not set". Read/written only through
+  ExpeditionPlanner.startDateText / setStartDateText.
+-->
+<ui version="4.0">
+ <class>ExpeditionPlannerDateRow</class>
+ <widget class="QWidget" name="ExpeditionPlannerDateRow">
+  <layout class="QHBoxLayout" name="ExpeditionPlannerDateLayout">
+   <property name="spacing">
+    <number>0</number>
+   </property>
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <item>
+    <widget class="QDateEdit" name="ExpeditionPlannerCalloutStart">
+     <property name="toolTip">
+      <string>First day of the trip. Click for the calendar, or type or scroll the date. Saved in stations.json.</string>
+     </property>
+     <property name="displayFormat">
+      <string>yyyy-MM-dd</string>
+     </property>
+     <property name="calendarPopup">
+      <bool>true</bool>
+     </property>
+     <property name="minimumDate">
+      <date>
+       <year>1970</year>
+       <month>1</month>
+       <day>1</day>
+      </date>
+     </property>
+     <property name="maximumDate">
+      <date>
+       <year>2100</year>
+       <month>12</month>
+       <day>31</day>
+      </date>
+     </property>
+     <property name="specialValueText">
+      <string>Pick a date</string>
+     </property>
+     <property name="date">
+      <date>
+       <year>1970</year>
+       <month>1</month>
+       <day>1</day>
+      </date>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

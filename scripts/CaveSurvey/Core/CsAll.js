@@ -79,8 +79,6 @@ include(includeBasePath + "/CsStationSidecar.js");
 include(includeBasePath + "/CsTripPlan.js");
 // After CsTripPlan, whose route text, SVG and clock the card reuses.
 include(includeBasePath + "/CsCalloutCard.js");
-// The Start date picker's calendar arithmetic. Independent, pure.
-include(includeBasePath + "/CsCalendar.js");
 // Forecast lookup for the callout card. Independent of the survey engines.
 include(includeBasePath + "/CsWeather.js");
 include(includeBasePath + "/CsCalloutLocal.js");
