@@ -4,12 +4,16 @@
 //
 //   Cave Survey > Expedition Planner   (or type "epl")
 //
-// WHAT IT IS. A docked panel with two tabs. TRIP routes a trip from the
+// WHAT IT IS. A docked panel, ONE page with no tabs, laid out top to
+// bottom in the order of the printed callout card: Trip, Roster,
+// Schedule, Escalation, Route, Card. Route plans a trip from the
 // survey's first station to the stops picked from a dropdown of the
 // map's stations and back (Core/CsTripPlan.js), and writes the packet,
-// trip-plan.html, beside the drawing. CALLOUT builds callout-card.html,
-// the sheet a topside contact keeps (Core/CsCalloutCard.js). This is
-// the home for the later expedition tools too.
+// trip-plan.html, beside the drawing. Build card writes
+// callout-card.html, the sheet a topside contact keeps
+// (Core/CsCalloutCard.js), and refuses until every required field is
+// filled in, naming all the gaps at once. This is the home for the
+// later expedition tools too.
 //
 // THE SIDECAR IS SHARED, SO A WRITE RE-READS IT FIRST. Pace, the team's
 // packing list and the trip's days are stations.json `settings`, the
@@ -56,156 +60,51 @@ ExpeditionPlanner.state = { drawn: null, docPath: null, store: null,
 // ---------------------------------------------------------------------
 // The panel
 // ---------------------------------------------------------------------
-
-/**
- * The Trip page: the station picker, the stops, pace and packing (kept
- * in stations.json settings), and the plan as text.
- *
- * The stop list is a one-column QTableWidget, not a QListWidget: this
- * bridge has no constructor for QListWidget (see CaveShelf.js). The
- * picker is an editable QComboBox, whose own inline completion does the
- * typing help: QCompleter does not exist on this bridge.
- */
-ExpeditionPlanner.buildTripPage = function() {
-    var page = new QWidget();
-    var layout = new QVBoxLayout();
-    layout.setContentsMargins(6, 6, 6, 6);
-    layout.setSpacing(6);
-
-    var pickRow = new QHBoxLayout();
-    var picker = new QComboBox();
-    picker.objectName = "ExpeditionPlannerPicker";
-    picker.toolTip = qsTr("Type or pick a station of this drawing.");
-    try {
-        picker.setEditable(true);
-    } catch (eEdit) {
-        try {
-            picker.editable = true;
-        } catch (eEdit2) {
-        }
-    }
-    try {
-        // Enter must not add the typed text to the list as a new
-        // "station": only Add stop adds, and only a real station.
-        picker.insertPolicy = QComboBox.NoInsert;
-    } catch (eIns) {
-    }
-    var addButton = new QPushButton(qsTr("Add stop"));
-    addButton.objectName = "ExpeditionPlannerAdd";
-    addButton.toolTip = qsTr("Add the station in the box to this trip's stops.");
-    pickRow.addWidget(picker, 1, 0);
-    pickRow.addWidget(addButton, 0, 0);
-    layout.addLayout(pickRow, 0);
-    addButton.clicked.connect(function() { ExpeditionPlanner.addStop(); });
-
-    // One line, deliberately (qcad-js-bridge-traps).
-    var pickStatus = new QLabel("");
-    pickStatus.objectName = "ExpeditionPlannerPickStatus";
-    layout.addWidget(pickStatus, 0, 0);
-
-    var stopRow = new QHBoxLayout();
-    var removeButton = new QPushButton(qsTr("Remove"));
-    removeButton.objectName = "ExpeditionPlannerRemove";
-    removeButton.toolTip = qsTr("Take the selected stop off the list.");
-    var clearButton = new QPushButton(qsTr("Clear"));
-    clearButton.objectName = "ExpeditionPlannerClear";
-    stopRow.addWidget(removeButton, 0, 0);
-    stopRow.addWidget(clearButton, 0, 0);
-    stopRow.addStretch(1);
-    layout.addLayout(stopRow, 0);
-    removeButton.clicked.connect(function() { ExpeditionPlanner.removeStop(); });
-    clearButton.clicked.connect(function() { ExpeditionPlanner.clearStops(); });
-
-    var stops = new QTableWidget(0, 1);
-    stops.objectName = "ExpeditionPlannerStops";
-    try {
-        stops.horizontalHeader().visible = false;
-        stops.verticalHeader().visible = false;
-        stops.horizontalHeader().stretchLastSection = true;
-        stops.selectionBehavior = QAbstractItemView.SelectRows;
-        stops.selectionMode = QAbstractItemView.SingleSelection;
-        stops.editTriggers = QAbstractItemView.NoEditTriggers;
-    } catch (eStops) {
-    }
-    try {
-        stops.setMinimumHeight(70);
-        stops.setMaximumHeight(120);
-    } catch (eStopsH) {
-    }
-    layout.addWidget(stops, 0, 0);
-
-    // Pace: one line, deliberately (qcad-js-bridge-traps).
-    var paceRow = new QHBoxLayout();
-    var paceLabel = new QLabel(qsTr("Walking pace, ft per minute:"));
-    var pace = new QLineEdit();
-    pace.objectName = "ExpeditionPlannerPace";
-    try {
-        pace.placeholderText = qsTr("264 (a 3 mph hike)");
-    } catch (ePh) {
-    }
-    pace.toolTip = qsTr("Leave blank for the default, 264 ft a minute " +
-        "(3 mph). Saved in stations.json for the whole team.");
-    paceRow.addWidget(paceLabel, 0, 0);
-    paceRow.addWidget(pace, 1, 0);
-    layout.addLayout(paceRow, 0);
-
-    var packing = new QPlainTextEdit();
-    packing.objectName = "ExpeditionPlannerPacking";
-    try {
-        packing.placeholderText = qsTr("Team packing list, one item per line");
-    } catch (ePh2) {
-    }
-    packing.toolTip = qsTr("Printed in the packet as written. Saved in " +
-        "stations.json for the whole team.");
-    try {
-        packing.setMinimumHeight(50);
-        packing.setMaximumHeight(100);
-    } catch (ePackH) {
-    }
-    layout.addWidget(packing, 0, 0);
-
-    var runRow = new QHBoxLayout();
-    var planButton = new QPushButton(qsTr("Plan trip"));
-    planButton.objectName = "ExpeditionPlannerPlanButton";
-    planButton.toolTip = qsTr("Route from the survey's first station to " +
-        "every stop and back.");
-    var packetButton = new QPushButton(qsTr("Save packet"));
-    packetButton.objectName = "ExpeditionPlannerSavePacket";
-    packetButton.toolTip = qsTr("Write trip-plan.html beside the drawing: " +
-        "route sketch, directions, time and gear. No coordinates.");
-    packetButton.enabled = false;
-    runRow.addWidget(planButton, 0, 0);
-    runRow.addWidget(packetButton, 0, 0);
-    runRow.addStretch(1);
-    layout.addLayout(runRow, 0);
-    planButton.clicked.connect(function() { ExpeditionPlanner.planTrip(); });
-    packetButton.clicked.connect(function() { ExpeditionPlanner.savePacket(); });
-
-    var out = new QPlainTextEdit();
-    out.objectName = "ExpeditionPlannerPlanOut";
-    out.readOnly = true;
-    try {
-        out.setMinimumHeight(120);
-    } catch (eOutH) {
-    }
-    layout.addWidget(out, 1, 0);
-
-    page.setLayout(layout);
-    return page;
-};
+//
+// ONE PAGE, NO TABS, IN THE ORDER OF THE PRINTED CARD (Nathan,
+// 2026-09-29: "Too easy to not enter important information"). The page
+// reads top to bottom as callout-card.html does: Trip, Roster,
+// Schedule, Escalation, Route, Card. Required fields carry a red
+// asterisk, and Build card refuses, naming every gap at once
+// (CsCalloutCard.missingAll), until they are all filled in.
+//
+// The stop list is a one-column QTableWidget, not a QListWidget: this
+// bridge has no constructor for QListWidget (see CaveShelf.js). The
+// picker is an editable QComboBox, whose own inline completion does the
+// typing help: QCompleter does not exist on this bridge. QFormLayout has
+// no addRow here either, so fields sit in CsPanel.formGrid grids.
 
 ExpeditionPlanner.CALLOUT_DAY_HEADERS = ["Day", "Entry (HH:MM)", "Work hours", "Night (out/camp)"];
 ExpeditionPlanner.CALLOUT_ROSTER_HEADERS = ["Name", "Role", "Squeeze limit (in)", "Medical", "Emergency contact"];
 
-/** A labelled one-line field row; returns the QLineEdit. */
-ExpeditionPlanner.calloutField = function(layout, label, name, tip) {
-    var row = new QHBoxLayout();
-    row.addWidget(new QLabel(label), 0, 0);
+/** The objectName of the one scrolling page (the footer sits outside it). */
+ExpeditionPlanner.PAGE_SCROLL_NAME = "ExpeditionPlannerPageScroll";
+
+/** Label text (rich) for a field; a required one ends in a red asterisk. */
+ExpeditionPlanner.labelText = function(text, required) {
+    return CsPanel.escapeHtml(text) + (required === true ?
+        " <span style=\"color:#c00\">*</span>" : "");
+};
+
+/** A bold section heading, with a little air above it. */
+ExpeditionPlanner.heading = function(layout, text) {
+    try {
+        layout.addSpacing(6);
+    } catch (eSp) {
+    }
+    layout.addWidget(new QLabel("<b>" + CsPanel.escapeHtml(text) + "</b>"), 0, 0);
+};
+
+/**
+ * A labelled one-line field on row `row` of a formGrid; returns the
+ * QLineEdit. Label left, field right, so the page stays narrow.
+ */
+ExpeditionPlanner.calloutField = function(grid, row, label, required, name, tip) {
+    grid.addWidget(new QLabel(ExpeditionPlanner.labelText(label, required)), row, 0);
     var edit = new QLineEdit();
     edit.objectName = name;
     edit.toolTip = tip;
-    row.addWidget(edit, 1, 0);
-    layout.addLayout(row, 0);
+    grid.addWidget(edit, row, 1);
     return edit;
 };
 
@@ -264,89 +163,277 @@ ExpeditionPlanner.removeTableRow = function(table) {
     }
 };
 
-ExpeditionPlanner.buildCalloutPage = function() {
-    var page = new QWidget();
-    var layout = new QVBoxLayout();
-    layout.setContentsMargins(6, 6, 6, 6);
-    layout.setSpacing(6);
+/** A row of buttons, left-aligned; returns the buttons in order. */
+ExpeditionPlanner.buttonRow = function(layout, labels) {
+    var row = new QHBoxLayout();
+    var out = [];
+    for (var i = 0; i < labels.length; i++) {
+        var b = new QPushButton(labels[i]);
+        row.addWidget(b, 0, 0);
+        out.push(b);
+    }
+    row.addStretch(1);
+    layout.addLayout(row, 0);
+    return out;
+};
 
-    ExpeditionPlanner.calloutField(layout, qsTr("Start date:"),
+/** 1. TRIP: start date, forecast place. */
+ExpeditionPlanner.buildTripSection = function(layout) {
+    ExpeditionPlanner.heading(layout, qsTr("Trip"));
+    var grid = CsPanel.formGrid(1);
+    ExpeditionPlanner.calloutField(grid, 0, qsTr("Start date"), true,
         "ExpeditionPlannerCalloutStart",
         qsTr("First day of the trip, YYYY-MM-DD. Saved in stations.json."));
-    ExpeditionPlanner.calloutField(layout, qsTr("Forecast place:"),
+    ExpeditionPlanner.calloutField(grid, 1, qsTr("Forecast place"), false,
         "ExpeditionPlannerCalloutPlace",
         qsTr("Optional: a nearby town. Blank uses the drawing's location " +
             "rounded to about 10 km. The exact entrance is never sent."));
+    layout.addLayout(grid, 0);
+};
 
-    layout.addWidget(new QLabel(qsTr("Days (entry time, work hours, night):")), 0, 0);
-    var days = ExpeditionPlanner.calloutTable("ExpeditionPlannerCalloutDays",
-        ExpeditionPlanner.CALLOUT_DAY_HEADERS, 90, 150);
-    layout.addWidget(days, 0, 0);
-    var dayRow = new QHBoxLayout();
-    var addDay = new QPushButton(qsTr("Add day"));
-    var delDay = new QPushButton(qsTr("Remove day"));
-    dayRow.addWidget(addDay, 0, 0);
-    dayRow.addWidget(delDay, 0, 0);
-    dayRow.addStretch(1);
-    layout.addLayout(dayRow, 0);
-    addDay.clicked.connect(function() {
-        var t = ExpeditionPlanner.child("ExpeditionPlannerCalloutDays");
-        ExpeditionPlanner.addTableRow(t, [t.rowCount + 1, "08:00", "6", "out"]);
-    });
-    delDay.clicked.connect(function() {
-        ExpeditionPlanner.removeTableRow(
-            ExpeditionPlanner.child("ExpeditionPlannerCalloutDays"));
-    });
-
-    ExpeditionPlanner.calloutField(layout, qsTr("Topside contact:"),
-        "ExpeditionPlannerCalloutTopName", qsTr("Saved on this computer only."));
-    ExpeditionPlanner.calloutField(layout, qsTr("Contact phone:"),
-        "ExpeditionPlannerCalloutTopPhone", qsTr("Saved on this computer only."));
-    ExpeditionPlanner.calloutField(layout, qsTr("If no word by callout:"),
-        "ExpeditionPlannerCalloutEscalation",
-        qsTr("Who to call next, with the number. Saved on this computer only."));
-    ExpeditionPlanner.calloutField(layout, qsTr("Callout buffer, min:"),
-        "ExpeditionPlannerCalloutBuffer",
-        qsTr("Minutes after the expected exit that topside starts acting. Default 120."));
-
-    layout.addWidget(new QLabel(qsTr("Roster (saved on this computer only):")), 0, 0);
+/** 2. ROSTER: the people, and whether they go on the card. */
+ExpeditionPlanner.buildRosterSection = function(layout) {
+    ExpeditionPlanner.heading(layout, qsTr("Roster"));
+    layout.addWidget(new QLabel(qsTr("Saved on this computer only.")), 0, 0);
     var roster = ExpeditionPlanner.calloutTable("ExpeditionPlannerCalloutRoster",
         ExpeditionPlanner.CALLOUT_ROSTER_HEADERS, 90, 170);
     layout.addWidget(roster, 0, 0);
-    var rosterRow = new QHBoxLayout();
-    var addP = new QPushButton(qsTr("Add person"));
-    var delP = new QPushButton(qsTr("Remove person"));
-    rosterRow.addWidget(addP, 0, 0);
-    rosterRow.addWidget(delP, 0, 0);
-    rosterRow.addStretch(1);
-    layout.addLayout(rosterRow, 0);
-    addP.clicked.connect(function() {
+    var b = ExpeditionPlanner.buttonRow(layout,
+        [qsTr("Add person"), qsTr("Remove person")]);
+    b[0].clicked.connect(function() {
         ExpeditionPlanner.addTableRow(
             ExpeditionPlanner.child("ExpeditionPlannerCalloutRoster"),
             ["", "", "", "", ""]);
     });
-    delP.clicked.connect(function() {
+    b[1].clicked.connect(function() {
         ExpeditionPlanner.removeTableRow(
             ExpeditionPlanner.child("ExpeditionPlannerCalloutRoster"));
     });
-
     var include = new QCheckBox(qsTr("Include roster on the card"));
     include.objectName = "ExpeditionPlannerCalloutInclude";
+    include.toolTip = qsTr("While ticked, the card needs at least one " +
+        "person. Untick for a copy that leaves your hands.");
     include.checked = true;
     layout.addWidget(include, 0, 0);
+};
 
+/** 3. SCHEDULE: one row per day. */
+ExpeditionPlanner.buildScheduleSection = function(layout) {
+    ExpeditionPlanner.heading(layout, qsTr("Schedule"));
+    layout.addWidget(new QLabel(ExpeditionPlanner.labelText(
+        qsTr("Days: entry time, work hours, night"), true)), 0, 0);
+    var days = ExpeditionPlanner.calloutTable("ExpeditionPlannerCalloutDays",
+        ExpeditionPlanner.CALLOUT_DAY_HEADERS, 90, 150);
+    layout.addWidget(days, 0, 0);
+    var b = ExpeditionPlanner.buttonRow(layout,
+        [qsTr("Add day"), qsTr("Remove day")]);
+    b[0].clicked.connect(function() {
+        var t = ExpeditionPlanner.child("ExpeditionPlannerCalloutDays");
+        ExpeditionPlanner.addTableRow(t, [t.rowCount + 1, "08:00", "6", "out"]);
+    });
+    b[1].clicked.connect(function() {
+        ExpeditionPlanner.removeTableRow(
+            ExpeditionPlanner.child("ExpeditionPlannerCalloutDays"));
+    });
+};
+
+/** 4. ESCALATION: who topside is, and what they do. */
+ExpeditionPlanner.buildEscalationSection = function(layout) {
+    ExpeditionPlanner.heading(layout, qsTr("Escalation"));
+    var grid = CsPanel.formGrid(1);
+    ExpeditionPlanner.calloutField(grid, 0, qsTr("Topside contact"), true,
+        "ExpeditionPlannerCalloutTopName", qsTr("Saved on this computer only."));
+    ExpeditionPlanner.calloutField(grid, 1, qsTr("Contact phone"), true,
+        "ExpeditionPlannerCalloutTopPhone", qsTr("Saved on this computer only."));
+    ExpeditionPlanner.calloutField(grid, 2, qsTr("If no word by callout"), true,
+        "ExpeditionPlannerCalloutEscalation",
+        qsTr("Who to call next, with the number. Saved on this computer only."));
+    ExpeditionPlanner.calloutField(grid, 3, qsTr("Callout buffer, min"), false,
+        "ExpeditionPlannerCalloutBuffer",
+        qsTr("Minutes after the expected exit that topside starts acting. Default 120."));
+    layout.addLayout(grid, 0);
+};
+
+/**
+ * 5. ROUTE: the station picker, the stops, pace and packing (kept in
+ * stations.json settings), Plan trip and Save packet.
+ */
+ExpeditionPlanner.buildRouteSection = function(layout) {
+    ExpeditionPlanner.heading(layout, qsTr("Route"));
+    layout.addWidget(new QLabel(ExpeditionPlanner.labelText(
+        qsTr("Stops"), true)), 0, 0);
+
+    var pickRow = new QHBoxLayout();
+    var picker = new QComboBox();
+    picker.objectName = "ExpeditionPlannerPicker";
+    picker.toolTip = qsTr("Type or pick a station of this drawing.");
+    try {
+        picker.setEditable(true);
+    } catch (eEdit) {
+        try {
+            picker.editable = true;
+        } catch (eEdit2) {
+        }
+    }
+    try {
+        // Enter must not add the typed text to the list as a new
+        // "station": only Add stop adds, and only a real station.
+        picker.insertPolicy = QComboBox.NoInsert;
+    } catch (eIns) {
+    }
+    var addButton = new QPushButton(qsTr("Add stop"));
+    addButton.objectName = "ExpeditionPlannerAdd";
+    addButton.toolTip = qsTr("Add the station in the box to this trip's stops.");
+    pickRow.addWidget(picker, 1, 0);
+    pickRow.addWidget(addButton, 0, 0);
+    layout.addLayout(pickRow, 0);
+    addButton.clicked.connect(function() { ExpeditionPlanner.addStop(); });
+
+    // One line, deliberately (qcad-js-bridge-traps).
+    var pickStatus = new QLabel("");
+    pickStatus.objectName = "ExpeditionPlannerPickStatus";
+    layout.addWidget(pickStatus, 0, 0);
+
+    var stops = new QTableWidget(0, 1);
+    stops.objectName = "ExpeditionPlannerStops";
+    try {
+        stops.horizontalHeader().visible = false;
+        stops.verticalHeader().visible = false;
+        stops.horizontalHeader().stretchLastSection = true;
+        stops.selectionBehavior = QAbstractItemView.SelectRows;
+        stops.selectionMode = QAbstractItemView.SingleSelection;
+        stops.editTriggers = QAbstractItemView.NoEditTriggers;
+    } catch (eStops) {
+    }
+    try {
+        stops.setMinimumHeight(70);
+        stops.setMaximumHeight(120);
+    } catch (eStopsH) {
+    }
+    layout.addWidget(stops, 0, 0);
+
+    var stopRow = new QHBoxLayout();
+    var removeButton = new QPushButton(qsTr("Remove"));
+    removeButton.objectName = "ExpeditionPlannerRemove";
+    removeButton.toolTip = qsTr("Take the selected stop off the list.");
+    var clearButton = new QPushButton(qsTr("Clear"));
+    clearButton.objectName = "ExpeditionPlannerClear";
+    stopRow.addWidget(removeButton, 0, 0);
+    stopRow.addWidget(clearButton, 0, 0);
+    stopRow.addStretch(1);
+    layout.addLayout(stopRow, 0);
+    removeButton.clicked.connect(function() { ExpeditionPlanner.removeStop(); });
+    clearButton.clicked.connect(function() { ExpeditionPlanner.clearStops(); });
+
+    // Pace: one line, deliberately (qcad-js-bridge-traps).
+    var paceGrid = CsPanel.formGrid(1);
+    paceGrid.addWidget(new QLabel(qsTr("Walking pace, ft/min")), 0, 0);
+    var pace = new QLineEdit();
+    pace.objectName = "ExpeditionPlannerPace";
+    try {
+        pace.placeholderText = qsTr("264 (a 3 mph hike)");
+    } catch (ePh) {
+    }
+    pace.toolTip = qsTr("Leave blank for the default, 264 ft a minute " +
+        "(3 mph). Saved in stations.json for the whole team.");
+    paceGrid.addWidget(pace, 0, 1);
+    layout.addLayout(paceGrid, 0);
+
+    var packing = new QPlainTextEdit();
+    packing.objectName = "ExpeditionPlannerPacking";
+    try {
+        packing.placeholderText = qsTr("Team packing list, one item per line");
+    } catch (ePh2) {
+    }
+    packing.toolTip = qsTr("Printed in the packet as written. Saved in " +
+        "stations.json for the whole team.");
+    try {
+        packing.setMinimumHeight(50);
+        packing.setMaximumHeight(100);
+    } catch (ePackH) {
+    }
+    layout.addWidget(packing, 0, 0);
+
+    var runRow = new QHBoxLayout();
+    var planButton = new QPushButton(qsTr("Plan trip"));
+    planButton.objectName = "ExpeditionPlannerPlanButton";
+    planButton.toolTip = qsTr("Route from the survey's first station to " +
+        "every stop and back.");
+    var packetButton = new QPushButton(qsTr("Save packet"));
+    packetButton.objectName = "ExpeditionPlannerSavePacket";
+    packetButton.toolTip = qsTr("Write trip-plan.html beside the drawing: " +
+        "route sketch, directions, time and gear. No coordinates.");
+    packetButton.enabled = false;
+    runRow.addWidget(planButton, 0, 0);
+    runRow.addWidget(packetButton, 0, 0);
+    runRow.addStretch(1);
+    layout.addLayout(runRow, 0);
+    planButton.clicked.connect(function() { ExpeditionPlanner.planTrip(); });
+    packetButton.clicked.connect(function() { ExpeditionPlanner.savePacket(); });
+};
+
+/** 6. CARD: Build card, its status, and the plan as text beneath. */
+ExpeditionPlanner.buildCardSection = function(layout) {
+    ExpeditionPlanner.heading(layout, qsTr("Card"));
     var buildRow = new QHBoxLayout();
     var build = new QPushButton(qsTr("Build card"));
     build.objectName = "ExpeditionPlannerCalloutBuild";
-    build.toolTip = qsTr("Write callout-card.html beside the drawing. Add " +
-        "the trip's stops on the Trip tab first.");
-    var status = new QLabel("");
-    status.objectName = "ExpeditionPlannerCalloutStatus";
+    build.toolTip = qsTr("Write callout-card.html beside the drawing. Every " +
+        "field marked * must be filled in first.");
     buildRow.addWidget(build, 0, 0);
-    buildRow.addWidget(status, 1, 0);
+    buildRow.addStretch(1);
     layout.addLayout(buildRow, 0);
     build.clicked.connect(function() { ExpeditionPlanner.buildCard(); });
 
+    // Its own row and word-wrapped: "Missing: ..." names every gap at
+    // once, and one long line would widen the page into a horizontal
+    // scroll. It sits above the plan text, never under a stretching
+    // widget (qcad-js-bridge-traps: a wrapped label there is clipped).
+    var status = new QLabel("");
+    status.objectName = "ExpeditionPlannerCalloutStatus";
+    try {
+        status.wordWrap = true;
+    } catch (eWrap) {
+    }
+    layout.addWidget(status, 0, 0);
+
+    var out = new QPlainTextEdit();
+    out.objectName = "ExpeditionPlannerPlanOut";
+    out.readOnly = true;
+    try {
+        out.setMinimumHeight(160);
+    } catch (eOutH) {
+    }
+    layout.addWidget(out, 1, 0);
+};
+
+/** The one page, top to bottom in the card's order. */
+ExpeditionPlanner.buildPage = function() {
+    var page = new QWidget();
+    var layout = new QVBoxLayout();
+    layout.setContentsMargins(6, 6, 6, 6);
+    layout.setSpacing(4);
+    var hint = new QLabel("<span style=\"color:#777\">" +
+        CsPanel.escapeHtml(qsTr("* required to build the card")) + "</span>");
+    hint.objectName = "ExpeditionPlannerRequiredHint";
+    layout.addWidget(hint, 0, 0);
+    // Each section in its own try: a refused control costs that
+    // section, never the page (qcad-js-bridge-traps: wrap per control).
+    var sections = [ExpeditionPlanner.buildTripSection,
+        ExpeditionPlanner.buildRosterSection,
+        ExpeditionPlanner.buildScheduleSection,
+        ExpeditionPlanner.buildEscalationSection,
+        ExpeditionPlanner.buildRouteSection,
+        ExpeditionPlanner.buildCardSection];
+    for (var i = 0; i < sections.length; i++) {
+        try {
+            sections[i](layout);
+        } catch (eSection) {
+            CsTell.warn("Expedition Planner: part " + (i + 1) + " of the " +
+                "panel could not be built (" + eSection + ") -- please " +
+                "report this.");
+        }
+    }
     page.setLayout(layout);
     return page;
 };
@@ -360,11 +447,32 @@ ExpeditionPlanner.buildDock = function(appWin) {
     var layout = new QVBoxLayout();
     layout.setContentsMargins(0, 0, 0, 0);
     layout.setSpacing(4);
-    var tabs = new QTabWidget();
-    tabs.objectName = "ExpeditionPlannerTabs";
-    tabs.addTab(ExpeditionPlanner.buildTripPage(), qsTr("Trip"));
-    tabs.addTab(ExpeditionPlanner.buildCalloutPage(), qsTr("Callout"));
-    layout.addWidget(tabs, 1, 0);
+
+    // The page scrolls; the footer below it does not.
+    var page = ExpeditionPlanner.buildPage();
+    var scroll = null;
+    try {
+        scroll = new QScrollArea();
+        scroll.objectName = ExpeditionPlanner.PAGE_SCROLL_NAME;
+        // METHODS, NOT PROPERTIES: the bridge treats several QScrollArea
+        // properties as read-only (CsPanel.makeScrollable).
+        scroll.setWidgetResizable(true);
+        try {
+            scroll.setFrameShape(QFrame.NoFrame);
+        } catch (eFrame) {
+        }
+        try {
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded);
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded);
+        } catch (ePolicy) {
+        }
+        scroll.setWidget(page);
+        layout.addWidget(scroll, 1, 0);
+    } catch (eScroll) {
+        // No scroll area: the page still works, the outer
+        // CsPanel.makeScrollable wrap scrolls the whole dock instead.
+        layout.addWidget(page, 1, 0);
+    }
 
     // Footer. One line, deliberately: a wrapping label under a
     // stretching page is drawn clipped (qcad-js-bridge-traps).
@@ -542,7 +650,7 @@ ExpeditionPlanner.fillPicker = function() {
 };
 
 // ---------------------------------------------------------------------
-// The Trip tab
+// The Route section
 // ---------------------------------------------------------------------
 
 /** Repaint the stop list from state.planStops. */
@@ -732,7 +840,7 @@ ExpeditionPlanner.unitOf = function(survey) {
     return u === "m" ? "m" : "ft";
 };
 
-/** The plan as the text the tab shows. */
+/** The plan as the text the panel shows. */
 ExpeditionPlanner.planText = function(p, paceUsed) {
     var unit = p.unit;
     var len = function(v) { return String(Math.round(v)) + " " + unit; };
@@ -837,7 +945,7 @@ ExpeditionPlanner.today = function() {
 
 /**
  * Write trip-plan.html beside the drawing. Re-plans first, so the packet
- * is always what the tab shows for the stops, pace and packing now.
+ * is always what the panel shows for the stops, pace and packing now.
  * \return the path written, or ""
  */
 ExpeditionPlanner.savePacket = function() {
@@ -877,7 +985,7 @@ ExpeditionPlanner.savePacket = function() {
     return path;
 };
 
-/** Forget the Trip tab's stops and plan (the drawing changed). */
+/** Forget the trip's stops and plan (the drawing changed). */
 ExpeditionPlanner.resetPlan = function() {
     var s = ExpeditionPlanner.state;
     s.planStops = [];
@@ -896,7 +1004,7 @@ ExpeditionPlanner.resetPlan = function() {
 };
 
 // ---------------------------------------------------------------------
-// The Callout tab
+// The callout card
 // ---------------------------------------------------------------------
 
 /** The form as {trip, contacts, roster, includeRoster}. */
@@ -938,7 +1046,7 @@ ExpeditionPlanner.readCalloutForm = function() {
 
 /**
  * Fill the form from stations.json (trip) and local settings (people).
- * The Callout tables connect no itemChanged handler, so filling writes
+ * The roster and days tables connect no itemChanged handler, so filling writes
  * nothing.
  */
 ExpeditionPlanner.showCalloutSettings = function() {
@@ -1012,10 +1120,23 @@ ExpeditionPlanner.buildCard = function() {
         return "";
     }
     var form = ExpeditionPlanner.readCalloutForm();
-    var plan = ExpeditionPlanner.planTrip();
-    var need = CsCalloutCard.missing(form.trip, plan);
-    if (need !== "") {
-        ExpeditionPlanner.calloutSay(qsTr("Missing: %1").arg(need));
+    // No stops (or no survey) is a gap to name with the others, not a
+    // reason for planTrip's warning box; route only when there is one.
+    var plan = null;
+    if (s.drawn !== null && s.planStops.length > 0) {
+        plan = ExpeditionPlanner.planTrip();
+        if (plan === null) {
+            // planTrip has said why (a bad pace, most likely).
+            ExpeditionPlanner.calloutSay(qsTr("The route could not be " +
+                "planned; nothing was built."));
+            return "";
+        }
+    }
+    // EVERY gap at once, and nothing built until there are none.
+    var need = CsCalloutCard.missingAll(form.trip, plan, form.contacts,
+        form.roster, form.includeRoster);
+    if (need.length > 0) {
+        ExpeditionPlanner.calloutSay(qsTr("Missing: %1").arg(need.join(", ")));
         return "";
     }
     var problems = [];
