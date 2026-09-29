@@ -266,26 +266,18 @@ CsCalloutCard.weatherIconSvg = function(kind, label) {
 /** Two-line stamp text: "Sat 2026-10-03 08:00" without a weekday, dates are plain. */
 var csCardWhen = function(stamp) { return stamp.date + " " + stamp.time; };
 
-/**
- * The card as one HTML page that prints on two sheets.
- *
- * \param ctx {title, survey, resolved, trip, contacts: {topName, topPhone,
- *   escalation, bufferMin}, roster: the RESOLVED party
- *   (CsPeople.resolveParty: [{name, role, squeeze, medical, emergency,
- *   skills, skillsNote, known}]), includeRoster, forecast: {days: [{date,
- *   high, low, rainTotal, rainChance}]} | null, generated}
- */
-CsCalloutCard.html = function(plan, ctx) {
-    var esc = CsTripPlan.esc;
-    var trip = ctx.trip;
-    var contacts = ctx.contacts || {};
-    var buffer = typeof contacts.bufferMin === "number" ? contacts.bufferMin : 120;
-    var win = CsCalloutCard.windows(plan, trip, buffer);
-    var hazards = CsCalloutCard.hazards(plan);
-    var dates = CsCalloutCard.tripDates(trip);
-    var h = [];
+// ---------------------------------------------------------------------
+// Shared page pieces. Every renderer (the single-team card, the topside
+// sheet, the team file) builds from these, so the three look alike. Each
+// pushes lines onto h, which the caller joins with "\n": the single-team
+// card must stay byte-identical, so the push boundaries are part of the
+// output and must not move.
+// ---------------------------------------------------------------------
+
+/** The document head and stylesheet, up to and including <body>. */
+var csCardHead = function(h, titleText) {
     h.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">");
-    h.push("<title>" + esc(ctx.title) + " callout card</title>");
+    h.push("<title>" + CsTripPlan.esc(titleText) + "</title>");
     h.push("<style>body{font:14px/1.4 -apple-system,Helvetica,Arial,sans-serif;" +
         "max-width:760px;margin:20px auto;padding:0 16px;color:#111}" +
         "h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:16px 0 4px;" +
@@ -300,45 +292,58 @@ CsCalloutCard.html = function(plan, ctx) {
         ".day .txt{font-size:12px}.day .txt b{font-size:14px}.page2{margin-top:32px}" +
         "@media print{.page2{page-break-before:always;margin-top:0}}" +
         CsTripPlan.SIGNS_CSS + "</style></head><body>");
-    h.push("<h1>" + esc(ctx.title) + " &mdash; callout card</h1>");
+};
+
+/** The "first to last date · made <date>" line under the heading. */
+var csCardDatesLine = function(h, dates, generated) {
+    var esc = CsTripPlan.esc;
     h.push("<p class=\"note\">" + esc(dates.length > 0 ? dates[0] : "") +
         (dates.length > 1 ? " to " + esc(dates[dates.length - 1]) : "") +
-        (ctx.generated ? " &middot; made " + esc(ctx.generated) : "") + "</p>");
+        (generated ? " &middot; made " + esc(generated) : "") + "</p>");
+};
 
-    // Roster: above the fold, straight under the header.
-    h.push("<h2>Roster</h2>");
-    if (ctx.includeRoster === false) {
-        h.push("<p class=\"note\">Roster not included on this copy.</p>");
-    } else if (!ctx.roster || ctx.roster.length === 0) {
-        h.push("<p class=\"warn\">Roster not filled in.</p>");
-    } else {
-        h.push("<table><tr><th>Name</th><th>Role</th><th>Squeeze limit</th>" +
-            "<th>Medical</th><th>Emergency contact</th><th>Skills</th></tr>");
-        for (var r = 0; r < ctx.roster.length; r++) {
-            var p = ctx.roster[r];
-            if (p.known === false) {
-                // On the party, but not in this computer's directory.
-                h.push("<tr><td>" + esc(p.name) + "</td><td colspan=\"5\" " +
-                    "class=\"note\">details not on this computer</td></tr>");
-                continue;
-            }
-            var labels = CsPeople.skillLabels(p);
-            var escLabels = [];
-            for (var sl = 0; sl < labels.length; sl++) { escLabels.push(esc(labels[sl])); }
-            var note = p.skillsNote === undefined || p.skillsNote === null ?
-                "" : String(p.skillsNote);
-            h.push("<tr><td>" + esc(p.name) + "</td><td>" + esc(p.role) + "</td><td>" +
-                (typeof p.squeeze === "number" ? esc(p.squeeze) + " in" : "&mdash;") +
-                "</td><td>" + esc(p.medical) + "</td><td>" + esc(p.emergency) +
-                "</td><td>" + escLabels.join(" &middot; ") +
-                (note.replace(/\s+/g, "") !== "" ? (escLabels.length > 0 ? "<br>" : "") +
-                    "<span class=\"note\" style=\"font-size:11px\">" + esc(note) +
-                    "</span>" : "") + "</td></tr>");
-        }
-        h.push("</table>");
+/**
+ * One roster row. withEmergency false leaves the emergency-contact
+ * column out (team files: that stays on the topside sheet).
+ */
+var csCardRosterRow = function(p, withEmergency) {
+    var esc = CsTripPlan.esc;
+    if (p.known === false) {
+        // On the party, but not in this computer's directory.
+        return "<tr><td>" + esc(p.name) + "</td><td colspan=\"" +
+            (withEmergency ? 5 : 4) + "\" " +
+            "class=\"note\">details not on this computer</td></tr>";
     }
+    var labels = CsPeople.skillLabels(p);
+    var escLabels = [];
+    for (var sl = 0; sl < labels.length; sl++) { escLabels.push(esc(labels[sl])); }
+    var note = p.skillsNote === undefined || p.skillsNote === null ?
+        "" : String(p.skillsNote);
+    return "<tr><td>" + esc(p.name) + "</td><td>" + esc(p.role) + "</td><td>" +
+        (typeof p.squeeze === "number" ? esc(p.squeeze) + " in" : "&mdash;") +
+        "</td><td>" + esc(p.medical) + "</td><td>" +
+        (withEmergency ? esc(p.emergency) + "</td><td>" : "") +
+        escLabels.join(" &middot; ") +
+        (note.replace(/\s+/g, "") !== "" ? (escLabels.length > 0 ? "<br>" : "") +
+            "<span class=\"note\" style=\"font-size:11px\">" + esc(note) +
+            "</span>" : "") + "</td></tr>";
+};
 
-    h.push("<h2>Schedule</h2><table><tr><th>Day</th><th>Entry</th>" +
+/** A whole roster table: header, a row per person, close. */
+var csCardRosterTable = function(h, people, withEmergency) {
+    h.push("<table><tr><th>Name</th><th>Role</th><th>Squeeze limit</th>" +
+        "<th>Medical</th>" + (withEmergency ? "<th>Emergency contact</th>" : "") +
+        "<th>Skills</th></tr>");
+    for (var r = 0; r < people.length; r++) {
+        h.push(csCardRosterRow(people[r], withEmergency));
+    }
+    h.push("</table>");
+};
+
+/** The schedule table under `heading` (markup), then its warnings. */
+var csCardSchedule = function(h, win, heading) {
+    var esc = CsTripPlan.esc;
+    h.push(heading + "<table><tr><th>Day</th><th>Entry</th>" +
         "<th>Turnaround</th><th>Expected out</th><th>Callout</th></tr>");
     for (var w = 0; w < win.rows.length; w++) {
         var row = win.rows[w];
@@ -356,7 +361,11 @@ CsCalloutCard.html = function(plan, ctx) {
     for (var wn = 0; wn < win.warnings.length; wn++) {
         h.push("<p class=\"warn\">" + esc(win.warnings[wn]) + "</p>");
     }
+};
 
+/** The boxed escalation section. */
+var csCardEscalation = function(h, contacts, buffer) {
+    var esc = CsTripPlan.esc;
     h.push("<h2>Escalation</h2><div class=\"box\">");
     if (!contacts.topName && !contacts.topPhone && !contacts.escalation) {
         h.push("<span class=\"warn\">Contacts not filled in.</span>");
@@ -366,17 +375,24 @@ CsCalloutCard.html = function(plan, ctx) {
             " min after expected out.<br>" + esc(contacts.escalation));
     }
     h.push("</div>");
+};
 
+/**
+ * The forecast strip for `dates`, with weather icons.
+ * \return true when any of those dates is wet
+ */
+var csCardForecast = function(h, forecast, dates) {
+    var esc = CsTripPlan.esc;
     h.push("<h2>Forecast</h2>");
     var anyWet = false;
-    if (ctx.forecast === null || ctx.forecast === undefined) {
+    if (forecast === null || forecast === undefined) {
         h.push("<p class=\"warn\">No forecast, check before you go.</p>");
     } else {
         h.push("<div class=\"days\">");
         for (var d = 0; d < dates.length; d++) {
             var fd = null;
-            for (var f = 0; f < ctx.forecast.days.length; f++) {
-                if (ctx.forecast.days[f].date === dates[d]) { fd = ctx.forecast.days[f]; }
+            for (var f = 0; f < forecast.days.length; f++) {
+                if (forecast.days[f].date === dates[d]) { fd = forecast.days[f]; }
             }
             if (fd === null) {
                 h.push("<div class=\"day\"><span class=\"txt\"><span class=\"note\">" +
@@ -400,6 +416,11 @@ CsCalloutCard.html = function(plan, ctx) {
         }
         h.push("</div>");
     }
+    return anyWet;
+};
+
+/** The rain-plus-water flag, when a day is wet and a hazard is water. */
+var csCardWaterFlag = function(h, anyWet, hazards) {
     var anyWater = false;
     for (var hz = 0; hz < hazards.length; hz++) {
         if (hazards[hz].water) { anyWater = true; }
@@ -408,29 +429,41 @@ CsCalloutCard.html = function(plan, ctx) {
         h.push("<p class=\"flag\">Rain forecast + water noted on route. Check " +
             "conditions before going in.</p>");
     }
+};
 
-    // Page 2: the route.
-    h.push("<div class=\"page2\"><h1>" + esc(ctx.title) + " &mdash; route</h1>");
+/** Opens the route page (print page break before it) under `heading` (markup). */
+var csCardRouteIntro = function(h, heading) {
+    h.push("<div class=\"page2\"><h1>" + heading + "</h1>");
     h.push("<p class=\"note\">This route follows the survey line. It is not a " +
         "guarantee that the way is safe or easy: crawls, water, climbs and loose " +
         "ground are only known where someone wrote them down.</p>");
+};
+
+/** The route drawing and the directions, or `noRoute` (text) when there are no stops. */
+var csCardRoute = function(h, plan, survey, resolved, noRoute) {
+    var esc = CsTripPlan.esc;
     if (plan.stops.length === 0) {
-        h.push("<p class=\"warn\">No route: add stops under Route in the Expedition Planner.</p>");
-    } else {
-        h.push(CsTripPlan.routeSvg(ctx.survey, ctx.resolved, plan));
-        h.push("<h2>Directions</h2>");
-        for (var s = 0; s < plan.stops.length; s++) {
-            h.push("<h3>To " + esc(plan.stops[s].station) + "</h3>");
-            var legIn = CsTripPlan.signs(plan.stops[s].steps, plan.unit,
-                plan.stops[s].station);
-            h.push(CsTripPlan.legSummaryHtml(legIn, plan.stops[s].steps, plan.unit));
-            h.push(CsTripPlan.signsHtml(legIn));
-        }
-        h.push("<h3>Back to " + esc(plan.start) + "</h3>");
-        var legOut = CsTripPlan.signs(plan.back.steps, plan.unit, plan.start);
-        h.push(CsTripPlan.legSummaryHtml(legOut, plan.back.steps, plan.unit));
-        h.push(CsTripPlan.signsHtml(legOut));
+        h.push("<p class=\"warn\">" + esc(noRoute) + "</p>");
+        return;
     }
+    h.push(CsTripPlan.routeSvg(survey, resolved, plan));
+    h.push("<h2>Directions</h2>");
+    for (var s = 0; s < plan.stops.length; s++) {
+        h.push("<h3>To " + esc(plan.stops[s].station) + "</h3>");
+        var legIn = CsTripPlan.signs(plan.stops[s].steps, plan.unit,
+            plan.stops[s].station);
+        h.push(CsTripPlan.legSummaryHtml(legIn, plan.stops[s].steps, plan.unit));
+        h.push(CsTripPlan.signsHtml(legIn));
+    }
+    h.push("<h3>Back to " + esc(plan.start) + "</h3>");
+    var legOut = CsTripPlan.signs(plan.back.steps, plan.unit, plan.start);
+    h.push(CsTripPlan.legSummaryHtml(legOut, plan.back.steps, plan.unit));
+    h.push(CsTripPlan.signsHtml(legOut));
+};
+
+/** The hazards list. */
+var csCardHazards = function(h, hazards) {
+    var esc = CsTripPlan.esc;
     h.push("<h2>Hazards on the route</h2>");
     if (hazards.length === 0) {
         h.push("<p class=\"note\">None noted. Notes only exist where someone wrote them.</p>");
@@ -442,6 +475,11 @@ CsCalloutCard.html = function(plan, ctx) {
         }
         h.push("</ul>");
     }
+};
+
+/** Rope and hardware, when the route has any rope. */
+var csCardRope = function(h, plan) {
+    var esc = CsTripPlan.esc;
     if (plan.gear && plan.gear.rope.length > 0) {
         h.push("<h2>Rope and hardware</h2><ul>");
         for (var ro = 0; ro < plan.gear.rope.length; ro++) {
@@ -452,6 +490,51 @@ CsCalloutCard.html = function(plan, ctx) {
         }
         h.push("</ul>");
     }
+};
+
+/**
+ * The card as one HTML page that prints on two sheets.
+ *
+ * \param ctx {title, survey, resolved, trip, contacts: {topName, topPhone,
+ *   escalation, bufferMin}, roster: the RESOLVED party
+ *   (CsPeople.resolveParty: [{name, role, squeeze, medical, emergency,
+ *   skills, skillsNote, known}]), includeRoster, forecast: {days: [{date,
+ *   high, low, rainTotal, rainChance}]} | null, generated}
+ */
+CsCalloutCard.html = function(plan, ctx) {
+    var esc = CsTripPlan.esc;
+    var trip = ctx.trip;
+    var contacts = ctx.contacts || {};
+    var buffer = typeof contacts.bufferMin === "number" ? contacts.bufferMin : 120;
+    var win = CsCalloutCard.windows(plan, trip, buffer);
+    var hazards = CsCalloutCard.hazards(plan);
+    var dates = CsCalloutCard.tripDates(trip);
+    var h = [];
+    csCardHead(h, ctx.title + " callout card");
+    h.push("<h1>" + esc(ctx.title) + " &mdash; callout card</h1>");
+    csCardDatesLine(h, dates, ctx.generated);
+
+    // Roster: above the fold, straight under the header.
+    h.push("<h2>Roster</h2>");
+    if (ctx.includeRoster === false) {
+        h.push("<p class=\"note\">Roster not included on this copy.</p>");
+    } else if (!ctx.roster || ctx.roster.length === 0) {
+        h.push("<p class=\"warn\">Roster not filled in.</p>");
+    } else {
+        csCardRosterTable(h, ctx.roster, true);
+    }
+
+    csCardSchedule(h, win, "<h2>Schedule</h2>");
+    csCardEscalation(h, contacts, buffer);
+    var anyWet = csCardForecast(h, ctx.forecast, dates);
+    csCardWaterFlag(h, anyWet, hazards);
+
+    // Page 2: the route.
+    csCardRouteIntro(h, esc(ctx.title) + " &mdash; route");
+    csCardRoute(h, plan, ctx.survey, ctx.resolved,
+        "No route: add stops under Route in the Expedition Planner.");
+    csCardHazards(h, hazards);
+    csCardRope(h, plan);
     h.push("</div></body></html>");
     return h.join("\n");
 };
