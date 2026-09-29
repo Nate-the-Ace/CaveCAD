@@ -2138,8 +2138,9 @@ class TestSheetFileGuard(unittest.TestCase):
                         "beside the drawing",
         "ExpeditionPlanner": "reads the survey; writes stations.json "
                              "settings and trip-plan.html / "
-                             "callout-card.html beside the drawing; roster "
-                             "and contacts to per-user settings only",
+                             "callout-card.html beside the drawing; reads "
+                             "and writes people.json in the per-user data "
+                             "folder; contacts to per-user settings only",
     }
 
     def guarded(self, folder):
