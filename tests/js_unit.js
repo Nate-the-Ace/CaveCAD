@@ -163,6 +163,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsStationTable.js",
     "scripts/CaveSurvey/Core/CsStationStore.js",
     "scripts/CaveSurvey/Core/CsTripPlan.js",
+    "scripts/CaveSurvey/Core/CsCalloutCard.js",
     "scripts/CaveSurvey/Core/CsGhost.js",
     "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsSection3d.js",
@@ -33458,6 +33459,54 @@ eqs(ccBad.settings.trip.startDate, "", "trip: an impossible date is dropped");
 eqs(ccBad.settings.trip.days.length, 1, "trip: only the one good day survives");
 eqs(ccBad.settings.trip.days[0].night, "out", "trip: unknown night becomes out");
 
+
+// ---------------------------------------------------------------------
+// Callout card -- schedule windows
+// ---------------------------------------------------------------------
+
+var ccPlan = { stops: [ { station: "A3", steps: [], minutesIn: 90 } ],
+    totals: { minutesIn: 90, minutesWork: 20, minutesOut: 80 } };
+var ccOne = CsCalloutCard.windows(ccPlan, { startDate: "2026-10-03",
+    days: [ { entry: "08:00", workHours: 4, night: "out" } ] }, 120);
+eqs(ccOne.rows.length, 1, "windows: one day, one row");
+eqs(ccOne.rows[0].turnaround.time, "13:30", "windows: turnaround is entry + in + work");
+eqs(ccOne.rows[0].expectedOut.time, "14:50", "windows: expected out adds the way out");
+eqs(ccOne.rows[0].callout.time, "16:50", "windows: callout is expected out + buffer");
+
+var ccThree = CsCalloutCard.windows(ccPlan, { startDate: "2026-10-03", days: [
+    { entry: "08:00", workHours: 6, night: "camp" },
+    { entry: "08:00", workHours: 6, night: "camp" },
+    { entry: "08:00", workHours: 3, night: "out" } ] }, 120);
+eqs(ccThree.rows[0].turnaround.time, "15:30", "windows: day 1 adds the way in");
+eqs(ccThree.rows[0].callout, null, "windows: a camp night has no callout");
+eqs(ccThree.rows[1].turnaround.time, "14:00", "windows: day 2 starts underground");
+eqs(ccThree.rows[1].fromSurface, false, "windows: day 2 does not start on the surface");
+eqs(ccThree.rows[2].turnaround.time, "11:00", "windows: day 3 turnaround");
+eqs(ccThree.rows[2].expectedOut.time, "12:20", "windows: day 3 out");
+eqs(ccThree.rows[2].callout.time, "14:20", "windows: day 3 callout");
+eqs(ccThree.rows[2].entry.date, "2026-10-05", "windows: day 3 is two dates on");
+
+var ccLate = CsCalloutCard.windows(ccPlan, { startDate: "2026-10-03",
+    days: [ { entry: "22:00", workHours: 3, night: "out" } ] }, 120);
+eqs(ccLate.rows[0].turnaround.date, "2026-10-04", "windows: turnaround crosses midnight");
+eqs(ccLate.rows[0].turnaround.time, "02:30", "windows: midnight turnaround time");
+eqs(ccLate.rows[0].callout.time, "05:50", "windows: midnight callout time");
+
+var ccOver = CsCalloutCard.windows(ccPlan, { startDate: "2026-10-03", days: [
+    { entry: "08:00", workHours: 30, night: "out" },
+    { entry: "09:00", workHours: 2, night: "out" } ] }, 120);
+eqs(ccOver.rows.length, 2, "windows: an overrun still returns rows");
+ok(ccOver.warnings.length === 1 && /day 1/i.test(ccOver.warnings[0]),
+    "windows: an overrun into the next entry warns about day 1");
+
+eqs(CsCalloutCard.missing({ startDate: "", days: [] }, ccPlan),
+    "start date", "missing: start date first");
+eqs(CsCalloutCard.missing({ startDate: "2026-10-03", days: [] }, ccPlan),
+    "at least one day", "missing: days");
+ok(CsCalloutCard.missing({ startDate: "2026-10-03", days: [ {} ] },
+    { stops: [], totals: {} }) !== "", "missing: a plan with no stops");
+eqs(CsCalloutCard.missing({ startDate: "2026-10-03", days: [ {} ] }, ccPlan),
+    "", "missing: complete is blank");
 
 // ---------------------------------------------------------------------
 // Report.

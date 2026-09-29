@@ -76,6 +76,8 @@ include(includeBasePath + "/CsStationStore.js");
 // After CsStationTable and CsPitch: routes over the survey graph and
 // reads pitches for its vertical steps.
 include(includeBasePath + "/CsTripPlan.js");
+// After CsTripPlan, whose route text, SVG and clock the card reuses.
+include(includeBasePath + "/CsCalloutCard.js");
 include(includeBasePath + "/CsGhost.js");
 
 // The 3D passage surface. After CsTraverse and CsLrud, whose splay
