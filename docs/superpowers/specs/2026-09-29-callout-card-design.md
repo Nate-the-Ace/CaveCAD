@@ -60,7 +60,11 @@ will read the same field.
   or `null`. 5 s timeout. Kept out of `CsCalloutCard` so the card engine
   stays pure and testable offline. Service: Open-Meteo (no key).
 - **Panel:** a Callout tab of the Expedition Planner dock, beside its Trip
-  tab. The planner is its own tool (`epl`), not a tab of Station Table: see
+  tab.
+  *(2026-09-29, 0.9.188.0: the Trip and Callout tabs were merged into one
+  scrolling page in the card's order -- Trip, Roster, Schedule, Escalation,
+  Route, Card -- and Build card refuses until every required item is filled
+  in, naming all gaps at once via `CsCalloutCard.missingAll`.)* The planner is its own tool (`epl`), not a tab of Station Table: see
   `docs/superpowers/plans/2026-09-29-expedition-planner-panel.md`. Schedule editor, roster editor, contacts, weather place,
   "include roster" tick, Build card. Writes `callout-card.html` beside the
   drawing and opens it. Follows the tab-engine rules (build in init, find by

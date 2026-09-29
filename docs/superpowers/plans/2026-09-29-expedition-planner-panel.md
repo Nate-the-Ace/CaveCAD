@@ -16,6 +16,11 @@ ranking). Station Table goes back to being only the station table.
 
 ## Panel shape
 
+> **Superseded 2026-09-29 (0.9.188.0):** the Trip and Callout tabs below are
+> gone. The dock is one scrolling page in the callout card's order (Trip,
+> Roster, Schedule, Escalation, Route, Card); every objectName is kept; Build
+> card refuses until `CsCalloutCard.missingAll` is empty.
+
 Dock objectName `CaveSurveyExpeditionPlannerDock`, title "Expedition Planner",
 tabs:
 

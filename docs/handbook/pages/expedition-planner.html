@@ -3,17 +3,17 @@
 <h2>When you reach for it</h2>
 <p>Before a trip, once you know which leads or stations the team is going for. <a href="station-table.html">Station Table</a> is where to find them; this panel is where the trip itself is put together.</p>
 <h2>Opening it</h2>
-<p><b>Cave Survey &gt; Expedition Planner</b>. The panel has two tabs, <b>Trip</b> and <b>Callout</b>. It reads the drawing when it opens; after switching to another cave's tab, or after editing the survey, press <b>Refresh</b> at the bottom. The line beside it says how many stations the drawing has, or that it holds no survey.</p>
+<p><b>Cave Survey &gt; Expedition Planner</b>. The panel is one page, with no tabs, laid out top to bottom in the same order as the printed callout card: <b>Trip</b> (start date, forecast place), <b>Roster</b>, <b>Schedule</b> (the days), <b>Escalation</b> (topside contact and what to do if there is no word), <b>Route</b> (the stops, pace, packing list, Plan trip and Save packet) and <b>Card</b> (Build card, with the plan's text underneath). Scroll down through it; fill it in as you go and nothing important gets skipped. Fields marked with a red <b>*</b> are required to build the card. It reads the drawing when it opens; after switching to another cave's tab, or after editing the survey, press <b>Refresh</b> at the bottom. The line beside it says how many stations the drawing has, or that it holds no survey.</p>
 <h2>Plan a trip</h2>
-<p>The <b>Trip</b> tab turns a few stations into a route, a time budget and a gear list, and writes it out as a page the team can print.</p>
+<p>The <b>Route</b> section turns a few stations into a route, a time budget and a gear list, and writes it out as a page the team can print.</p>
 <ol>
-<li>On the <b>Trip</b> tab, pick a station from the dropdown at the top, or type its name (the box finishes a name you start), and press <b>Add stop</b>. Do the same for every stop on the trip. A name that is not a station of this drawing is refused, with a note under the box saying so; adding a stop twice does nothing. <b>Remove</b> takes the selected stop off the list; <b>Clear</b> empties it.</li>
-<li>Press <b>Plan trip</b>. The route starts at the survey's first station, visits every stop in the shortest order it can find, and comes back to where it started. The tab shows the directions leg by leg, the time in, at work and out, the distance, the rope for each pitch, and any warnings.</li>
+<li>Under <b>Route</b>, pick a station from the dropdown at the top, or type its name (the box finishes a name you start), and press <b>Add stop</b>. Do the same for every stop on the trip. A name that is not a station of this drawing is refused, with a note under the box saying so; adding a stop twice does nothing. <b>Remove</b> takes the selected stop off the list; <b>Clear</b> empties it.</li>
+<li>Press <b>Plan trip</b>. The route starts at the survey's first station, visits every stop in the shortest order it can find, and comes back to where it started. The text box at the bottom of the panel shows the directions leg by leg, the time in, at work and out, the distance, the rope for each pitch, and any warnings.</li>
 <li>Press <b>Save packet</b> to write <code>trip-plan.html</code> in the cave's folder, beside the drawing. Open it in a browser to read or print it. Save the drawing once first: an unsaved drawing has no folder to put it in.</li>
 </ol>
 <p>The packet holds the objectives, the time budget, a sketch of the route over the cave's shape, the directions, what to watch for, the gear list and the team's packing list. It has no coordinates and no entrance location, so it can go to a team that has not been there before.</p>
 <h3>Highway-style directions</h3>
-<p>On the callout card and the packet, directions appear only where you have a decision to make: at each intersection the leg is a road sign, with an arrow, the intersection's station in large type and "toward" the station you are heading for. The small grey figure at the left of each row is the distance and time to walk to reach that junction; when the walk takes under a minute only the distance is shown. Junctions only a few feet apart are really one wiggle, so they merge into one sign showing the net turn. The signs run in one column, top to bottom, in the order you meet them. Turns are drawn relative to the way you were already going (straight, slight, left or right, sharp, or back the way you came); a pitch out of an intersection shows a vertical arrow, and after a pitch the sign shows the compass heading instead. A leg with no intersections is one line: follow the passage to the station. Pitches are covered by the rope list, not the signs. The step-by-step text on the Trip tab is unchanged.</p>
+<p>On the callout card and the packet, directions appear only where you have a decision to make: at each intersection the leg is a road sign, with an arrow, the intersection's station in large type and "toward" the station you are heading for. The small grey figure at the left of each row is the distance and time to walk to reach that junction; when the walk takes under a minute only the distance is shown. Junctions only a few feet apart are really one wiggle, so they merge into one sign showing the net turn. The signs run in one column, top to bottom, in the order you meet them. Turns are drawn relative to the way you were already going (straight, slight, left or right, sharp, or back the way you came); a pitch out of an intersection shows a vertical arrow, and after a pitch the sign shows the compass heading instead. A leg with no intersections is one line: follow the passage to the station. Pitches are covered by the rope list, not the signs. The step-by-step text in the panel is unchanged.</p>
 <h3>Pace</h3>
 <p>Walking time is worked out at 264 feet a minute, a 3 mph hiking pace, plus time on rope for each pitch and 20 minutes of work at each stop. Cave passage is usually slower than a trail: type your own pace in feet per minute in <b>Walking pace</b> and press <b>Plan trip</b> again. Leave it blank to go back to 264. The pace and the <b>packing list</b> are saved in <code>stations.json</code>, so the whole team plans with the same numbers.</p>
 <h3>What it cannot tell you</h3>
@@ -23,7 +23,15 @@
 <li>A stop that cannot be reached along the surveyed line is listed as a warning and left out of the route. A shot whose walls say the passage is under 3 feet high or wide is flagged as tight.</li>
 </ul>
 <h2>Callout card</h2>
-<p>The <b>Callout</b> tab builds <code>callout-card.html</code> beside the drawing: two printed sheets for a trip. Add the trip's stops on the <b>Trip</b> tab first, then fill in the Callout tab and press <b>Build card</b>.</p>
+<p><b>Build card</b>, in the <b>Card</b> section at the bottom, writes <code>callout-card.html</code> beside the drawing: two printed sheets for a trip. It builds nothing until every required item is there, and then says <b>Missing:</b> with all of the gaps at once, not just the first. Required:</p>
+<ul>
+<li>the <b>start date</b>;</li>
+<li>at least one person on the <b>roster</b>, while <b>Include roster on the card</b> is ticked;</li>
+<li>at least one <b>day</b> in the schedule;</li>
+<li>the <b>topside contact</b>'s name, the <b>contact phone</b>, and the <b>if no word by callout</b> line;</li>
+<li>at least one <b>stop</b> under Route.</li>
+</ul>
+<p>The forecast place and the callout buffer are optional (the buffer defaults to 120 minutes). A field holding only spaces counts as empty.</p>
 <ul>
 <li><b>Sheet 1, for topside:</b> the roster (name, role, squeeze limit, medical notes, emergency contact), the schedule, who to call if there is no word, and the forecast for each trip day.</li>
 <li><b>Sheet 2, for the team:</b> the route sketch, turn-by-turn directions, hazard notes found on the way, and the rope list.</li>
