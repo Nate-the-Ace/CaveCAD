@@ -2,7 +2,7 @@
 //
 // Part of the Cave Survey Core library: pure ES5. The file itself
 // (stations.json in the cave folder, carried by Google Drive with the
-// rest of the cave) is read and written by StationTable.js; this file
+// rest of the cave) is read and written by CsStationSidecar.js; this file
 // is everything about what is IN it.
 //
 // THE KEY IS STATION + NOTE TEXT. A note the team edits later is a

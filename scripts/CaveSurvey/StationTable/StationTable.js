@@ -79,24 +79,6 @@ StationTable.state = { rows: [], shown: [], store: null, orphans: [],
 // Reading the drawing
 // ---------------------------------------------------------------------
 
-/**
- * The whole cave as the drawing carries it, resolved the way the drawing
- * was solved (anchor, datum and adjustment as recorded), so elevations
- * agree with the map. CsRevise.resolveAsDrawn is that recipe, shared.
- *
- * \return {survey, resolved} or null when the drawing holds no survey
- */
-StationTable.readDrawing = function(doc) {
-    if (isNull(doc)) {
-        return null;
-    }
-    var drawn = CsRevise.resolveAsDrawn(doc);
-    if (drawn === null || drawn === undefined || isNull(drawn.survey)) {
-        return null;
-    }
-    return drawn;
-};
-
 /** The open document, or null. Resolved fresh every time. */
 StationTable.document = function() {
     try {
@@ -118,76 +100,6 @@ StationTable.pathOf = function(doc) {
     } catch (e) {
         return "";
     }
-};
-
-// ---------------------------------------------------------------------
-// The sidecar file
-// ---------------------------------------------------------------------
-
-/** Absolute path of stations.json beside the drawing, or "" when unsaved. */
-StationTable.sidecarPath = function(docPath) {
-    var folder = CsCave.folderOf(String(docPath === undefined ||
-        docPath === null ? "" : docPath));
-    return folder === null ? "" : folder + "/" + CsStationStore.FILE;
-};
-
-/** \return {store, error} -- never throws */
-StationTable.readSidecar = function(path) {
-    if (path === "") {
-        return { store: CsStationStore.empty(), error: "" };
-    }
-    try {
-        var file = new QFile(path);
-        if (!file.exists()) {
-            return { store: CsStationStore.empty(), error: "" };
-        }
-        if (!file.open(QIODevice.ReadOnly | QIODevice.Text)) {
-            return { store: CsStationStore.empty(),
-                error: qsTr("stations.json exists but could not be opened") };
-        }
-        var stream = new QTextStream(file);
-        try {
-            stream.setEncoding(QStringConverter.Utf8);
-        } catch (eEnc) {
-            // an older bridge reads in the locale's codec
-        }
-        var text = String(stream.readAll());
-        file.close();
-        return CsStationStore.parse(text);
-    } catch (e) {
-        return { store: CsStationStore.empty(),
-            error: qsTr("stations.json could not be read") + " (" + e + ")" };
-    }
-};
-
-/** Write text to a file as UTF-8, replacing it. \return true on success */
-StationTable.writeText = function(path, text) {
-    if (path === "") {
-        return false;
-    }
-    try {
-        var file = new QFile(path);
-        if (!file.open(QIODevice.WriteOnly | QIODevice.Truncate |
-                QIODevice.Text)) {
-            return false;
-        }
-        var stream = new QTextStream(file);
-        try {
-            stream.setEncoding(QStringConverter.Utf8);
-        } catch (eEnc) {
-        }
-        stream.writeString(text);
-        stream.flush();
-        file.close();
-        return true;
-    } catch (e) {
-        return false;
-    }
-};
-
-/** \return true on success */
-StationTable.writeSidecar = function(path, store) {
-    return StationTable.writeText(path, CsStationStore.serialize(store));
 };
 
 // ---------------------------------------------------------------------
@@ -455,7 +367,7 @@ StationTable.calloutField = function(layout, label, name, tip) {
  * An editable table with fixed headers. It never connects itemChanged:
  * the form is read on Build card, so filling it by code writes nothing.
  */
-StationTable.calloutTable = function(name, headers, minH) {
+StationTable.calloutTable = function(name, headers, minH, maxH) {
     var t = new QTableWidget(0, headers.length);
     t.objectName = name;
     t.setHorizontalHeaderLabels(headers);
@@ -463,6 +375,7 @@ StationTable.calloutTable = function(name, headers, minH) {
         t.verticalHeader().visible = false;
         t.horizontalHeader().stretchLastSection = true;
         t.setMinimumHeight(minH);
+        t.setMaximumHeight(maxH);
     } catch (e) {
     }
     return t;
@@ -521,7 +434,7 @@ StationTable.buildCalloutPage = function() {
 
     layout.addWidget(new QLabel(qsTr("Days (entry time, work hours, night):")), 0, 0);
     var days = StationTable.calloutTable("StationTableCalloutDays",
-        StationTable.CALLOUT_DAY_HEADERS, 90);
+        StationTable.CALLOUT_DAY_HEADERS, 90, 150);
     layout.addWidget(days, 0, 0);
     var dayRow = new QHBoxLayout();
     var addDay = new QPushButton(qsTr("Add day"));
@@ -551,7 +464,7 @@ StationTable.buildCalloutPage = function() {
 
     layout.addWidget(new QLabel(qsTr("Roster (saved on this computer only):")), 0, 0);
     var roster = StationTable.calloutTable("StationTableCalloutRoster",
-        StationTable.CALLOUT_ROSTER_HEADERS, 90);
+        StationTable.CALLOUT_ROSTER_HEADERS, 90, 170);
     layout.addWidget(roster, 0, 0);
     var rosterRow = new QHBoxLayout();
     var addP = new QPushButton(qsTr("Add person"));
@@ -1019,13 +932,13 @@ StationTable.commitRow = function(row, fields, confirmRelink) {
             "Make the change once more."));
         return null;
     }
-    var path = StationTable.sidecarPath(s.docPath);
+    var path = CsStationSidecar.sidecarPath(s.docPath);
     if (path === "") {
         CsTell.warn(qsTr("Station Table: save the drawing first. The team " +
             "marks are stored beside it in stations.json."));
         return null;
     }
-    var side = StationTable.readSidecar(path);
+    var side = CsStationSidecar.readSidecar(path);
     if (side.error !== "") {
         s.loadError = side.error;
         StationTable.updateSummary((s.shown || []).length);
@@ -1036,7 +949,7 @@ StationTable.commitRow = function(row, fields, confirmRelink) {
         return null;
     }
     CsStationStore.setEntry(side.store, row, fields);
-    if (!StationTable.writeSidecar(path, side.store)) {
+    if (!CsStationSidecar.writeSidecar(path, side.store)) {
         CsTell.warn(qsTr("Station Table: could not write stations.json " +
             "beside the drawing."));
         return null;
@@ -1452,11 +1365,11 @@ StationTable.paceBlock = function(stored, typed) {
  */
 StationTable.savePlanSettings = function(pace, packing) {
     var s = StationTable.state;
-    var path = StationTable.sidecarPath(s.docPath);
+    var path = CsStationSidecar.sidecarPath(s.docPath);
     if (path === "") {
         return qsTr("pace and packing not saved: save the drawing first");
     }
-    var side = StationTable.readSidecar(path);
+    var side = CsStationSidecar.readSidecar(path);
     if (side.error !== "") {
         s.loadError = side.error;
         StationTable.updateSummary((s.shown || []).length);
@@ -1477,7 +1390,7 @@ StationTable.savePlanSettings = function(pace, packing) {
     }
     st.packing = packing;
     st.pace = block;
-    if (!StationTable.writeSidecar(path, side.store)) {
+    if (!CsStationSidecar.writeSidecar(path, side.store)) {
         return qsTr("pace and packing not saved: could not write stations.json");
     }
     if (s.store !== null) {
@@ -1718,17 +1631,17 @@ StationTable.showCalloutSettings = function() {
  */
 StationTable.saveTrip = function(trip) {
     var s = StationTable.state;
-    var path = StationTable.sidecarPath(s.docPath);
+    var path = CsStationSidecar.sidecarPath(s.docPath);
     if (path === "") {
         return qsTr("trip not saved: save the drawing first");
     }
-    var side = StationTable.readSidecar(path);
+    var side = CsStationSidecar.readSidecar(path);
     if (side.error !== "") {
         return qsTr("trip not saved: stations.json could not be read") +
             " (" + side.error + ")";
     }
     side.store.settings.trip = trip;
-    if (!StationTable.writeSidecar(path, side.store)) {
+    if (!CsStationSidecar.writeSidecar(path, side.store)) {
         return qsTr("trip not saved: could not write stations.json");
     }
     if (s.store !== null) { s.store.settings.trip = trip; }
@@ -1780,7 +1693,7 @@ StationTable.buildCard = function() {
         forecast: wx.days === null ? null : { days: wx.days },
         generated: StationTable.today() });
     var path = CsCave.folderOf(s.docPath) + "/callout-card.html";
-    if (!StationTable.writeText(path, html)) {
+    if (!CsStationSidecar.writeText(path, html)) {
         StationTable.calloutSay(qsTr("Could not write callout-card.html beside the drawing."));
         return "";
     }
@@ -1818,7 +1731,7 @@ StationTable.savePacket = function() {
         survey: s.drawn.survey, resolved: s.drawn.resolved,
         date: StationTable.today() });
     var path = CsCave.folderOf(s.docPath) + "/trip-plan.html";
-    if (!StationTable.writeText(path, html)) {
+    if (!CsStationSidecar.writeText(path, html)) {
         CsTell.warn(qsTr("Station Table: could not write trip-plan.html " +
             "beside the drawing."));
         return "";
@@ -1867,13 +1780,13 @@ StationTable.reload = function() {
     }
     var drawn = null;
     try {
-        drawn = StationTable.readDrawing(doc);
+        drawn = CsStationSidecar.readDrawing(doc);
     } catch (eRead) {
         drawn = null;
         CsTell.warn("Station Table: could not read the survey (" + eRead + ").");
     }
     s.drawn = drawn;
-    var side = StationTable.readSidecar(StationTable.sidecarPath(s.docPath));
+    var side = CsStationSidecar.readSidecar(CsStationSidecar.sidecarPath(s.docPath));
     s.store = side.store;
     s.loadError = side.error;
     StationTable.showPlanSettings(changed);

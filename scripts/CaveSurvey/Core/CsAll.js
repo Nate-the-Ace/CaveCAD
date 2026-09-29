@@ -70,9 +70,10 @@ include(includeBasePath + "/CsPitch.js");
 // After CsFrontier (open ends) and CsPitch: the table reads the
 // frontier, and the trip plan reads pitches.
 include(includeBasePath + "/CsStationTable.js");
-// Pure sidecar logic for the Station Table's marks and notes; the file
-// I/O itself is in StationTable/StationTable.js.
+// Pure sidecar logic for the Station Table's marks and notes.
 include(includeBasePath + "/CsStationStore.js");
+// stations.json on disk, shared by Station Table and Expedition Planner.
+include(includeBasePath + "/CsStationSidecar.js");
 // After CsStationTable and CsPitch: routes over the survey graph and
 // reads pitches for its vertical steps.
 include(includeBasePath + "/CsTripPlan.js");

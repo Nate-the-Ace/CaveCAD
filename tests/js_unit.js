@@ -162,6 +162,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsPitch.js",
     "scripts/CaveSurvey/Core/CsStationTable.js",
     "scripts/CaveSurvey/Core/CsStationStore.js",
+    "scripts/CaveSurvey/Core/CsStationSidecar.js",
     "scripts/CaveSurvey/Core/CsTripPlan.js",
     "scripts/CaveSurvey/Core/CsCalloutCard.js",
     "scripts/CaveSurvey/Core/CsWeather.js",
