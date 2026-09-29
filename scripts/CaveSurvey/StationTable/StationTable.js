@@ -436,6 +436,159 @@ StationTable.buildPlanPage = function() {
     return page;
 };
 
+StationTable.CALLOUT_DAY_HEADERS = ["Day", "Entry (HH:MM)", "Work hours", "Night (out/camp)"];
+StationTable.CALLOUT_ROSTER_HEADERS = ["Name", "Role", "Squeeze limit (in)", "Medical", "Emergency contact"];
+
+/** A labelled one-line field row; returns the QLineEdit. */
+StationTable.calloutField = function(layout, label, name, tip) {
+    var row = new QHBoxLayout();
+    row.addWidget(new QLabel(label), 0, 0);
+    var edit = new QLineEdit();
+    edit.objectName = name;
+    edit.toolTip = tip;
+    row.addWidget(edit, 1, 0);
+    layout.addLayout(row, 0);
+    return edit;
+};
+
+/**
+ * An editable table with fixed headers. It never connects itemChanged:
+ * the form is read on Build card, so filling it by code writes nothing.
+ */
+StationTable.calloutTable = function(name, headers, minH) {
+    var t = new QTableWidget(0, headers.length);
+    t.objectName = name;
+    t.setHorizontalHeaderLabels(headers);
+    try {
+        t.verticalHeader().visible = false;
+        t.horizontalHeader().stretchLastSection = true;
+        t.setMinimumHeight(minH);
+    } catch (e) {
+    }
+    return t;
+};
+
+/** rowCount is a PROPERTY on this bridge (see LinetypeMaker). */
+StationTable.addTableRow = function(table, cells) {
+    var r = table.rowCount;
+    table.setRowCount(r + 1);
+    for (var c = 0; c < cells.length; c++) {
+        table.setItem(r, c, new QTableWidgetItem(String(cells[c])));
+    }
+};
+
+/** The selected row of a table, or -1. currentRow is a METHOD here. */
+StationTable.calloutSelectedRow = function(table) {
+    var idx = -1;
+    try {
+        var sel = table.selectionModel().selectedRows();
+        if (sel.length > 0) {
+            idx = sel[0].row();
+        }
+    } catch (eSel) {
+        idx = -1;
+    }
+    if (idx < 0) {
+        try {
+            idx = table.currentRow();
+        } catch (eCur) {
+            idx = -1;
+        }
+    }
+    return (typeof idx === "number" && idx >= 0) ? idx : -1;
+};
+
+StationTable.removeTableRow = function(table) {
+    var r = StationTable.calloutSelectedRow(table);
+    if (r >= 0 && r < table.rowCount) {
+        table.removeRow(r);
+    }
+};
+
+StationTable.buildCalloutPage = function() {
+    var page = new QWidget();
+    var layout = new QVBoxLayout();
+    layout.setContentsMargins(6, 6, 6, 6);
+    layout.setSpacing(6);
+
+    StationTable.calloutField(layout, qsTr("Start date:"),
+        "StationTableCalloutStart",
+        qsTr("First day of the trip, YYYY-MM-DD. Saved in stations.json."));
+    StationTable.calloutField(layout, qsTr("Forecast place:"),
+        "StationTableCalloutPlace",
+        qsTr("Optional: a nearby town. Blank uses the drawing's location " +
+            "rounded to about 10 km. The exact entrance is never sent."));
+
+    layout.addWidget(new QLabel(qsTr("Days (entry time, work hours, night):")), 0, 0);
+    var days = StationTable.calloutTable("StationTableCalloutDays",
+        StationTable.CALLOUT_DAY_HEADERS, 90);
+    layout.addWidget(days, 0, 0);
+    var dayRow = new QHBoxLayout();
+    var addDay = new QPushButton(qsTr("Add day"));
+    var delDay = new QPushButton(qsTr("Remove day"));
+    dayRow.addWidget(addDay, 0, 0);
+    dayRow.addWidget(delDay, 0, 0);
+    dayRow.addStretch(1);
+    layout.addLayout(dayRow, 0);
+    addDay.clicked.connect(function() {
+        var t = StationTable.child("StationTableCalloutDays");
+        StationTable.addTableRow(t, [t.rowCount + 1, "08:00", "6", "out"]);
+    });
+    delDay.clicked.connect(function() {
+        StationTable.removeTableRow(StationTable.child("StationTableCalloutDays"));
+    });
+
+    StationTable.calloutField(layout, qsTr("Topside contact:"),
+        "StationTableCalloutTopName", qsTr("Saved on this computer only."));
+    StationTable.calloutField(layout, qsTr("Contact phone:"),
+        "StationTableCalloutTopPhone", qsTr("Saved on this computer only."));
+    StationTable.calloutField(layout, qsTr("If no word by callout:"),
+        "StationTableCalloutEscalation",
+        qsTr("Who to call next, with the number. Saved on this computer only."));
+    StationTable.calloutField(layout, qsTr("Callout buffer, min:"),
+        "StationTableCalloutBuffer",
+        qsTr("Minutes after the expected exit that topside starts acting. Default 120."));
+
+    layout.addWidget(new QLabel(qsTr("Roster (saved on this computer only):")), 0, 0);
+    var roster = StationTable.calloutTable("StationTableCalloutRoster",
+        StationTable.CALLOUT_ROSTER_HEADERS, 90);
+    layout.addWidget(roster, 0, 0);
+    var rosterRow = new QHBoxLayout();
+    var addP = new QPushButton(qsTr("Add person"));
+    var delP = new QPushButton(qsTr("Remove person"));
+    rosterRow.addWidget(addP, 0, 0);
+    rosterRow.addWidget(delP, 0, 0);
+    rosterRow.addStretch(1);
+    layout.addLayout(rosterRow, 0);
+    addP.clicked.connect(function() {
+        StationTable.addTableRow(StationTable.child("StationTableCalloutRoster"),
+            ["", "", "", "", ""]);
+    });
+    delP.clicked.connect(function() {
+        StationTable.removeTableRow(StationTable.child("StationTableCalloutRoster"));
+    });
+
+    var include = new QCheckBox(qsTr("Include roster on the card"));
+    include.objectName = "StationTableCalloutInclude";
+    include.checked = true;
+    layout.addWidget(include, 0, 0);
+
+    var buildRow = new QHBoxLayout();
+    var build = new QPushButton(qsTr("Build card"));
+    build.objectName = "StationTableCalloutBuild";
+    build.toolTip = qsTr("Write callout-card.html beside the drawing. Plan the " +
+        "trip on the Plan tab first.");
+    var status = new QLabel("");
+    status.objectName = "StationTableCalloutStatus";
+    buildRow.addWidget(build, 0, 0);
+    buildRow.addWidget(status, 1, 0);
+    layout.addLayout(buildRow, 0);
+    build.clicked.connect(function() { StationTable.buildCard(); });
+
+    page.setLayout(layout);
+    return page;
+};
+
 StationTable.buildDock = function(appWin) {
     var dock = new QDockWidget(qsTr("Station Table"), appWin);
     // Without an objectName restoreState() cannot identify the dock and
@@ -445,6 +598,7 @@ StationTable.buildDock = function(appWin) {
     tabs.objectName = "StationTableTabs";
     tabs.addTab(StationTable.buildTablePage(), qsTr("Stations"));
     tabs.addTab(StationTable.buildPlanPage(), qsTr("Plan"));
+    tabs.addTab(StationTable.buildCalloutPage(), qsTr("Callout"));
     dock.setWidget(tabs);
     appWin.addDockWidget(Qt.RightDockWidgetArea, dock);
     CsPanel.attachHelp(dock, "StationTable", qsTr("Station Table"));
@@ -1483,6 +1637,163 @@ StationTable.today = function() {
     return d.getFullYear() + "-" + two(d.getMonth() + 1) + "-" + two(d.getDate());
 };
 
+/** The form as {trip, contacts, roster, includeRoster}. */
+StationTable.readCalloutForm = function() {
+    var text = function(name) {
+        var w = StationTable.child(name);
+        return w === null ? "" : String(w.text);
+    };
+    var cell = function(t, r, c) {
+        var it = t.item(r, c);
+        return isNull(it) ? "" : String(it.text());
+    };
+    var days = [];
+    var dt = StationTable.child("StationTableCalloutDays");
+    for (var r = 0; dt !== null && r < dt.rowCount; r++) {
+        days.push({ entry: cell(dt, r, 1), workHours: parseFloat(cell(dt, r, 2)),
+            night: cell(dt, r, 3) });
+    }
+    var trip = CsStationStore.cleanTrip({ startDate: text("StationTableCalloutStart"),
+        weatherPlace: text("StationTableCalloutPlace"), days: days });
+    var rt = StationTable.child("StationTableCalloutRoster");
+    var roster = [];
+    for (var p = 0; rt !== null && p < rt.rowCount; p++) {
+        roster.push({ name: cell(rt, p, 0), role: cell(rt, p, 1),
+            squeeze: cell(rt, p, 2), medical: cell(rt, p, 3),
+            emergency: cell(rt, p, 4) });
+    }
+    var include = StationTable.child("StationTableCalloutInclude");
+    return { trip: trip,
+        contacts: CsCalloutLocal.parseContacts(CsCalloutLocal.serializeContacts({
+            topName: text("StationTableCalloutTopName"),
+            topPhone: text("StationTableCalloutTopPhone"),
+            escalation: text("StationTableCalloutEscalation"),
+            bufferMin: text("StationTableCalloutBuffer") })),
+        roster: CsCalloutLocal.parseRoster(CsCalloutLocal.serializeRoster(roster)),
+        includeRoster: include === null ? true : include.checked === true };
+};
+
+/**
+ * Fill the form from stations.json (trip) and local settings (people).
+ * The Callout tables connect no itemChanged handler, so filling writes
+ * nothing.
+ */
+StationTable.showCalloutSettings = function() {
+    var s = StationTable.state;
+    var set = function(name, v) {
+        var w = StationTable.child(name);
+        if (w !== null) { w.text = String(v); }
+    };
+    var dt = StationTable.child("StationTableCalloutDays");
+    var rt = StationTable.child("StationTableCalloutRoster");
+    if (dt === null || rt === null) {
+        return;
+    }
+    var trip = (s.store !== null && s.store.settings.trip) ?
+        s.store.settings.trip : CsStationStore.emptyTrip();
+    set("StationTableCalloutStart", trip.startDate);
+    set("StationTableCalloutPlace", trip.weatherPlace);
+    dt.setRowCount(0);
+    for (var i = 0; i < trip.days.length; i++) {
+        StationTable.addTableRow(dt, [i + 1, trip.days[i].entry,
+            trip.days[i].workHours, trip.days[i].night]);
+    }
+    var c = CsCalloutLocal.loadContacts();
+    set("StationTableCalloutTopName", c.topName);
+    set("StationTableCalloutTopPhone", c.topPhone);
+    set("StationTableCalloutEscalation", c.escalation);
+    set("StationTableCalloutBuffer", c.bufferMin);
+    rt.setRowCount(0);
+    var people = CsCalloutLocal.loadRoster();
+    for (var p = 0; p < people.length; p++) {
+        StationTable.addTableRow(rt, [people[p].name, people[p].role,
+            people[p].squeeze === null ? "" : people[p].squeeze,
+            people[p].medical, people[p].emergency]);
+    }
+};
+
+/**
+ * Put the trip into stations.json settings (re-reading the file first,
+ * like savePlanSettings). \return "" when saved, else why not.
+ */
+StationTable.saveTrip = function(trip) {
+    var s = StationTable.state;
+    var path = StationTable.sidecarPath(s.docPath);
+    if (path === "") {
+        return qsTr("trip not saved: save the drawing first");
+    }
+    var side = StationTable.readSidecar(path);
+    if (side.error !== "") {
+        return qsTr("trip not saved: stations.json could not be read") +
+            " (" + side.error + ")";
+    }
+    side.store.settings.trip = trip;
+    if (!StationTable.writeSidecar(path, side.store)) {
+        return qsTr("trip not saved: could not write stations.json");
+    }
+    if (s.store !== null) { s.store.settings.trip = trip; }
+    return "";
+};
+
+StationTable.calloutSay = function(text) {
+    var label = StationTable.child("StationTableCalloutStatus");
+    if (label !== null) { label.text = text; }
+};
+
+/** Write callout-card.html beside the drawing. \return the path or "" */
+StationTable.buildCard = function() {
+    var s = StationTable.state;
+    if (!StationTable.planGuard()) { return ""; }
+    if (s.docPath === "" || CsCave.folderOf(s.docPath) === null) {
+        StationTable.calloutSay(qsTr("Save the drawing first."));
+        return "";
+    }
+    var form = StationTable.readCalloutForm();
+    var plan = StationTable.planTrip();
+    var need = CsCalloutCard.missing(form.trip, plan);
+    if (need !== "") {
+        StationTable.calloutSay(qsTr("Missing: %1").arg(need));
+        return "";
+    }
+    var problems = [];
+    var why = StationTable.saveTrip(form.trip);
+    if (why !== "") { problems.push(why); }
+    if (!CsCalloutLocal.saveRoster(form.roster)) { problems.push(qsTr("roster not saved")); }
+    if (!CsCalloutLocal.saveContacts(form.contacts)) { problems.push(qsTr("contacts not saved")); }
+
+    var anchor = null;
+    try {
+        var rec = CsLocationPick.anchorRecord(StationTable.document());
+        if (rec !== null) { anchor = { lat: rec.lat, lon: rec.lon }; }
+    } catch (eAnchor) {
+    }
+    var wx = CsWeather.lookup(CsCalloutCard.tripDates(form.trip), anchor,
+        form.trip.weatherPlace);
+    if (wx.days === null) {
+        problems.push(qsTr("no forecast (%1)").arg(wx.error));
+    }
+    var html = CsCalloutCard.html(plan, {
+        title: CsCave.nameOf(s.docPath) || qsTr("Cave"),
+        survey: s.drawn.survey, resolved: s.drawn.resolved,
+        trip: form.trip, contacts: form.contacts, roster: form.roster,
+        includeRoster: form.includeRoster,
+        forecast: wx.days === null ? null : { days: wx.days },
+        generated: StationTable.today() });
+    var path = CsCave.folderOf(s.docPath) + "/callout-card.html";
+    if (!StationTable.writeText(path, html)) {
+        StationTable.calloutSay(qsTr("Could not write callout-card.html beside the drawing."));
+        return "";
+    }
+    StationTable.calloutSay(qsTr("Saved callout-card.html") +
+        (problems.length > 0 ? " (" + problems.join("; ") + ")" : ""));
+    try {
+        // Same call CaveShelf.reveal ships.
+        QDesktopServices.openUrl(new QUrl("file://" + path));
+    } catch (eOpen) {
+    }
+    return path;
+};
+
 /**
  * Write trip-plan.html beside the drawing. Re-plans first, so the packet
  * is always what the tab shows for the stops, pace and packing now.
@@ -1566,6 +1877,9 @@ StationTable.reload = function() {
     s.store = side.store;
     s.loadError = side.error;
     StationTable.showPlanSettings(changed);
+    if (changed) {
+        StationTable.showCalloutSettings();
+    }
     if (drawn === null) {
         s.rows = [];
         s.orphans = [];
