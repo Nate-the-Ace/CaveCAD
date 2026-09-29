@@ -35270,7 +35270,8 @@ if (typeof ExpeditionPlanner !== "undefined" &&
     ok(fa.indexOf("First aid &lt;b&gt;kit&lt;/b&gt;<br>Spare batteries") > 0,
         "tm render: team packing printed, escaped, line breaks kept");
     ok(!/-?\d{2}\.\d{3,}/.test(noIcons(faTop)), "tm render: team file page 1 has no long decimal");
-    ok(fa.indexOf("Pat Topside") < 0, "tm render: team file has no escalation box");
+    ok(fa.indexOf("Pat Topside") < 0 && fa.indexOf("Contacts not filled in.") > 0,
+        "tm render: team file without contacts prints the escalation fallback");
     var faFc = faTop.slice(faTop.indexOf("<h2>Forecast</h2>"));
     ok(faFc.indexOf("2026-10-03") > 0 && faFc.indexOf("2026-10-04") > 0 &&
         faFc.indexOf("2026-10-05") < 0, "tm render: team file forecast is its own dates");
@@ -35324,6 +35325,36 @@ if (typeof ExpeditionPlanner !== "undefined" &&
     ok(evFile.indexOf("&lt;b&gt;Deep&lt;/b&gt;") > 0 && evFile.indexOf("&lt;b&gt;go&lt;/b&gt; far") > 0 &&
         evFile.indexOf("&lt;b&gt;rope&lt;/b&gt;") > 0 && evFile.indexOf("&lt;b&gt;Zed&lt;/b&gt;") > 0,
         "tm render: team file escapes team name, goal, packing, member");
+
+    // The team file carries the trip's escalation box: a team underground
+    // must know who topside is. Trip-level contacts only, never a member's.
+    var fe = CsCalloutCard.teamHtml(teamCtx(0, ccRealPlan, { contacts: contacts }));
+    var feTop = fe.slice(0, fe.indexOf("class=\"page2\""));
+    var feEsc = feTop.indexOf("<h2>Escalation</h2>");
+    ok(feEsc > feTop.indexOf("<th>Callout</th>") && feEsc < feTop.indexOf("<h2>Forecast</h2>"),
+        "tm render: team file escalation box sits under the schedule, before the forecast");
+    ok(feTop.indexOf("Pat Topside") > feEsc && feTop.indexOf("555-0100") > feEsc &&
+        feTop.indexOf("Call the rescue coordinator, 555-0199.") > feEsc,
+        "tm render: team file shows the topside contact, phone and escalation line");
+    ok(feTop.indexOf("Callout buffer: 120 min after expected out.") > feEsc,
+        "tm render: team file escalation box carries the buffer wording");
+    ok(fe.indexOf("Luis") < 0 && fe.indexOf("555-0111") < 0 && fe.indexOf("Mum") < 0 &&
+        fe.indexOf("Emergency") < 0 && fe.indexOf("emergency") < 0,
+        "tm render: team file with the escalation box still has no member emergency contact");
+    var fe90 = CsCalloutCard.teamHtml(teamCtx(0, ccRealPlan, { contacts: { topName: "Pat Topside",
+        topPhone: "555-0100", escalation: "E", bufferMin: 90 } }));
+    ok(fe90.indexOf("Callout buffer: 90 min after expected out.") > 0,
+        "tm render: team file uses the trip's own buffer");
+    var feNull = CsCalloutCard.teamHtml(teamCtx(0, ccRealPlan, { contacts: null }));
+    ok(feNull.indexOf("<h2>Escalation</h2>") > 0 && feNull.indexOf("Contacts not filled in.") > 0,
+        "tm render: team file with null contacts prints the fallback");
+    var feEmpty = CsCalloutCard.teamHtml(teamCtx(0, ccRealPlan, { contacts: {} }));
+    ok(feEmpty.indexOf("Contacts not filled in.") > 0,
+        "tm render: team file with empty contacts prints the fallback");
+    var feEvil = CsCalloutCard.teamHtml(teamCtx(0, ccRealPlan, { contacts: { topName: "<b>Pat</b>",
+        topPhone: "1", escalation: "<i>x</i>", bufferMin: 120 } }));
+    ok(feEvil.indexOf("<b>Pat") < 0 && feEvil.indexOf("&lt;b&gt;Pat&lt;/b&gt;") > 0 &&
+        feEvil.indexOf("<i>x") < 0, "tm render: team file escalation box is escaped");
 })();
 
 // ---------------------------------------------------------------------

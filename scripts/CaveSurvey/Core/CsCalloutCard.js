@@ -675,12 +675,15 @@ CsCalloutCard.topsideHtml = function(ctx) {
 };
 
 /**
- * One team's file: who, when, its own forecast, then (after a print page
- * break) its route, directions, hazards, rope and packing. Medical notes
- * are here (the team needs them); emergency contacts are NOT (topside only).
+ * One team's file: who, when, the trip's escalation box (who topside is),
+ * its own forecast, then (after a print page break) its route, directions,
+ * hazards, rope and packing. Medical notes are here (the team needs them);
+ * members' emergency contacts are NOT (topside only).
  *
  * \param ctx {title, trip, team, plan, windows (CsTeams.windows), members
- *   (CsTeams.memberRows), forecast, generated, survey, resolved}
+ *   (CsTeams.memberRows), contacts: {topName, topPhone, escalation,
+ *   bufferMin} (missing prints "Contacts not filled in."), forecast,
+ *   generated, survey, resolved}
  */
 CsCalloutCard.teamHtml = function(ctx) {
     var esc = CsTripPlan.esc;
@@ -707,6 +710,10 @@ CsCalloutCard.teamHtml = function(ctx) {
     }
 
     csCardSchedule(h, csCardWin(ctx.windows), "<h2>Schedule</h2>");
+    // Who topside is: the trip-level contacts, never a member's own.
+    var contacts = ctx.contacts || {};
+    csCardEscalation(h, contacts,
+        typeof contacts.bufferMin === "number" ? contacts.bufferMin : 120);
     var anyWet = csCardForecast(h, ctx.forecast, dates);
     csCardWaterFlag(h, anyWet, hazards);
 
