@@ -164,6 +164,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsStationStore.js",
     "scripts/CaveSurvey/Core/CsTripPlan.js",
     "scripts/CaveSurvey/Core/CsCalloutCard.js",
+    "scripts/CaveSurvey/Core/CsWeather.js",
     "scripts/CaveSurvey/Core/CsGhost.js",
     "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsSection3d.js",
@@ -33569,6 +33570,51 @@ ok(ccDry.indexOf("Rain forecast + water noted on route") < 0,
 ok(ccDry.indexOf("90%") > 0, "card: rain chance printed");
 ok(!/-?\d{2}\.\d{3,}/.test(ccHtml.slice(0, ccSplit)),
     "card: page 1 has no long decimal that could be a coordinate");
+
+// ---------------------------------------------------------------------
+// Callout card -- weather requests
+// ---------------------------------------------------------------------
+
+var ccForecastJson = JSON.stringify({ daily: {
+    time: ["2026-10-03", "2026-10-04"],
+    temperature_2m_max: [70.2, 66.0], temperature_2m_min: [50.1, null],
+    precipitation_sum: [0.8, 0], precipitation_probability_max: [90, 10] } });
+var ccUrls = [];
+var ccFake = function(url) {
+    ccUrls.push(url);
+    if (url.indexOf("geocoding") >= 0) {
+        return { text: JSON.stringify({ results: [ { latitude: 35.94821,
+            longitude: -85.90417 } ] }), error: "" };
+    }
+    return { text: ccForecastJson, error: "" };
+};
+var ccAnchor = { lat: 35.12345678, lon: -85.98765432 };
+var ccDates = ["2026-10-03", "2026-10-04"];
+var ccWx = CsWeather.lookup(ccDates, ccAnchor, "", ccFake);
+eqs(ccWx.error, "", "weather: anchor lookup has no error");
+eqs(ccWx.days.length, 2, "weather: two days back");
+eqs(ccWx.days[0].rainChance, 90, "weather: rain chance parsed");
+eqs(ccWx.days[1].low, null, "weather: a null low stays null");
+ok(ccUrls[0].indexOf("latitude=35.1") > 0 && ccUrls[0].indexOf("longitude=-86.0") > 0,
+    "weather: the request carries the rounded coordinate");
+ok(ccUrls[0].indexOf("35.12") < 0 && ccUrls[0].indexOf("85.98") < 0,
+    "weather: the exact coordinate never reaches the request");
+ok(ccUrls[0].indexOf("start_date=2026-10-03") > 0 &&
+    ccUrls[0].indexOf("end_date=2026-10-04") > 0, "weather: the trip dates are asked for");
+
+ccUrls = [];
+var ccWx2 = CsWeather.lookup(ccDates, null, "Sewanee, TN", ccFake);
+eqs(ccUrls.length, 2, "weather: a place is geocoded, then forecast");
+ok(ccUrls[0].indexOf("geocoding") >= 0 && ccUrls[0].indexOf("Sewanee%2C%20TN") > 0,
+    "weather: place name is encoded into the geocode request");
+ok(ccUrls[1].indexOf("latitude=35.9") > 0, "weather: geocode result is rounded too");
+eqs(CsWeather.lookup(ccDates, null, "", ccFake).error, "no location",
+    "weather: nothing to look up says so");
+var ccDown = CsWeather.lookup(ccDates, ccAnchor, "", function() {
+    return { text: "", error: "timed out" }; });
+eqs(ccDown.days, null, "weather: a failed fetch gives no days");
+eqs(ccDown.error, "timed out", "weather: the failure reason is kept");
+eqs(CsWeather.parseForecast("not json"), null, "weather: junk parses to null");
 
 // ---------------------------------------------------------------------
 // Report.

@@ -78,6 +78,8 @@ include(includeBasePath + "/CsStationStore.js");
 include(includeBasePath + "/CsTripPlan.js");
 // After CsTripPlan, whose route text, SVG and clock the card reuses.
 include(includeBasePath + "/CsCalloutCard.js");
+// Forecast lookup for the callout card. Independent of the survey engines.
+include(includeBasePath + "/CsWeather.js");
 include(includeBasePath + "/CsGhost.js");
 
 // The 3D passage surface. After CsTraverse and CsLrud, whose splay
