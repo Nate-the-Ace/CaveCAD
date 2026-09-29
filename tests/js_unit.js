@@ -34845,14 +34845,16 @@ if (typeof ExpeditionPlanner !== "undefined" &&
     eqs(CsTeams.missingAll(none, [null], {}, [], false).join("|"), ["start date", "topside contact name",
         "contact phone", "the if-no-word escalation line", "Team 1: a name", "Team 1: at least one person",
         "Team 1: at least one day", "Team 1: at least one stop"].join("|"), "tm engine: everything missing, panel order");
+    // The roster is covered by each team's own "at least one person": the
+    // trip-level roster line was dropped as a duplicate (Include roster ticked or not).
     var rost = CsTeams.missingAll(none, [null], {}, [], true);
-    eqs(rost.length, 9, "tm engine: roster wording added when nobody on any team");
-    ok(rost.join("|").indexOf("Include roster") >= 0, "tm engine: roster wording names Include roster");
+    eqs(rost.length, 8, "tm engine: no duplicate trip-level roster line when nobody is on any team");
+    ok(rost.join("|").indexOf("Include roster") < 0, "tm engine: no roster wording is added");
     var rost2 = CsTeams.missingAll(full, plans, contacts, [], true);
-    eqs(rost2.length, 0, "tm engine: roster wording not shown when someone is on a team");
+    eqs(rost2.length, 0, "tm engine: nothing missing when everyone is assigned");
     var half = JSON.parse(JSON.stringify(full)); half.teams[0].members = [];
     eqs(CsTeams.missingAll(half, plans, contacts, [], true).join("|"), "Alpha: at least one person",
-        "tm engine: roster wording off when another team has members");
+        "tm engine: one empty team is reported by name only");
     eqs(CsTeams.missingAll(null, null, null, null, true).length > 0, true, "tm engine: missingAll never throws on null");
 
     // Slug, file name.

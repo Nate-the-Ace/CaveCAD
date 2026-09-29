@@ -216,7 +216,6 @@ CsTeams.missingAll = function(trip, plansByTeam, contacts, roster, includeRoster
     if (csTeamsTrim(c.topPhone) === "") { out.push("contact phone"); }
     if (csTeamsTrim(c.escalation) === "") { out.push("the if-no-word escalation line"); }
     var counts = [];
-    var anyone = false;
     var i, j;
     for (i = 0; i < teams.length; i++) {
         var n = 0;
@@ -225,11 +224,9 @@ CsTeams.missingAll = function(trip, plansByTeam, contacts, roster, includeRoster
             if (csTeamsTrim(csTeamsObj(ms[j]).name) !== "") { n++; }
         }
         counts.push(n);
-        if (n > 0) { anyone = true; }
     }
-    if (includeRoster !== false && !anyone) {
-        out.push("at least one person going (add them to a team, or untick Include roster)");
-    }
+    // No trip-level "roster" line: every team already reports its own
+    // "at least one person", so a trip-level line would say it twice.
     for (i = 0; i < teams.length; i++) {
         var team = csTeamsObj(teams[i]);
         var label = csTeamsTrim(team.name);
