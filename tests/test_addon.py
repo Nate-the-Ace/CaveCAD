@@ -1800,6 +1800,7 @@ MENU = {
     # 451 -- survey data
     "SurveyNotebook/SurveyNotebook.js":   (451, 10, ["surveynotebook", "snb"]),
     "StationTable/StationTable.js":       (451, 12, ["stationtable", "st"]),
+    "ExpeditionPlanner/ExpeditionPlanner.js": (451, 13, ["expeditionplanner", "epl"]),
     "ImportCaveSurvey/ImportCaveSurvey.js": (451, 20, ["importcavesurvey", "ics"]),
     "ExportCaveSurvey/ExportCaveSurvey.js": (451, 30, ["exportcavesurvey", "ecs"]),
     "LoopErrors/LoopErrors.js":           (451, 40, ["looperrors", "le"]),
@@ -2135,6 +2136,10 @@ class TestSheetFileGuard(unittest.TestCase):
         "StartHere": "ticks a checklist in the settings; draws nothing",
         "StationTable": "reads the survey; writes only stations.json "
                         "beside the drawing",
+        "ExpeditionPlanner": "reads the survey; writes stations.json "
+                             "settings and trip-plan.html / "
+                             "callout-card.html beside the drawing; roster "
+                             "and contacts to per-user settings only",
     }
 
     def guarded(self, folder):

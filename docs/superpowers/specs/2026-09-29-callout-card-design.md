@@ -59,8 +59,9 @@ will read the same field.
   `{days: [{date, high, low, rainTotal, rainChance}], source, placeLabel}`
   or `null`. 5 s timeout. Kept out of `CsCalloutCard` so the card engine
   stays pure and testable offline. Service: Open-Meteo (no key).
-- **Panel:** a Callout tab in the Station Table dock, beside Stations and
-  Plan (the Plan tab is already full). Schedule editor, roster editor, contacts, weather place,
+- **Panel:** a Callout tab of the Expedition Planner dock, beside its Trip
+  tab. The planner is its own tool (`epl`), not a tab of Station Table: see
+  `docs/superpowers/plans/2026-09-29-expedition-planner-panel.md`. Schedule editor, roster editor, contacts, weather place,
   "include roster" tick, Build card. Writes `callout-card.html` beside the
   drawing and opens it. Follows the tab-engine rules (build in init, find by
   objectName, no expandos).

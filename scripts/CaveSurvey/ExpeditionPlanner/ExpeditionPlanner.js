@@ -2,7 +2,7 @@
 //
 // QCAD add-on tool: plan a trip into the cave and build its callout card.
 //
-//   Cave Survey > Expedition Planner   (or type "ep")
+//   Cave Survey > Expedition Planner   (or type "epl")
 //
 // WHAT IT IS. A docked panel with two tabs. TRIP routes a trip from the
 // survey's first station to the stops picked from a dropdown of the
@@ -1137,7 +1137,7 @@ ExpeditionPlanner.init = function(basePath) {
     action.setIcon(basePath + "/ExpeditionPlanner.svg");
     action.setStatusTip(qsTr("Plan a trip to stations in the cave, save " +
         "its route packet, and build the callout card for topside"));
-    action.setDefaultCommands(["expeditionplanner", "ep"]);
+    action.setDefaultCommands(["expeditionplanner", "epl"]);
     action.setGroupSortOrder(451);
     action.setSortOrder(13);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);

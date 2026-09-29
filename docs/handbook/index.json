@@ -147,6 +147,17 @@
       "shots": []
     },
     {
+      "id": "expedition-planner",
+      "title": "Expedition Planner",
+      "class": "tool",
+      "file": "expedition-planner.html",
+      "stage": 451,
+      "tools": [
+        "ExpeditionPlanner"
+      ],
+      "shots": []
+    },
+    {
       "id": "3d-view",
       "title": "3D View",
       "class": "tool",
