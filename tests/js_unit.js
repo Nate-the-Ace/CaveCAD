@@ -33756,8 +33756,12 @@ ok(CsTripPlan.signsHtml(sg2C).indexOf(
 ok(CsTripPlan.signsHtml(sg2C).indexOf(" min") < 0, "signs2: short single line has no min");
 ok(sgP2.indexOf("0 min") < 0 && sgPacket.indexOf(" 0 min") < 0,
     "signs2: no 0 min in card page 2 or packet");
-ok(CsTripPlan.SIGNS_CSS.indexOf("column-count:2") > 0, "signs2: two columns css");
-ok(CsTripPlan.SIGNS_CSS.indexOf("column-gap:18px") > 0, "signs2: column gap css");
+// One column (Nathan, 2026-09-29: two columns made it unclear which
+// sign to look at next). Rows run top to bottom in route order.
+ok(CsTripPlan.SIGNS_CSS.indexOf("column-count") < 0, "signs2: one column, no column-count css");
+ok(CsTripPlan.SIGNS_CSS.indexOf("column-gap") < 0, "signs2: no column gap css");
+ok(ccHtml.indexOf("column-count") < 0, "signs2: the card has no column-count");
+ok(sgPacket.indexOf("column-count") < 0, "signs2: the packet has no column-count");
 var sg2Html = CsTripPlan.signsHtml(sgTwo);
 ok(sg2Html.indexOf("class=\"conn\"") < 0 && sg2Html.indexOf("class=\"blk\"") < 0,
     "signs2: no standalone connector elements");

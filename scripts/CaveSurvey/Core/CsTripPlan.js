@@ -725,9 +725,12 @@ CsTripPlan.signs = function(steps, unit, destination) {
     return { signs: signs, connectors: connectors, destination: destination };
 };
 
-/** CSS for signsHtml; both printed pages add it to their <style>. */
-CsTripPlan.SIGNS_CSS = ".signs{margin:4px 0;column-count:2;column-gap:18px}" +
-    ".signs.solo{column-count:1}" +
+/**
+ * CSS for signsHtml; both printed pages add it to their <style>. ONE
+ * column, top to bottom in route order: two columns made it unclear
+ * which sign to look at next (Nathan, 2026-09-29).
+ */
+CsTripPlan.SIGNS_CSS = ".signs{margin:4px 0}" +
     ".signs .none{font-size:11px;color:#666}" +
     ".sign{display:flex;align-items:center;gap:8px;border:2px solid #111;" +
     "border-radius:8px;margin:2px 0;padding:3px 8px 3px 3px;" +
