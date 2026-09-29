@@ -165,6 +165,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsStationSidecar.js",
     "scripts/CaveSurvey/Core/CsTripPlan.js",
     "scripts/CaveSurvey/Core/CsCalloutCard.js",
+    "scripts/CaveSurvey/Core/CsTeams.js",
     "scripts/CaveSurvey/Core/CsWeather.js",
     "scripts/CaveSurvey/Core/CsCalloutLocal.js",
     "scripts/CaveSurvey/Core/CsPeople.js",
@@ -34670,6 +34671,210 @@ if (typeof ExpeditionPlanner !== "undefined" &&
     eqs(tmLegacy.days[0].entry, "08:00", "tm store: legacy day entry as before");
     eqs(tmLegacy.party.length, 1, "tm store: legacy party kept");
     eqs(rt(tmTrip).days[0].entry, "08:00", "tm store: trip day zero-padded");
+})();
+
+// ---------------------------------------------------------------------
+// Teams engine (CsTeams)
+// ---------------------------------------------------------------------
+(function() {
+    var day = function(entry, hrs, night) { return { entry: entry, workHours: hrs, night: night }; };
+    var tm = function(name, off, members, days) {
+        return { id: "id-" + name, name: name, goal: "", dayOffset: off, members: members,
+            stops: [], days: days, packing: "" };
+    };
+    var b = CsTeams.blank("Deep");
+    ok(CsUuid.isValid(b.id), "tm engine: blank has a uuid");
+    eqs(JSON.stringify({ n: b.name, g: b.goal, o: b.dayOffset, m: b.members, s: b.stops, d: b.days, p: b.packing }),
+        JSON.stringify({ n: "Deep", g: "", o: 0, m: [], s: [], d: [], p: "" }), "tm engine: blank shape");
+    ok(CsTeams.blank("x").id !== CsTeams.blank("x").id, "tm engine: blank ids differ");
+
+    var src = tm("A", 2, [{ id: "p1", name: "Pat" }], [day("08:00", 4, "out")]);
+    src.stops = ["S1"]; src.packing = "rope";
+    var cp = CsTeams.copyOf(src, "B");
+    ok(cp.id !== src.id && CsUuid.isValid(cp.id), "tm engine: copyOf new id");
+    eqs(cp.name, "B", "tm engine: copyOf name");
+    eqs(cp.dayOffset, 2, "tm engine: copyOf keeps offset");
+    eqs(cp.days.length, 1, "tm engine: copyOf keeps days");
+    eqs(cp.days[0].entry, "08:00", "tm engine: copyOf day content");
+    eqs(cp.members.length + cp.stops.length, 0, "tm engine: copyOf no members/stops");
+    eqs(cp.packing, "", "tm engine: copyOf empty packing");
+    cp.days[0].entry = "09:00";
+    eqs(src.days[0].entry, "08:00", "tm engine: copyOf days are a deep copy");
+
+    var lt = { startDate: "2026-10-03", days: [day("08:00", 4, "out")], teams: [] };
+    var lp = [{ id: "p1", name: "Pat" }];
+    var ltJson = JSON.stringify(lt), lpJson = JSON.stringify(lp);
+    var fl = CsTeams.fromLegacy(lt, "rope", lp);
+    eqs(fl.length, 1, "tm engine: fromLegacy one team");
+    eqs(fl[0].name, "Team 1", "tm engine: fromLegacy name");
+    eqs(fl[0].days.length, 1, "tm engine: fromLegacy days");
+    eqs(fl[0].members[0].name, "Pat", "tm engine: fromLegacy party");
+    eqs(fl[0].packing, "rope", "tm engine: fromLegacy packing");
+    ok(CsUuid.isValid(fl[0].id), "tm engine: fromLegacy id");
+    fl[0].days[0].entry = "10:00"; fl[0].members[0].name = "Zed";
+    eqs(JSON.stringify(lt), ltJson, "tm engine: fromLegacy does not mutate trip");
+    eqs(JSON.stringify(lp), lpJson, "tm engine: fromLegacy does not mutate party");
+    var fe = CsTeams.fromLegacy({ startDate: "", days: [] }, "", []);
+    eqs(fe.length, 1, "tm engine: fromLegacy empty -> one team");
+    eqs(fe[0].name + "|" + fe[0].days.length + "|" + fe[0].members.length, "Team 1|0|0",
+        "tm engine: fromLegacy empty team is empty");
+    var have = [tm("Z", 0, [], [])];
+    eqs(CsTeams.fromLegacy({ days: [day("08:00", 1, "out")], teams: have }, "x", []), have,
+        "tm engine: fromLegacy keeps existing teams");
+
+    var trip = { startDate: "2026-10-03" };
+    eqs(CsTeams.dates(trip, tm("A", 0, [], [day("8:00", 1, "camp"), day("8:00", 1, "out")])).join(","),
+        "2026-10-03,2026-10-04", "tm engine: dates");
+    eqs(CsTeams.dates(trip, tm("A", 2, [], [day("8:00", 1, "camp"), day("8:00", 1, "out")])).join(","),
+        "2026-10-05,2026-10-06", "tm engine: dates with offset");
+    eqs(CsTeams.dates({ startDate: "2026-10-31" }, tm("A", 1, [], [day("8:00", 1, "out"), day("8:00", 1, "out")])).join(","),
+        "2026-11-01,2026-11-02", "tm engine: dates cross a month");
+    eqs(CsTeams.dates({ startDate: "" }, tm("A", 0, [], [day("8:00", 1, "out")])).join(","), "",
+        "tm engine: dates empty for no start");
+    eqs(CsTeams.dates({ startDate: "2026-02-31" }, tm("A", 0, [], [day("8:00", 1, "out")])).length, 0,
+        "tm engine: dates empty for invalid start");
+
+    // Same-day conflicts.
+    var pat = { id: "p1", name: "Pat" };
+    var one = day("08:00", 4, "out");
+    var t1 = { startDate: "2026-10-03", teams: [
+        tm("Alpha", 0, [pat], [one, one]), tm("Beta", 1, [pat], [one]) ] };
+    var c1 = CsTeams.sameDayConflicts(t1);
+    eqs(c1.length, 1, "tm engine: one overlapping day");
+    eqs(c1[0].date + "|" + c1[0].person + "|" + c1[0].teams.join(","), "2026-10-04|Pat|Alpha,Beta",
+        "tm engine: conflict shape");
+    var t2 = { startDate: "2026-10-03", teams: [
+        tm("Alpha", 0, [pat], [one]), tm("Beta", 1, [pat], [one]) ] };
+    eqs(CsTeams.sameDayConflicts(t2).length, 0, "tm engine: same person, different dates: no warning");
+    var t3 = { startDate: "2026-10-03", teams: [
+        tm("A", 0, [pat], [one]), tm("B", 0, [pat], [one]), tm("C", 0, [pat], [one]) ] };
+    var c3 = CsTeams.sameDayConflicts(t3);
+    eqs(c3.length, 1, "tm engine: three teams, one entry");
+    eqs(c3[0].teams.join(","), "A,B,C", "tm engine: three teams named in order");
+    var t4 = { startDate: "2026-10-03", teams: [
+        tm("A", 0, [{ id: "", name: "  PAT " }], [one]), tm("B", 0, [{ id: "", name: "pat" }], [one]) ] };
+    eqs(CsTeams.sameDayConflicts(t4).length, 1, "tm engine: name match trimmed, case blind");
+    var t5 = { startDate: "2026-10-03", teams: [
+        tm("A", 0, [{ id: "p1", name: "Pat" }], [one]), tm("B", 0, [{ id: "p2", name: "Pat" }], [one]) ] };
+    eqs(CsTeams.sameDayConflicts(t5).length, 0, "tm engine: different ids, same name: two people");
+    var t6 = { startDate: "2026-10-03", teams: [
+        tm("A", 0, [{ id: "p1", name: "Pat" }], [one]), tm("B", 0, [{ id: "", name: "pat" }], [one]) ] };
+    var c6 = CsTeams.sameDayConflicts(t6);
+    eqs(c6.length, 1, "tm engine: one team by id, another by name only, is a conflict");
+    eqs(c6[0].teams.join(","), "A,B", "tm engine: alias conflict names both teams");
+    var t7 = { startDate: "2026-10-03", teams: [
+        tm("B", 0, [{ id: "", name: "pat" }], [one]), tm("A", 0, [{ id: "p1", name: "Pat" }], [one]) ] };
+    eqs(CsTeams.sameDayConflicts(t7).length, 1, "tm engine: alias conflict, name-only team first");
+    var t8 = { startDate: "2026-10-03", teams: [
+        tm("A", 0, [{ id: "p1", name: "Pat" }, { id: "p2", name: "Al" }], [one, one]),
+        tm("B", 1, [{ id: "p2", name: "Al" }, { id: "p1", name: "Pat" }], [one]),
+        tm("C", 0, [{ id: "p2", name: "Al" }], [one]) ] };
+    var c8 = CsTeams.sameDayConflicts(t8);
+    eqs(c8.map(function(x) { return x.date + " " + x.person; }).join(","),
+        "2026-10-03 Al,2026-10-04 Al,2026-10-04 Pat", "tm engine: sorted by date then person");
+    eqs(CsTeams.sameDayConflicts({ startDate: "", teams: t8.teams }).length, 0, "tm engine: no start, no conflicts");
+    eqs(CsTeams.sameDayConflicts({ startDate: "2026-10-03" }).length, 0, "tm engine: no teams, no conflicts");
+    var t9 = { startDate: "2026-10-03", teams: [
+        tm("Same", 0, [pat], [one]), tm("Same", 0, [pat], [one]) ] };
+    eqs(CsTeams.sameDayConflicts(t9).length, 0, "tm engine: one team name twice is not two teams");
+
+    // Windows.
+    var plan = { stops: [{ station: "A3", steps: [], minutesIn: 90 }],
+        totals: { minutesIn: 90, minutesWork: 20, minutesOut: 80 } };
+    var w0 = CsTeams.windows(plan, trip, tm("A", 0, [], [day("08:00", 4, "out")]), 120);
+    eqs(w0.rows[0].entry.date + " " + w0.rows[0].entry.time, "2026-10-03 08:00", "tm engine: windows day 1");
+    eqs(w0.rows[0].callout.time, "16:50", "tm engine: windows callout");
+    var w1 = CsTeams.windows(plan, trip, tm("A", 1, [], [day("08:00", 4, "out")]), 120);
+    eqs(w1.rows[0].entry.date, "2026-10-04", "tm engine: windows offset 1 shifts entry");
+    eqs(w1.rows[0].callout.date, "2026-10-04", "tm engine: windows offset 1 shifts callout");
+    var wsame = CsCalloutCard.windows(plan, { startDate: "2026-10-04",
+        days: [day("08:00", 4, "out")] }, 120);
+    eqs(JSON.stringify(w1), JSON.stringify(wsame), "tm engine: windows equals card windows at shifted date");
+    eqs(CsTeams.windows(plan, { startDate: "" }, tm("A", 1, [], [day("08:00", 4, "out")]), 120).rows.length, 0,
+        "tm engine: windows empty for no start");
+
+    // Callout strip.
+    var mk = function(n, days) { return { team: n, rows: CsTeams.windows(plan, trip,
+        tm(n, 0, [], days), 60).rows }; };
+    var strip = CsTeams.calloutStrip([
+        mk("Alpha", [day("08:00", 4, "out"), day("08:00", 4, "out")]),
+        mk("Beta", [day("08:00", 4, "out")]) ]);
+    eqs(strip.map(function(s) { return s.team + " " + s.stamp.date + " " + s.stamp.time; }).join(","),
+        "Alpha 2026-10-03 15:50,Beta 2026-10-03 15:50,Alpha 2026-10-04 15:50",
+        "tm engine: strip sorted by time, ties by team order");
+    eqs(strip[0].kind, "callout", "tm engine: strip kind");
+    var camp = CsTeams.calloutStrip([mk("Camp", [day("08:00", 4, "camp")]),
+        mk("Beta", [day("09:00", 4, "out")])]);
+    eqs(camp.length, 2, "tm engine: camp-only team: camp day contributes nothing besides the last day");
+    var campOnly = CsTeams.calloutStrip([{ team: "Camp", rows: [
+        { callout: null, endsOnSurface: false }] }]);
+    eqs(campOnly.length, 0, "tm engine: camp-only team contributes nothing");
+    eqs(CsTeams.calloutStrip([]).length, 0, "tm engine: empty strip");
+    var plainArr = CsTeams.calloutStrip([w0.rows]);
+    eqs(plainArr.length + plainArr[0].team, "1Team 1", "tm engine: strip accepts bare rows, default label");
+
+    // missingAll.
+    var full = { startDate: "2026-10-03", teams: [
+        { id: "a", name: "Alpha", members: [pat], stops: ["S"], days: [one] },
+        { id: "b", name: "Beta", members: [{ id: "", name: "Bo" }], stops: ["S"], days: [one] } ] };
+    var contacts = { topName: "Top", topPhone: "555", escalation: "call" };
+    var plans = [{ stops: [{}] }, { stops: [{}] }];
+    eqs(CsTeams.missingAll(full, plans, contacts, [], true).join("|"), "", "tm engine: complete -> nothing missing");
+    var mm = function(f) {
+        var tt = JSON.parse(JSON.stringify(full)), cc = JSON.parse(JSON.stringify(contacts)),
+            pp = JSON.parse(JSON.stringify(plans));
+        var r = f(tt, cc, pp);
+        return CsTeams.missingAll(tt, pp, cc, [], true).join("|");
+    };
+    eqs(mm(function(t) { t.startDate = ""; }), "start date", "tm engine: missing start alone");
+    eqs(mm(function(t) { t.startDate = "2026-02-31"; }), "start date", "tm engine: invalid start");
+    eqs(mm(function(t, c) { c.topName = "  "; }), "topside contact name", "tm engine: missing contact name (blank)");
+    eqs(mm(function(t, c) { c.topPhone = ""; }), "contact phone", "tm engine: missing phone");
+    eqs(mm(function(t, c) { c.escalation = " \t"; }), "the if-no-word escalation line",
+        "tm engine: missing escalation (whitespace)");
+    eqs(mm(function(t) { t.teams[1].name = "   "; }), "Team 2: a name", "tm engine: blank team name, default label");
+    eqs(mm(function(t) { t.teams[0].members = []; }), "Alpha: at least one person", "tm engine: no members");
+    eqs(mm(function(t) { t.teams[1].members = [{ id: "", name: "  " }]; }), "Beta: at least one person",
+        "tm engine: whitespace-only member is nobody");
+    eqs(mm(function(t) { t.teams[0].days = []; }), "Alpha: at least one day", "tm engine: no days");
+    eqs(mm(function(t, c, p) { p[1] = { stops: [] }; }), "Beta: at least one stop", "tm engine: no stops");
+    var nostops = JSON.parse(JSON.stringify(full)); nostops.teams[0].stops = [];
+    eqs(CsTeams.missingAll(nostops, [null, plans[1]], contacts, [], true).join("|"), "Alpha: at least one stop",
+        "tm engine: null plan means no stops");
+    var none = { startDate: "", teams: [{ id: "a", name: "", members: [], stops: [], days: [] }] };
+    eqs(CsTeams.missingAll(none, [null], {}, [], false).join("|"), ["start date", "topside contact name",
+        "contact phone", "the if-no-word escalation line", "Team 1: a name", "Team 1: at least one person",
+        "Team 1: at least one day", "Team 1: at least one stop"].join("|"), "tm engine: everything missing, panel order");
+    var rost = CsTeams.missingAll(none, [null], {}, [], true);
+    eqs(rost.length, 9, "tm engine: roster wording added when nobody on any team");
+    ok(rost.join("|").indexOf("Include roster") >= 0, "tm engine: roster wording names Include roster");
+    var rost2 = CsTeams.missingAll(full, plans, contacts, [], true);
+    eqs(rost2.length, 0, "tm engine: roster wording not shown when someone is on a team");
+    var half = JSON.parse(JSON.stringify(full)); half.teams[0].members = [];
+    eqs(CsTeams.missingAll(half, plans, contacts, [], true).join("|"), "Alpha: at least one person",
+        "tm engine: roster wording off when another team has members");
+    eqs(CsTeams.missingAll(null, null, null, null, true).length > 0, true, "tm engine: missingAll never throws on null");
+
+    // Slug, file name.
+    eqs(CsTeams.slug("Deep Push!"), "deep-push", "tm engine: slug basic");
+    eqs(CsTeams.slug(""), "team", "tm engine: slug empty");
+    eqs(CsTeams.slug("***"), "team", "tm engine: slug all punctuation");
+    eqs(CsTeams.slug("  Wet  --  Dry  "), "wet-dry", "tm engine: slug collapses hyphens");
+    var long40 = "abcdefghij abcdefghij abcdefghij abcdefghij".slice(0, 40);
+    eqs(CsTeams.slug(long40), "abcdefghij-abcdefghij-abcdefgh", "tm engine: slug cut to 30");
+    eqs(CsTeams.slug("aaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbb").length <= 30, true, "tm engine: slug never over 30");
+    eqs(CsTeams.slug("aaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbb"), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "tm engine: slug trims a trailing hyphen after the cut");
+    eqs(CsTeams.fileName(0, { name: "Deep Push!" }), "team-1-deep-push.html", "tm engine: fileName");
+    eqs(CsTeams.fileName(2, { name: "" }), "team-3-team.html", "tm engine: fileName blank");
+
+    // memberRows.
+    var dir = [{ id: "p1", name: "Pat", role: "lead", medical: "asthma", emergency: "Mum 555" }];
+    var rows = CsTeams.memberRows({ members: [{ id: "p1", name: "x" }, { id: "", name: "Stranger" }] }, dir);
+    eqs(rows.length, 2, "tm engine: memberRows two");
+    eqs(rows[0].known + "|" + rows[0].medical + "|" + rows[0].name, "true|asthma|Pat", "tm engine: known member resolved");
+    eqs(rows[1].known + "|" + rows[1].name, "false|Stranger", "tm engine: unknown member");
+    eqs(CsTeams.memberRows({ members: [] }, dir).length, 0, "tm engine: memberRows empty");
 })();
 
 // ---------------------------------------------------------------------

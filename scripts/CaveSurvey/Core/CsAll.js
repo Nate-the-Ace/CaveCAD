@@ -79,6 +79,8 @@ include(includeBasePath + "/CsStationSidecar.js");
 include(includeBasePath + "/CsTripPlan.js");
 // After CsTripPlan, whose route text, SVG and clock the card reuses.
 include(includeBasePath + "/CsCalloutCard.js");
+// The teams engine: per-team dates, conflicts, windows, file names.
+include(includeBasePath + "/CsTeams.js");
 // Forecast lookup for the callout card. Independent of the survey engines.
 include(includeBasePath + "/CsWeather.js");
 include(includeBasePath + "/CsCalloutLocal.js");
