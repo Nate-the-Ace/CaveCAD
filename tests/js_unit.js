@@ -33534,8 +33534,10 @@ var ccCtx = function(over) {
         trip: ccTrip,
         contacts: { topName: "Pat Topside", topPhone: "555-0100",
             escalation: "Call the rescue coordinator, 555-0199.", bufferMin: 120 },
-        roster: [ { name: "Ana <b>Ruiz</b>", role: "Lead", squeeze: 14,
-            medical: "Asthma", emergency: "Luis 555-0111" } ],
+        roster: [ { id: "id-ana", name: "Ana <b>Ruiz</b>", role: "Lead", squeeze: 14,
+            medical: "Asthma", emergency: "Luis 555-0111",
+            skills: ["first_aid", "vertical"], skillsNote: "SRT <i>since</i> 2019",
+            known: true } ],
         includeRoster: true, forecast: null, generated: "2026-09-29" };
     for (var k in over) { c[k] = over[k]; }
     return c;
@@ -33555,6 +33557,25 @@ ok(ccHtml.indexOf("Pat Topside") > 0 && ccHtml.indexOf("555-0199") > 0,
     "card: escalation printed");
 ok(ccHtml.indexOf("14:00") > 0, "card: callout time printed");
 
+var ccRosterPart = ccHtml.slice(ccHtml.indexOf("<h2>Roster</h2>"),
+    ccHtml.indexOf("<h2>Schedule</h2>"));
+ok(ccRosterPart.indexOf("<th>Skills</th>") > 0, "card: roster has a Skills column");
+ok(ccRosterPart.indexOf("Vertical (SRT / rope) &middot; First aid trained") > 0 ||
+    ccRosterPart.indexOf("Vertical (SRT / rope) \u00b7 First aid trained") > 0,
+    "card: skills print as checklist labels joined by a middle dot");
+ok(ccRosterPart.indexOf("SRT &lt;i&gt;since&lt;/i&gt; 2019") > 0,
+    "card: the skills note prints, escaped");
+ok(ccRosterPart.indexOf("<i>since") < 0, "card: no raw markup from the skills note");
+ok(ccRosterPart.indexOf("details not on this computer") < 0,
+    "card: a known person has their details");
+var ccUnknown = CsCalloutCard.html(ccRealPlan, ccCtx({ roster: [
+    { id: "", name: "Stranger & Co", role: "", squeeze: null, medical: "",
+      emergency: "", skills: [], skillsNote: "", known: false } ] }));
+var ccUnknownPart = ccUnknown.slice(ccUnknown.indexOf("<h2>Roster</h2>"),
+    ccUnknown.indexOf("<h2>Schedule</h2>"));
+ok(ccUnknownPart.indexOf("Stranger &amp; Co") > 0, "card: an unknown person's name prints, escaped");
+eqs(ccUnknownPart.split("details not on this computer").length, 2,
+    "card: an unknown person prints details not on this computer once");
 var ccNoRoster = CsCalloutCard.html(ccRealPlan, ccCtx({ includeRoster: false }));
 ok(ccNoRoster.indexOf("Ana") < 0, "card: include roster off prints no names");
 ok(ccNoRoster.indexOf("Roster not included") > 0, "card: roster-off line");
@@ -33877,7 +33898,7 @@ ccMaOne({ contacts: { topName: "Pat", topPhone: "", escalation: "x" } },
 ccMaOne({ contacts: { topName: "Pat", topPhone: "555-0100", escalation: "" } },
     "the if-no-word escalation line", "escalation line");
 ccMaOne({ roster: [] },
-    "at least one person on the roster (or untick Include roster)", "roster");
+    "at least one person going (tick Going, or untick Include roster)", "roster");
 
 // Whitespace is not an answer.
 ccMaOne({ contacts: { topName: "  \t", topPhone: "555-0100", escalation: "x" } },
@@ -33889,7 +33910,7 @@ ccMaOne({ contacts: { topName: "Pat", topPhone: "555", escalation: " \n " } },
 ccMaOne({ trip: { startDate: "   ", weatherPlace: "", days: ccMaTrip.days } },
     "start date", "whitespace-only start date");
 ccMaOne({ roster: [ { name: "   ", role: "sketch" } ] },
-    "at least one person on the roster (or untick Include roster)",
+    "at least one person going (tick Going, or untick Include roster)",
     "a roster row with a blank name is not a person");
 
 // The roster only counts when it goes on the card.
@@ -33910,7 +33931,7 @@ eqs(ccMaAll({ contacts: { topName: "Pat", topPhone: "555", escalation: "x",
 var ccMaEvery = CsCalloutCard.missingAll({ startDate: "", weatherPlace: "", days: [] },
     null, { topName: "", topPhone: "", escalation: "" }, [], true);
 eqs(ccMaEvery.join(" | "), [ "start date",
-    "at least one person on the roster (or untick Include roster)",
+    "at least one person going (tick Going, or untick Include roster)",
     "at least one day", "topside contact name", "contact phone",
     "the if-no-word escalation line",
     "at least one stop (add one under Route)" ].join(" | "),
@@ -34287,6 +34308,56 @@ eqs(CsPeople.skillLabels(null).length, 0, "skillLabels: null is no labels");
 eqs(CsPeople.parse(JSON.stringify({ people: [ { name: "Str", skills: "SRT" } ] }))
     .people[0].skillsNote, "SRT", "skills: an old free-text skills string becomes the note");
 
+// Skill groups: presentation only (the popup's collapsible categories).
+var ppGroups = CsPeople.skillsByGroup();
+var ppGroupIds = [];
+for (var ppG = 0; ppG < ppGroups.length; ppG++) { ppGroupIds.push(ppGroups[ppG].id); }
+eqs(ppGroupIds.join(","), "leadership,vertical,rescue,survey,other",
+    "skill groups: in order");
+eqs(ppGroups[0].label + "|" + ppGroups[4].label, "Leadership and comms|Water and digging",
+    "skill groups: labels");
+var ppMembers = function(g) {
+    var ids = [];
+    for (var i = 0; i < ppGroups[g].skills.length; i++) { ids.push(ppGroups[g].skills[i].id); }
+    return ids.join(",");
+};
+eqs(ppMembers(0), "leader,radio", "skill groups: leadership members");
+eqs(ppMembers(1), "vertical,rigging", "skill groups: vertical members");
+eqs(ppMembers(2), "rescue,first_aid,cpr,wfr", "skill groups: rescue members");
+eqs(ppMembers(3), "survey_lead,survey_instruments,survey_book,sketching",
+    "skill groups: survey members, read together");
+eqs(ppMembers(4), "diving,digging", "skill groups: water and digging members");
+var ppHome = {};
+var ppGroupKnown = {};
+for (var ppK = 0; ppK < CsPeople.SKILL_GROUPS.length; ppK++) {
+    ppGroupKnown[CsPeople.SKILL_GROUPS[ppK].id] = true;
+}
+var ppBadGroup = 0;
+for (var ppS = 0; ppS < CsPeople.SKILLS.length; ppS++) {
+    if (ppGroupKnown[CsPeople.SKILLS[ppS].group] !== true) { ppBadGroup++; }
+}
+for (var ppG2 = 0; ppG2 < ppGroups.length; ppG2++) {
+    for (var ppM = 0; ppM < ppGroups[ppG2].skills.length; ppM++) {
+        var ppSid = ppGroups[ppG2].skills[ppM].id;
+        ppHome[ppSid] = (ppHome[ppSid] || 0) + 1;
+    }
+}
+var ppOnce = 0;
+for (var ppS2 = 0; ppS2 < CsPeople.SKILLS.length; ppS2++) {
+    if (ppHome[CsPeople.SKILLS[ppS2].id] === 1) { ppOnce++; }
+}
+eqs(ppBadGroup, 0, "skill groups: every skill names a known group");
+eqs(ppOnce, CsPeople.SKILLS.length, "skill groups: every skill is in exactly one group");
+var ppCounted = { skills: ["survey_book", "sketching", "cpr", "telepathy", "survey_book"] };
+eqs(CsPeople.groupCount(ppCounted, "survey"), 2, "groupCount: two survey skills");
+eqs(CsPeople.groupCount(ppCounted, "rescue"), 1, "groupCount: one rescue skill");
+eqs(CsPeople.groupCount(ppCounted, "vertical"), 0, "groupCount: none ticked is 0");
+eqs(CsPeople.groupCount(ppCounted, "nope"), 0, "groupCount: an unknown group is 0");
+eqs(CsPeople.groupCount(null, "survey"), 0, "groupCount: null person is 0");
+eqs(CsPeople.skillLabels({ skills: ["radio", "leader"] }).join(" | "),
+    "Trip leader | Cave radio / comms",
+    "skillLabels: still flat in the checklist order, not grouped");
+
 // validate: the popup's required fields.
 var ppOkFields = { name: "Ana", role: "", squeeze: "", medical: "None",
     emergency: "Luis 555-0111", skills: [], skillsNote: "" };
@@ -34312,6 +34383,30 @@ eqs(ppV({ squeeze: "-3" }).length, 1, "validate: negative squeeze");
 eqs(ppV({ squeeze: "14in" }).length, 1, "validate: squeeze with units is refused");
 eqs(ppV({ squeeze: "big" }).length, 1, "validate: squeeze words refused");
 eqs(CsPeople.validate(null).length, 3, "validate: null names the three required fields");
+
+// No pure code and no card build touches the per-user file.
+var ppTouched = [];
+var ppKeep = { save: CsPeople.save, load: CsPeople.load, path: CsPeople.path };
+CsPeople.save = function() { ppTouched.push("save"); return "sentinel"; };
+CsPeople.load = function() { ppTouched.push("load"); return { people: [], error: "" }; };
+CsPeople.path = function() { ppTouched.push("path"); return ""; };
+try {
+    var ppPureDir = CsPeople.parse(CsPeople.serialize([ppAna])).people;
+    CsPeople.resolveParty([ { id: "id-ana", name: "Ana Ruiz" } ], ppPureDir);
+    CsPeople.partyOf(ppPureDir, ["id-ana"]);
+    CsPeople.validate({});
+    CsPeople.skillLabels(ppAna);
+    CsPeople.blank();
+    CsCalloutCard.missingAll(ccMaTrip, ccPlan, ccMaContacts,
+        CsPeople.resolveParty([ { id: "id-ana", name: "Ana Ruiz" } ], ppPureDir), true);
+    CsCalloutCard.html(ccRealPlan, ccCtx({ roster:
+        CsPeople.resolveParty([ { id: "id-ana", name: "Ana Ruiz" } ], ppPureDir) }));
+} finally {
+    CsPeople.save = ppKeep.save;
+    CsPeople.load = ppKeep.load;
+    CsPeople.path = ppKeep.path;
+}
+eqs(ppTouched.join(","), "", "people: pure code and the card never touch people.json");
 
 // The trip party in stations.json: names and ids only.
 eqs(CsStationStore.empty().settings.trip.party.length, 0, "trip party: empty by default");

@@ -9,6 +9,7 @@
 // The 'Cs' prefix is mandatory: include() dedupes by basename.
 
 include(includeBasePath + "/CsTripPlan.js");
+include(includeBasePath + "/CsPeople.js");
 
 var CsCalloutCard = {};
 
@@ -82,7 +83,7 @@ var csCardFilled = function(v) {
  * \param trip {startDate, days}
  * \param plan a CsTripPlan plan, or null
  * \param contacts {topName, topPhone, escalation}
- * \param roster [{name, ...}]
+ * \param roster the resolved party [{name, ...}]: at least one person going
  * \param includeRoster false leaves the roster off the card (and out of this)
  * \return [short human strings], empty when the card can be built
  */
@@ -106,7 +107,7 @@ CsCalloutCard.missingAll = function(trip, plan, contacts, roster, includeRoster)
             }
         }
         if (!person) {
-            out.push("at least one person on the roster (or untick Include roster)");
+            out.push("at least one person going (tick Going, or untick Include roster)");
         }
     }
     if (Object.prototype.toString.call(t.days) !== "[object Array]" ||
@@ -269,9 +270,10 @@ var csCardWhen = function(stamp) { return stamp.date + " " + stamp.time; };
  * The card as one HTML page that prints on two sheets.
  *
  * \param ctx {title, survey, resolved, trip, contacts: {topName, topPhone,
- *   escalation, bufferMin}, roster: [{name, role, squeeze, medical,
- *   emergency}], includeRoster, forecast: {days: [{date, high, low,
- *   rainTotal, rainChance}]} | null, generated}
+ *   escalation, bufferMin}, roster: the RESOLVED party
+ *   (CsPeople.resolveParty: [{name, role, squeeze, medical, emergency,
+ *   skills, skillsNote, known}]), includeRoster, forecast: {days: [{date,
+ *   high, low, rainTotal, rainChance}]} | null, generated}
  */
 CsCalloutCard.html = function(plan, ctx) {
     var esc = CsTripPlan.esc;
@@ -311,13 +313,27 @@ CsCalloutCard.html = function(plan, ctx) {
         h.push("<p class=\"warn\">Roster not filled in.</p>");
     } else {
         h.push("<table><tr><th>Name</th><th>Role</th><th>Squeeze limit</th>" +
-            "<th>Medical</th><th>Emergency contact</th></tr>");
+            "<th>Medical</th><th>Emergency contact</th><th>Skills</th></tr>");
         for (var r = 0; r < ctx.roster.length; r++) {
             var p = ctx.roster[r];
+            if (p.known === false) {
+                // On the party, but not in this computer's directory.
+                h.push("<tr><td>" + esc(p.name) + "</td><td colspan=\"5\" " +
+                    "class=\"note\">details not on this computer</td></tr>");
+                continue;
+            }
+            var labels = CsPeople.skillLabels(p);
+            var escLabels = [];
+            for (var sl = 0; sl < labels.length; sl++) { escLabels.push(esc(labels[sl])); }
+            var note = p.skillsNote === undefined || p.skillsNote === null ?
+                "" : String(p.skillsNote);
             h.push("<tr><td>" + esc(p.name) + "</td><td>" + esc(p.role) + "</td><td>" +
                 (typeof p.squeeze === "number" ? esc(p.squeeze) + " in" : "&mdash;") +
                 "</td><td>" + esc(p.medical) + "</td><td>" + esc(p.emergency) +
-                "</td></tr>");
+                "</td><td>" + escLabels.join(" &middot; ") +
+                (note.replace(/\s+/g, "") !== "" ? (escLabels.length > 0 ? "<br>" : "") +
+                    "<span class=\"note\" style=\"font-size:11px\">" + esc(note) +
+                    "</span>" : "") + "</td></tr>");
         }
         h.push("</table>");
     }

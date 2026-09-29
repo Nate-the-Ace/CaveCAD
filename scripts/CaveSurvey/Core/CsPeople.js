@@ -33,21 +33,66 @@ CsPeople.FILE = "people.json";
  * is kept, never dropped, just not shown as a checkbox.
  */
 CsPeople.SKILLS = [
-    { id: "leader", label: "Trip leader" },
-    { id: "vertical", label: "Vertical (SRT / rope)" },
-    { id: "rigging", label: "Rigging and bolting" },
-    { id: "rescue", label: "Cave rescue trained" },
-    { id: "first_aid", label: "First aid trained" },
-    { id: "cpr", label: "CPR trained" },
-    { id: "wfr", label: "Wilderness first responder or higher" },
-    { id: "survey_lead", label: "Survey lead" },
-    { id: "survey_instruments", label: "Survey instruments (compass, clinometer, tape or laser)" },
-    { id: "survey_book", label: "Survey book / data recording" },
-    { id: "sketching", label: "Cave sketching" },
-    { id: "diving", label: "Sump / cave diving" },
-    { id: "radio", label: "Cave radio / comms" },
-    { id: "digging", label: "Digging" }
+    { id: "leader", label: "Trip leader", group: "leadership" },
+    { id: "vertical", label: "Vertical (SRT / rope)", group: "vertical" },
+    { id: "rigging", label: "Rigging and bolting", group: "vertical" },
+    { id: "rescue", label: "Cave rescue trained", group: "rescue" },
+    { id: "first_aid", label: "First aid trained", group: "rescue" },
+    { id: "cpr", label: "CPR trained", group: "rescue" },
+    { id: "wfr", label: "Wilderness first responder or higher", group: "rescue" },
+    { id: "survey_lead", label: "Survey lead", group: "survey" },
+    { id: "survey_instruments",
+        label: "Survey instruments (compass, clinometer, tape or laser)", group: "survey" },
+    { id: "survey_book", label: "Survey book / data recording", group: "survey" },
+    { id: "sketching", label: "Cave sketching", group: "survey" },
+    { id: "diving", label: "Sump / cave diving", group: "other" },
+    { id: "radio", label: "Cave radio / comms", group: "leadership" },
+    { id: "digging", label: "Digging", group: "other" }
 ];
+
+/**
+ * The popup's collapsible categories, in order. Presentation only: a
+ * person still stores a flat list of skill ids, and the card and the
+ * table list labels flat in SKILLS order.
+ */
+CsPeople.SKILL_GROUPS = [
+    { id: "leadership", label: "Leadership and comms" },
+    { id: "vertical", label: "Vertical" },
+    { id: "rescue", label: "Rescue and medical" },
+    { id: "survey", label: "Survey" },
+    { id: "other", label: "Water and digging" }
+];
+
+/** [{id, label, skills: [{id, label, group}]}] in group order, skills in SKILLS order. */
+CsPeople.skillsByGroup = function() {
+    var out = [];
+    for (var g = 0; g < CsPeople.SKILL_GROUPS.length; g++) {
+        var grp = CsPeople.SKILL_GROUPS[g];
+        var members = [];
+        for (var i = 0; i < CsPeople.SKILLS.length; i++) {
+            if (CsPeople.SKILLS[i].group === grp.id) { members.push(CsPeople.SKILLS[i]); }
+        }
+        out.push({ id: grp.id, label: grp.label, skills: members });
+    }
+    return out;
+};
+
+/** How many of a group's skills a person has ticked (unknown ids never count). */
+CsPeople.groupCount = function(person, groupId) {
+    if (person === null || typeof person !== "object" ||
+            Object.prototype.toString.call(person.skills) !== "[object Array]") {
+        return 0;
+    }
+    var have = {};
+    for (var i = 0; i < person.skills.length; i++) { have["#" + String(person.skills[i])] = true; }
+    var n = 0;
+    for (var k = 0; k < CsPeople.SKILLS.length; k++) {
+        if (CsPeople.SKILLS[k].group === groupId && have["#" + CsPeople.SKILLS[k].id] === true) {
+            n++;
+        }
+    }
+    return n;
+};
 
 var csPeopleStr = function(v) {
     return (v === undefined || v === null) ? "" : String(v);
