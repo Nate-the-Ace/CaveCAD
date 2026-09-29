@@ -206,11 +206,15 @@ ExpeditionPlanner.buildTripSection = function(layout) {
     // no date getters: only property()/setProperty(), and only
     // startDateText/setStartDateText below use them. Parented to the
     // main window (null) until the grid takes it.
-    grid.addWidget(WidgetFactory.createWidget(ExpeditionPlanner.basePath,
-        "ExpeditionPlannerDate.ui", null), 0, 1);
+    var dateRow = WidgetFactory.createWidget(ExpeditionPlanner.basePath,
+        "ExpeditionPlannerDate.ui", null);
+    grid.addWidget(dateRow, 0, 1);
     // A fresh panel starts on today; showCalloutSettings replaces it
-    // with the drawing's saved start date, when there is one.
-    ExpeditionPlanner.setStartDateText("");
+    // with the drawing's saved start date, when there is one. Written on
+    // the widget itself: setStartDateText would look it up through the
+    // dock, which is still being built here (see ensureDock).
+    ExpeditionPlanner.writeStartDate(
+        isNull(dateRow) ? null : dateRow.findChild("ExpeditionPlannerCalloutStart"), "");
     ExpeditionPlanner.calloutField(grid, 1, qsTr("Forecast place"), false,
         "ExpeditionPlannerCalloutPlace",
         qsTr("Optional: a nearby town. Blank uses the drawing's location " +
@@ -581,8 +585,21 @@ ExpeditionPlanner.buildDock = function(appWin) {
 
 ExpeditionPlanner.ensureDock = function() {
     if (isNull(csExpeditionPlannerDock)) {
-        csExpeditionPlannerDock = ExpeditionPlanner.buildDock(
-            RMainWindowQt.getMainWindow());
+        // A lookup made WHILE the dock is being built (child(), the
+        // start-date accessors) would land here again with the global
+        // still unset and build the dock again, forever: 0.9.194.0 hung
+        // CaveCAD at startup that way ("Maximum call stack size
+        // exceeded"). Refuse instead; child() turns the throw into null.
+        if (ExpeditionPlanner.building === true) {
+            throw new Error("ExpeditionPlanner: the dock is still being built");
+        }
+        ExpeditionPlanner.building = true;
+        try {
+            csExpeditionPlannerDock = ExpeditionPlanner.buildDock(
+                RMainWindowQt.getMainWindow());
+        } finally {
+            ExpeditionPlanner.building = false;
+        }
     }
     return csExpeditionPlannerDock;
 };
@@ -1764,10 +1781,13 @@ ExpeditionPlanner.startDateText = function() {
     return text;
 };
 
-/** Show `text` (yyyy-mm-dd) in the field; anything else shows today. */
-ExpeditionPlanner.setStartDateText = function(text) {
-    var w = ExpeditionPlanner.child("ExpeditionPlannerCalloutStart");
-    if (w === null) {
+/**
+ * Write `text` (yyyy-mm-dd; anything else means today) into the QDateEdit
+ * `w` itself. Takes the widget so the dock BUILD can initialise the field
+ * without looking it up through the dock, which does not exist yet.
+ */
+ExpeditionPlanner.writeStartDate = function(w, text) {
+    if (isNull(w)) {
         return;
     }
     var t = String(isNull(text) ? "" : text).replace(/^\s+|\s+$/g, "");
@@ -1775,6 +1795,12 @@ ExpeditionPlanner.setStartDateText = function(text) {
         w.setProperty("date", csStoreDateOk(t) ? t : ExpeditionPlanner.todayIso());
     } catch (e) {
     }
+};
+
+/** Show `text` (yyyy-mm-dd) in the field; anything else shows today. */
+ExpeditionPlanner.setStartDateText = function(text) {
+    ExpeditionPlanner.writeStartDate(
+        ExpeditionPlanner.child("ExpeditionPlannerCalloutStart"), text);
 };
 
 // ---------------------------------------------------------------------

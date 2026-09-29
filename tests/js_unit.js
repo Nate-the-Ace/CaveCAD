@@ -34530,6 +34530,60 @@ ok(CsCalloutCard.missingAll(CsStationStore.cleanTrip(qdMissTrip("2026-10-03")), 
 
 
 // ---------------------------------------------------------------------
+// Dock build must never re-enter itself (0.9.194.0 startup hang)
+// ---------------------------------------------------------------------
+
+if (typeof ExpeditionPlanner !== "undefined" &&
+        typeof ExpeditionPlanner.ensureDock === "function") {
+    (function() {
+        var realBuild = ExpeditionPlanner.buildDock;
+        var realDock = csExpeditionPlannerDock;
+        var builds = 0;
+        var inner = "unset";
+        var fakeDock = { findChild: function() { return null; } };
+        // The bug: a build-time child()/setStartDateText lookup called
+        // ensureDock() again while the global was still unset, so the
+        // dock was built again, forever.
+        ExpeditionPlanner.buildDock = function() {
+            builds++;
+            if (builds > 5) {
+                return fakeDock;
+            }
+            inner = ExpeditionPlanner.child("ExpeditionPlannerCalloutStart");
+            return fakeDock;
+        };
+        csExpeditionPlannerDock = null;
+        try {
+            var got = ExpeditionPlanner.ensureDock();
+            eqs(builds, 1, "dd2: a lookup during the build does not rebuild the dock");
+            ok(inner === null, "dd2: a lookup during the build answers null");
+            ok(got === fakeDock, "dd2: the built dock is returned");
+            eqs(ExpeditionPlanner.building, false, "dd2: the build flag is cleared");
+            ExpeditionPlanner.ensureDock();
+            eqs(builds, 1, "dd2: a built dock is reused");
+        } finally {
+            ExpeditionPlanner.buildDock = realBuild;
+            csExpeditionPlannerDock = realDock;
+            ExpeditionPlanner.building = false;
+        }
+        // writeStartDate takes the widget itself, so the build needs no lookup.
+        var wrote = [];
+        var w = { setProperty: function(n, v) { wrote.push(n + "=" + v); } };
+        var realToday = ExpeditionPlanner.todayIso;
+        ExpeditionPlanner.todayIso = function() { return "2026-09-29"; };
+        try {
+            ExpeditionPlanner.writeStartDate(w, "");
+            ExpeditionPlanner.writeStartDate(w, "2026-10-03");
+            ExpeditionPlanner.writeStartDate(null, "2026-10-03");
+        } finally {
+            ExpeditionPlanner.todayIso = realToday;
+        }
+        eqs(wrote.join("|"), "date=2026-09-29|date=2026-10-03",
+            "dd2: writeStartDate writes today for blank and the date otherwise, and ignores a null widget");
+    })();
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
