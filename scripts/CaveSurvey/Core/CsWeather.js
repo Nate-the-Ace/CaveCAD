@@ -23,7 +23,7 @@ CsWeather.forecastUrl = function(lat, lon, startDate, endDate) {
     return "https://api.open-meteo.com/v1/forecast?latitude=" +
         CsWeather.round(lat) + "&longitude=" + CsWeather.round(lon) +
         "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum," +
-        "precipitation_probability_max&temperature_unit=fahrenheit" +
+        "precipitation_probability_max,weather_code&temperature_unit=fahrenheit" +
         "&precipitation_unit=inch&timezone=auto&start_date=" + startDate +
         "&end_date=" + endDate;
 };
@@ -46,7 +46,7 @@ CsWeather.parseGeocode = function(text) {
     return null;
 };
 
-/** \return [{date, high, low, rainTotal, rainChance}] or null */
+/** \return [{date, high, low, rainTotal, rainChance, code}] or null */
 CsWeather.parseForecast = function(text) {
     try {
         var daily = JSON.parse(String(text)).daily;
@@ -60,12 +60,46 @@ CsWeather.parseForecast = function(text) {
                 high: num(daily.temperature_2m_max, i),
                 low: num(daily.temperature_2m_min, i),
                 rainTotal: num(daily.precipitation_sum, i),
-                rainChance: num(daily.precipitation_probability_max, i) });
+                rainChance: num(daily.precipitation_probability_max, i),
+                code: daily.weather_code ? num(daily.weather_code, i) : null });
         }
         return out;
     } catch (e) {
         return null;
     }
+};
+
+// WMO weather code -> icon kind and one-word label. [codes, kind, label]
+CsWeather.CODES = [
+    [[0], "clear", "Clear"], [[1], "clear", "Mostly clear"],
+    [[2], "partly", "Partly cloudy"], [[3], "cloud", "Overcast"],
+    [[45, 48], "fog", "Fog"], [[51, 53, 55, 56, 57], "drizzle", "Drizzle"],
+    [[61, 63], "rain", "Rain"], [[65], "rain", "Heavy rain"],
+    [[66, 67], "rain", "Freezing rain"], [[71, 73, 75, 77], "snow", "Snow"],
+    [[80, 81], "showers", "Showers"], [[82], "showers", "Heavy showers"],
+    [[85, 86], "snow", "Snow showers"], [[95], "thunder", "Thunderstorm"],
+    [[96, 99], "thunder", "Thunderstorm, hail"]
+];
+
+/** \return {kind, label}, or null when code is not a number */
+CsWeather.describeCode = function(code) {
+    if (typeof code !== "number" || code !== code) { return null; }
+    for (var i = 0; i < CsWeather.CODES.length; i++) {
+        var row = CsWeather.CODES[i];
+        for (var k = 0; k < row[0].length; k++) {
+            if (row[0][k] === code) { return { kind: row[1], label: row[2] }; }
+        }
+    }
+    return { kind: "cloud", label: "Cloudy" };
+};
+
+/** For a day with no code: a wet-looking day still gets a rain icon. */
+CsWeather.fallbackKind = function(day) {
+    if ((typeof day.rainChance === "number" && day.rainChance >= 50) ||
+            (typeof day.rainTotal === "number" && day.rainTotal >= 0.25)) {
+        return { kind: "rain", label: "Rain likely" };
+    }
+    return null;
 };
 
 /**

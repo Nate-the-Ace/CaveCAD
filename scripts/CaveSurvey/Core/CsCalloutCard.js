@@ -215,6 +215,53 @@ var csCardWet = function(day) {
             day.rainTotal >= CsCalloutCard.RAIN_INCHES));
 };
 
+/**
+ * A 44x44 black-and-white weather glyph as an inline svg, or "" for an
+ * unknown kind. Static markup; the label only goes into aria-label.
+ * Showers differ from rain: a small sun above the cloud and two short
+ * vertical drops, where rain is three long slanted lines.
+ */
+CsCalloutCard.weatherIconSvg = function(kind, label) {
+    var cloud = "<path d=\"M13 30a6 6 0 0 1 0-12 8 8 0 0 1 15-2 6 6 0 0 1 2 14z\"/>";
+    var lines = function(xs, y1, y2, dx) {
+        var p = "";
+        for (var i = 0; i < xs.length; i++) {
+            p += "<path d=\"M" + xs[i] + " " + y1 + "l" + dx + " " + (y2 - y1) + "\"/>";
+        }
+        return p;
+    };
+    var sun = function(cx, cy, r) {
+        var p = "<circle cx=\"" + cx + "\" cy=\"" + cy + "\" r=\"" + r + "\"/>";
+        var a = [[0, -1], [1, 0], [0, 1], [-1, 0], [1, -1], [1, 1], [-1, 1], [-1, -1]];
+        for (var i = 0; i < a.length; i++) {
+            var f = i < 4 ? 1 : 0.7;
+            p += "<path d=\"M" + (cx + a[i][0] * (r + 3) * f) + " " +
+                (cy + a[i][1] * (r + 3) * f) + "L" + (cx + a[i][0] * (r + 7) * f) + " " +
+                (cy + a[i][1] * (r + 7) * f) + "\"/>";
+        }
+        return p;
+    };
+    var body = {
+        clear: sun(22, 22, 7),
+        partly: sun(15, 14, 5) + "<path d=\"M15 36a5 5 0 0 1 0-10 7 7 0 0 1 13-2 5 5 0 0 1 2 12z\"/>",
+        cloud: cloud,
+        fog: "<path d=\"M13 26a6 6 0 0 1 0-12 8 8 0 0 1 15-2 6 6 0 0 1 2 14z\"/>" +
+            "<path d=\"M10 33h24M14 38h16\"/>",
+        drizzle: cloud + lines([16, 23, 30], 34, 38, 0),
+        rain: cloud + lines([15, 22, 29], 33, 42, -3),
+        showers: sun(30, 11, 4) + "<path d=\"M12 32a5 5 0 0 1 0-10 7 7 0 0 1 13-2 5 5 0 0 1 2 12z\"/>" +
+            lines([16, 24], 36, 41, 0),
+        snow: cloud + "<path d=\"M16 35v6M13 38h6M24 35v6M21 38h6M32 35v6M29 38h6\"/>",
+        thunder: cloud + "<path d=\"M24 31l-5 6h5l-3 6\"/>"
+    }[kind];
+    if (body === undefined) { return ""; }
+    var text = label || kind;
+    return "<svg viewBox=\"0 0 44 44\" width=\"44\" height=\"44\" role=\"img\" " +
+        "aria-label=\"" + CsTripPlan.esc(text) + "\" fill=\"none\" " +
+        "stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" " +
+        "stroke-linejoin=\"round\">" + body + "</svg>";
+};
+
 /** Two-line stamp text: "Sat 2026-10-03 08:00" without a weekday, dates are plain. */
 var csCardWhen = function(stamp) { return stamp.date + " " + stamp.time; };
 
@@ -246,7 +293,9 @@ CsCalloutCard.html = function(plan, ctx) {
         "border:2px solid #a00;padding:4px 8px;margin:6px 0}" +
         ".box{border:3px solid #111;padding:8px 12px;margin:10px 0;font-size:17px}" +
         ".days{display:flex;gap:6px;flex-wrap:wrap}.day{border:1px solid #bbb;" +
-        "padding:4px 8px;min-width:110px}.page2{margin-top:32px}" +
+        "padding:4px 8px;min-width:110px;display:flex;gap:8px;align-items:center}" +
+        ".day .ico{flex:none;line-height:0}" +
+        ".day .txt{font-size:12px}.day .txt b{font-size:14px}.page2{margin-top:32px}" +
         "@media print{.page2{page-break-before:always;margin-top:0}}" +
         CsTripPlan.SIGNS_CSS + "</style></head><body>");
     h.push("<h1>" + esc(ctx.title) + " &mdash; callout card</h1>");
@@ -313,15 +362,25 @@ CsCalloutCard.html = function(plan, ctx) {
             for (var f = 0; f < ctx.forecast.days.length; f++) {
                 if (ctx.forecast.days[f].date === dates[d]) { fd = ctx.forecast.days[f]; }
             }
-            h.push("<div class=\"day\"><b>" + esc(dates[d]) + "</b><br>");
             if (fd === null) {
-                h.push("<span class=\"note\">outside forecast range</span>");
+                h.push("<div class=\"day\"><span class=\"txt\"><span class=\"note\">" +
+                    esc(dates[d]) + "</span><br><span class=\"note\">" +
+                    "outside forecast range</span></span></div>");
             } else {
-                if (csCardWet(fd)) { anyWet = true; }
-                h.push(esc(fd.high) + "&deg; / " + esc(fd.low) + "&deg; F<br>rain " +
-                    esc(fd.rainTotal) + " in, " + esc(fd.rainChance) + "%");
+                var wet = csCardWet(fd);
+                if (wet) { anyWet = true; }
+                var wxd = CsWeather.describeCode(fd.code) || CsWeather.fallbackKind(fd);
+                h.push("<div class=\"day\"" + (wet ? " style=\"border:2px solid #111\"" : "") + ">");
+                if (wxd !== null) {
+                    h.push("<span class=\"ico\">" +
+                        CsCalloutCard.weatherIconSvg(wxd.kind, wxd.label) + "</span>");
+                }
+                h.push("<span class=\"txt\"><span class=\"note\">" + esc(dates[d]) +
+                    "</span><br>" + (wxd !== null ? "<b>" + esc(wxd.label) + "</b><br>" : "") +
+                    esc(fd.high) + "&deg; / " + esc(fd.low) + "&deg; F<br>" +
+                    "<span class=\"note\">rain " + esc(fd.rainTotal) + " in &middot; " +
+                    esc(fd.rainChance) + "%</span></span></div>");
             }
-            h.push("</div>");
         }
         h.push("</div>");
     }

@@ -33542,7 +33542,7 @@ var ccCtx = function(over) {
 var ccHtml = CsCalloutCard.html(ccRealPlan, ccCtx({}));
 var ccSplit = ccHtml.indexOf("class=\"page2\"");
 ok(ccSplit > 0, "card: page 2 marker present");
-ok(ccHtml.slice(0, ccSplit).indexOf("<svg") < 0, "card: page 1 has no route drawing");
+ok(ccHtml.slice(0, ccSplit).indexOf("xmlns=\"http://www.w3.org/2000/svg\"") < 0, "card: page 1 has no route drawing");
 ok(ccHtml.slice(ccSplit).indexOf("<svg") > 0, "card: page 2 has the route drawing");
 ok(ccHtml.indexOf("Roster") < ccHtml.indexOf("Schedule"),
     "card: roster comes before the schedule");
@@ -34086,6 +34086,77 @@ ok(sg3JPacket.indexOf("class=\"legsum\"") > 0, "packet: leg summary line present
 ok(sg3JPacket.indexOf("1 intersection ·") > 0, "packet: counts the intersection");
 ok(!/class="label">A\d+<\/div>/.test(sg3JPacket), "packet: no station-only rows");
 ok(sg3JPacket.indexOf("toward") < 0, "packet: no toward");
+
+// ---------------------------------------------------------------------
+// Callout card -- forecast weather icons
+// ---------------------------------------------------------------------
+
+var wxJson = JSON.stringify({ daily: {
+    time: ["2026-10-03", "2026-10-04", "2026-10-05"],
+    temperature_2m_max: [70, 66, 60], temperature_2m_min: [50, 48, 40],
+    precipitation_sum: [0.8, 0, 0], precipitation_probability_max: [90, 10, 5],
+    weather_code: [63, null, 0] } });
+var wxDays = CsWeather.parseForecast(wxJson);
+eqs(wxDays[0].code, 63, "wx: code parsed");
+eqs(wxDays[1].code, null, "wx: a null code stays null");
+eqs(wxDays[2].code, 0, "wx: code 0 is kept");
+eqs(CsWeather.parseForecast(ccForecastJson)[0].code, null, "wx: missing code array gives null");
+ok(CsWeather.forecastUrl(35, -86, "2026-10-03", "2026-10-04").indexOf("weather_code") > 0,
+    "wx: the request asks for weather_code");
+var wxMap = [[0, "clear", "Clear"], [1, "clear", "Mostly clear"], [2, "partly", "Partly cloudy"],
+    [3, "cloud", "Overcast"], [45, "fog", "Fog"], [48, "fog", "Fog"],
+    [51, "drizzle", "Drizzle"], [57, "drizzle", "Drizzle"], [61, "rain", "Rain"],
+    [63, "rain", "Rain"], [65, "rain", "Heavy rain"], [66, "rain", "Freezing rain"],
+    [67, "rain", "Freezing rain"], [71, "snow", "Snow"], [77, "snow", "Snow"],
+    [80, "showers", "Showers"], [81, "showers", "Showers"], [82, "showers", "Heavy showers"],
+    [85, "snow", "Snow showers"], [86, "snow", "Snow showers"], [95, "thunder", "Thunderstorm"],
+    [96, "thunder", "Thunderstorm, hail"], [99, "thunder", "Thunderstorm, hail"],
+    [42, "cloud", "Cloudy"]];
+for (var wxI = 0; wxI < wxMap.length; wxI++) {
+    var wxD = CsWeather.describeCode(wxMap[wxI][0]);
+    ok(wxD !== null && wxD.kind === wxMap[wxI][1] && wxD.label === wxMap[wxI][2],
+        "wx: code " + wxMap[wxI][0] + " describes as " + wxMap[wxI][2]);
+}
+eqs(CsWeather.describeCode(null), null, "wx: null code has no description");
+eqs(CsWeather.describeCode(undefined), null, "wx: undefined code has no description");
+eqs(CsWeather.describeCode("x"), null, "wx: text code has no description");
+eqs(CsWeather.fallbackKind({ rainChance: 60, rainTotal: 0 }).label, "Rain likely", "wx: chance falls back to rain");
+eqs(CsWeather.fallbackKind({ rainChance: 0, rainTotal: 0.3 }).kind, "rain", "wx: total falls back to rain");
+eqs(CsWeather.fallbackKind({ rainChance: 10, rainTotal: 0 }), null, "wx: a dry day has no fallback");
+var wxKinds = ["clear", "partly", "cloud", "fog", "drizzle", "rain", "showers", "snow", "thunder"];
+var wxSeen = {};
+for (var wxK = 0; wxK < wxKinds.length; wxK++) {
+    var wxSvg = CsCalloutCard.weatherIconSvg(wxKinds[wxK]);
+    ok(wxSvg.indexOf("<svg") === 0 && wxSvg.indexOf("role=\"img\"") > 0 &&
+        wxSvg.indexOf("aria-label=\"") > 0, "wx: icon for " + wxKinds[wxK]);
+    ok(!wxSeen[wxSvg], "wx: icon for " + wxKinds[wxK] + " is distinct");
+    wxSeen[wxSvg] = true;
+}
+eqs(CsCalloutCard.weatherIconSvg("bogus"), "", "wx: unknown kind has no icon");
+var wxCell = function(fc) {
+    var html = CsCalloutCard.html(ccRealPlan, ccCtx({ forecast: fc }));
+    var top = html.slice(0, html.indexOf("class=\"page2\""));
+    var at = top.indexOf("<div class=\"day");
+    return top.slice(at, top.indexOf("</div>", at));
+};
+var wxRain = wxCell({ days: [ { date: "2026-10-03", high: 73, low: 70, rainTotal: 0.54,
+    rainChance: 57, code: 63 } ] }, "2026-10-03");
+ok(wxRain.indexOf("<svg") > 0 && wxRain.indexOf("aria-label=\"Rain\"") > 0 &&
+    wxRain.indexOf(">Rain<") > 0, "wx: code 63 gives the rain icon and label");
+ok(wxRain.indexOf("2px solid #111") > 0, "wx: a wet day gets the heavy border");
+var wxClear = wxCell({ days: [ { date: "2026-10-03", high: 73, low: 70, rainTotal: 0,
+    rainChance: 5, code: 0 } ] }, "2026-10-03");
+ok(wxClear.indexOf(">Clear<") > 0 && wxClear.indexOf("2px solid") < 0, "wx: code 0 shows Clear, thin border");
+var wxFb = wxCell({ days: [ { date: "2026-10-03", high: 70, low: 50, rainTotal: 0.8,
+    rainChance: 90 } ] }, "2026-10-03");
+ok(wxFb.indexOf("<svg") > 0 && wxFb.indexOf("Rain likely") > 0, "wx: a wet day with no code falls back");
+var wxNone = wxCell({ days: [ { date: "2026-10-03", high: 70, low: 50, rainTotal: 0,
+    rainChance: 5 } ] }, "2026-10-03");
+ok(wxNone.indexOf("<svg") < 0 && wxNone.indexOf("70&deg;") > 0, "wx: a dry day with no code has no icon");
+var wxOut = wxCell({ days: [ { date: "2026-10-09", high: 70, low: 50, rainTotal: 0,
+    rainChance: 5, code: 0 } ] }, "2026-10-03");
+ok(wxOut.indexOf("<svg") < 0 && wxOut.indexOf("outside forecast range") > 0, "wx: outside the range has no icon");
+
 
 // ---------------------------------------------------------------------
 // Report.
