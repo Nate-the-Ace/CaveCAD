@@ -3328,7 +3328,7 @@ ExpeditionPlanner.buildSuggestDialog = function(party) {
     // Objectives.
     v.addWidget(new QLabel("<b>" + CsPanel.escapeHtml(qsTr("Objectives")) + "</b>"), 0, 0);
     var stopsT = ExpeditionPlanner.calloutTable(pre + "Stops",
-        [qsTr("Lock"), qsTr("Stop"), qsTr("Currently")], 90, 200);
+        [qsTr("Lock"), qsTr("Stop"), qsTr("Currently")], 150, 240);
     stopsT.toolTip = qsTr("Tick Lock to keep a stop on its team. Unticked stops " +
         "are shared out.");
     setupTable(stopsT);
@@ -3377,7 +3377,7 @@ ExpeditionPlanner.buildSuggestDialog = function(party) {
     v.addWidget(new QLabel("<b>" + CsPanel.escapeHtml(qsTr("People going")) + "</b>"), 0, 0);
     var peopleT = ExpeditionPlanner.calloutTable(pre + "People",
         [qsTr("Lock"), qsTr("Person"), qsTr("Skills"), qsTr("Squeeze (in)"),
-            qsTr("Currently")], 90, 220);
+            qsTr("Currently")], 150, 260);
     peopleT.toolTip = qsTr("Tick Lock to keep someone on their team. Unticked " +
         "people are shared out.");
     setupTable(peopleT);
@@ -3597,7 +3597,7 @@ ExpeditionPlanner.buildSuggestDialog = function(party) {
     close.clicked.connect(function() { dlg.reject(); });
     dlg.setLayout(v);
     try {
-        dlg.resize(560, 680);
+        dlg.resize(660, 900);
     } catch (eSize) {
     }
     return dlg;
