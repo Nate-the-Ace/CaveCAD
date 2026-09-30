@@ -37569,6 +37569,101 @@ ok(ssFeasOk, "ss engine: feasible is false exactly when a hard warning exists");
         "sq engine: CsTeamSplit keeps no copy of the sentence or the fit rule");
 })();
 
+(function() {
+    var esc = CsTripPlan.esc;
+    var issues = [{ text: "Ana <b>Ruiz</b> (limit 12 in) may not fit the tightest passage on " +
+        "the route (10 in near N2)." }];
+    var note = "passage widths on the route are unknown, <squeeze> limits not checked.";
+    var rawIssue = issues[0].text;
+
+    // The single-team card: nothing changes without an issue.
+    var base = CsCalloutCard.html(ccRealPlan, ccCtx({}));
+    eqs(CsCalloutCard.html(ccRealPlan, ccCtx({ squeeze: [] })), base,
+        "sq render: single card byte-identical with no issues");
+    eqs(CsCalloutCard.html(ccRealPlan, ccCtx({ squeeze: null })), base,
+        "sq render: single card byte-identical with a null squeeze");
+    var noteOnly = [];
+    noteOnly.note = note;
+    eqs(CsCalloutCard.html(ccRealPlan, ccCtx({ squeeze: noteOnly })), base,
+        "sq render: single card byte-identical with only a note");
+    eqs(CsCalloutCard.html(ccRealPlan, ccCtx({ squeeze: { issues: [], note: note } })), base,
+        "sq render: single card byte-identical with an object and no issues");
+    var one = CsCalloutCard.html(ccRealPlan, ccCtx({ squeeze: issues }));
+    ok(one.indexOf(rawIssue) < 0 && one.indexOf(esc(rawIssue)) > 0,
+        "sq render: single card prints the issue, escaped");
+    ok(one.indexOf("<p class=\"warn\"><b>" + esc(rawIssue) + "</b></p>") > 0,
+        "sq render: single card issue is a bold warning");
+    ok(one.indexOf("<h2>Roster</h2>") < one.indexOf(esc(rawIssue)) &&
+        one.indexOf(esc(rawIssue)) < one.indexOf("<h2>Schedule</h2>"),
+        "sq render: single card issue sits under the roster");
+    var oneObj = CsCalloutCard.html(ccRealPlan, ccCtx({ squeeze: { issues: issues } }));
+    eqs(oneObj, one, "sq render: single card takes {issues} as well as an array");
+    var oneOff = CsCalloutCard.html(ccRealPlan, ccCtx({ squeeze: issues, includeRoster: false }));
+    eqs(oneOff, CsCalloutCard.html(ccRealPlan, ccCtx({ includeRoster: false })),
+        "sq render: single card roster off prints no person-naming issue");
+
+    // Topside and team file fixture: two teams.
+    var dir = [ { id: "p-ana", name: "Ana <b>Ruiz</b>", role: "Lead", squeeze: 12, medical: "",
+        emergency: "", skills: [], skillsNote: "" } ];
+    var trip = { startDate: "2026-10-03", weatherPlace: "", teams: [
+        { id: "t1", name: "Alpha", goal: "", dayOffset: 0, members: [ { id: "p-ana", name: "Ana" } ],
+          stops: ["A3"], days: [ { entry: "08:00", workHours: 4, night: "out" } ], packing: "" },
+        { id: "t2", name: "Beta", goal: "", dayOffset: 0, members: [ { id: "p-ana", name: "Ana" } ],
+          stops: ["A3"], days: [ { entry: "09:00", workHours: 4, night: "out" } ], packing: "" } ] };
+    var entry = function(i, sq) {
+        var e = { team: trip.teams[i], plan: ccRealPlan,
+            windows: CsTeams.windows(ccRealPlan, trip, trip.teams[i], 120),
+            members: CsTeams.memberRows(trip.teams[i], dir) };
+        if (sq !== undefined) { e.squeeze = sq; }
+        return e;
+    };
+    var topOf = function(sqA, sqB, over) {
+        var c = { title: "Test Cave", trip: trip, teams: [entry(0, sqA), entry(1, sqB)],
+            contacts: { topName: "Pat", topPhone: "555", escalation: "Call." },
+            includeRoster: true, forecast: null, generated: "2026-09-29", fileNames: ["a", "b"] };
+        for (var k in over) { c[k] = over[k]; }
+        return CsCalloutCard.topsideHtml(c);
+    };
+    var plain = topOf();
+    eqs(topOf({ issues: [], note: "" }, null), plain, "sq render: topside unchanged with nothing to say");
+    eqs(topOf({}, { issues: [] }), plain, "sq render: topside unchanged with empty squeeze objects");
+    var top = topOf({ issues: issues, note: "" }, { issues: [], note: note });
+    var alphaAt = top.indexOf("<h3>Alpha</h3>");
+    var betaAt = top.indexOf("<h3>Beta</h3>");
+    var issueAt = top.indexOf("<p class=\"warn\"><b>" + esc(rawIssue) + "</b></p>");
+    var noteAt = top.indexOf("<p class=\"note\">" + esc(note) + "</p>");
+    ok(issueAt > alphaAt && issueAt < betaAt, "sq render: topside issue under Alpha's roster");
+    ok(noteAt > betaAt && noteAt < top.indexOf("<h2>Schedule"),
+        "sq render: topside grey note under Beta's roster");
+    ok(top.indexOf(rawIssue) < 0 && top.indexOf("<squeeze>") < 0, "sq render: topside escapes both");
+    eqs(top.split(esc(rawIssue)).length, 2, "sq render: topside prints the issue once");
+    var off = topOf({ issues: issues, note: "" }, { issues: [], note: note }, { includeRoster: false });
+    ok(off.indexOf(esc(rawIssue)) < 0 && off.indexOf("Ruiz") < 0,
+        "sq render: topside roster off hides the person-naming issue");
+    ok(off.indexOf(esc(note)) > 0, "sq render: topside roster off may keep the grey note");
+
+    // The team file.
+    var teamOf = function(sq) {
+        var e = entry(0);
+        var c = { title: "Test Cave", trip: trip, team: e.team, plan: ccRealPlan, windows: e.windows,
+            members: e.members, forecast: null, generated: "2026-09-29",
+            survey: tpSurvey(), resolved: tpResolved };
+        if (sq !== undefined) { c.squeeze = sq; }
+        return CsCalloutCard.teamHtml(c);
+    };
+    var tPlain = teamOf();
+    eqs(teamOf({ issues: [], note: "" }), tPlain, "sq render: team file unchanged with nothing to say");
+    eqs(teamOf(null), tPlain, "sq render: team file unchanged with a null squeeze");
+    var tf = teamOf({ issues: issues, note: note });
+    var tIssue = tf.indexOf("<p class=\"warn\"><b>" + esc(rawIssue) + "</b></p>");
+    var tNote = tf.indexOf("<p class=\"note\">" + esc(note) + "</p>");
+    ok(tIssue > tf.indexOf("<h2>Members</h2>") && tIssue < tf.indexOf("<h2>Schedule</h2>"),
+        "sq render: team file issue under the members table");
+    ok(tNote > tf.indexOf("<h2>Members</h2>") && tNote < tf.indexOf("<h2>Schedule</h2>"),
+        "sq render: team file grey note under the members table");
+    ok(tf.indexOf(rawIssue) < 0 && tf.indexOf("<squeeze>") < 0, "sq render: team file escapes both");
+})();
+
 // ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------

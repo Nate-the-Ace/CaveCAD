@@ -340,6 +340,43 @@ var csCardRosterTable = function(h, people, withEmergency) {
     h.push("</table>");
 };
 
+/**
+ * A squeeze field as {issues: [text], note}: an array of {text} (a `note`
+ * property on it counts), an object {issues: [{text}], note}, or nothing.
+ * Blank texts are dropped.
+ */
+var csCardSqueezeOf = function(sq) {
+    var out = { issues: [], note: "" };
+    if (sq === null || sq === undefined || typeof sq !== "object") { return out; }
+    var isArr = Object.prototype.toString.call(sq) === "[object Array]";
+    var list = isArr ? sq : sq.issues;
+    list = Object.prototype.toString.call(list) === "[object Array]" ? list : [];
+    for (var i = 0; i < list.length; i++) {
+        var it = list[i];
+        var text = it !== null && typeof it === "object" && it.text !== undefined &&
+            it.text !== null ? String(it.text) : "";
+        if (text.replace(/\s+/g, "") !== "") { out.issues.push(text); }
+    }
+    var note = sq.note === undefined || sq.note === null ? "" : String(sq.note);
+    out.note = note.replace(/\s+/g, "") === "" ? "" : note;
+    return out;
+};
+
+/**
+ * The squeeze block: each issue as a bold warning (like the same-day
+ * warnings), then the grey unknown-width note. withIssues false leaves
+ * the person-naming lines out (a roster-off copy).
+ */
+var csCardSqueeze = function(h, sq, withIssues) {
+    var esc = CsTripPlan.esc;
+    if (withIssues) {
+        for (var i = 0; i < sq.issues.length; i++) {
+            h.push("<p class=\"warn\"><b>" + esc(sq.issues[i]) + "</b></p>");
+        }
+    }
+    if (sq.note !== "") { h.push("<p class=\"note\">" + esc(sq.note) + "</p>"); }
+};
+
 /** The schedule table under `heading` (markup), then its warnings. */
 var csCardSchedule = function(h, win, heading) {
     var esc = CsTripPlan.esc;
@@ -499,7 +536,10 @@ var csCardRope = function(h, plan) {
  *   escalation, bufferMin}, roster: the RESOLVED party
  *   (CsPeople.resolveParty: [{name, role, squeeze, medical, emergency,
  *   skills, skillsNote, known}]), includeRoster, forecast: {days: [{date,
- *   high, low, rainTotal, rainChance}]} | null, generated}
+ *   high, low, rainTotal, rainChance}]} | null, generated, squeeze
+ *   (optional): [{text}] (a `note` property allowed) or {issues: [{text}],
+ *   note}}. The squeeze block prints ONLY when there is an issue and the
+ *   roster is on, so a card without one is byte-identical to before.
  */
 CsCalloutCard.html = function(plan, ctx) {
     var esc = CsTripPlan.esc;
@@ -522,6 +562,10 @@ CsCalloutCard.html = function(plan, ctx) {
         h.push("<p class=\"warn\">Roster not filled in.</p>");
     } else {
         csCardRosterTable(h, ctx.roster, true);
+    }
+    var squeeze = csCardSqueezeOf(ctx.squeeze);
+    if (ctx.includeRoster !== false && squeeze.issues.length > 0) {
+        csCardSqueeze(h, squeeze, true);
     }
 
     csCardSchedule(h, win, "<h2>Schedule</h2>");
@@ -582,9 +626,12 @@ var csCardAnd = function(names) {
  * to act. No route drawing and no directions (those are in the team files).
  *
  * \param ctx {title, trip (startDate, teams), teams: [{team, plan, windows
- *   (CsTeams.windows), members (CsTeams.memberRows)}], contacts: {topName,
- *   topPhone, escalation, bufferMin}, includeRoster, forecast, generated,
- *   fileNames: [the team files, in team order]}
+ *   (CsTeams.windows), members (CsTeams.memberRows), squeeze (optional):
+ *   {issues: [{text}], note}}], contacts: {topName, topPhone, escalation,
+ *   bufferMin}, includeRoster, forecast, generated, fileNames: [the team
+ *   files, in team order]}
+ *   A team's squeeze issues and note print under its roster; a roster-off
+ *   copy prints only the notes (no person), each after the team's name.
  */
 CsCalloutCard.topsideHtml = function(ctx) {
     var esc = CsTripPlan.esc;
@@ -634,6 +681,13 @@ CsCalloutCard.topsideHtml = function(ctx) {
     h.push("<h2>Roster</h2>");
     if (ctx.includeRoster === false) {
         h.push("<p class=\"note\">Roster not included on this copy.</p>");
+        for (t = 0; t < teams.length; t++) {
+            var offSq = csCardSqueezeOf(teams[t].squeeze);
+            if (offSq.note !== "") {
+                h.push("<p class=\"note\">" + esc(csCardTeamName(teams[t].team, t)) + ": " +
+                    esc(offSq.note) + "</p>");
+            }
+        }
     } else {
         for (t = 0; t < teams.length; t++) {
             h.push("<h3>" + esc(csCardTeamName(teams[t].team, t)) + "</h3>");
@@ -643,6 +697,7 @@ CsCalloutCard.topsideHtml = function(ctx) {
             } else {
                 csCardRosterTable(h, members, true);
             }
+            csCardSqueeze(h, csCardSqueezeOf(teams[t].squeeze), true);
         }
         var clash = CsTeams.sameDayConflicts(trip);
         for (var c = 0; c < clash.length; c++) {
@@ -683,7 +738,8 @@ CsCalloutCard.topsideHtml = function(ctx) {
  * \param ctx {title, trip, team, plan, windows (CsTeams.windows), members
  *   (CsTeams.memberRows), contacts: {topName, topPhone, escalation,
  *   bufferMin} (missing prints "Contacts not filled in."), forecast,
- *   generated, survey, resolved}
+ *   generated, survey, resolved, squeeze (optional): {issues: [{text}],
+ *   note}, printed under the members table}
  */
 CsCalloutCard.teamHtml = function(ctx) {
     var esc = CsTripPlan.esc;
@@ -708,6 +764,7 @@ CsCalloutCard.teamHtml = function(ctx) {
     } else {
         csCardRosterTable(h, members, false);
     }
+    csCardSqueeze(h, csCardSqueezeOf(ctx.squeeze), true);
 
     csCardSchedule(h, csCardWin(ctx.windows), "<h2>Schedule</h2>");
     // Who topside is: the trip-level contacts, never a member's own.
