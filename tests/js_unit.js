@@ -168,6 +168,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsTeams.js",
     "scripts/CaveSurvey/Core/CsSqueeze.js",
     "scripts/CaveSurvey/Core/CsTeamSplit.js",
+    "scripts/CaveSurvey/Core/CsPushRank.js",
     "scripts/CaveSurvey/Core/CsWeather.js",
     "scripts/CaveSurvey/Core/CsCalloutLocal.js",
     "scripts/CaveSurvey/Core/CsPeople.js",
@@ -38089,6 +38090,480 @@ ok(ssFeasOk, "ss engine: feasible is false exactly when a hard warning exists");
         FQ.restore();
     }
 })();
+
+// ---------------------------------------------------------------------
+// What's left to push -- the lead ranking engine (CsPushRank)
+// ---------------------------------------------------------------------
+
+// Every fixture is hand-placed: resolved positions are written out, so
+// each expected score below is the spec's formula on round numbers.
+// Units are feet unless a test says otherwise.
+function prFix(legs, pos, extra) {
+    var s = CsModel.newSurvey();
+    var rl = [];
+    for (var i = 0; i < legs.length; i++) {
+        var sh = CsModel.newShot();
+        sh.from = legs[i][0];
+        sh.to = legs[i][1];
+        sh.distance = 10;
+        sh.trip = legs[i][2] || 0;
+        sh.notes = legs[i][3] || "";
+        // A pitch is found from the shot's clino (CsPitch reads
+        // resolved.legs), so a plumb leg says so: 5th entry -90.
+        sh.inclination = legs[i][4] || 0;
+        s.shots.push(sh);
+        rl.push({ from: sh.from, to: sh.to, shot: sh });
+    }
+    var st = {};
+    for (var name in pos) {
+        if (!Object.prototype.hasOwnProperty.call(pos, name)) { continue; }
+        var p = pos[name];
+        st[name] = (p.length > 2 && p[2] !== null) ? { x: p[0], y: p[1], z: p[2] } :
+            { x: p[0], y: p[1] };
+    }
+    var e = extra || {};
+    for (var k in e) {
+        if (Object.prototype.hasOwnProperty.call(e, k)) { s[k] = e[k]; }
+    }
+    return { survey: s, resolved: { stations: st, legs: rl, loops: [] } };
+}
+var prCfg = { paceFtPerMin: 100, leadWorkMin: 5 };
+var prRank = function(fix, extra) {
+    var o = { survey: fix.survey, resolved: fix.resolved, config: prCfg };
+    var e = extra || {};
+    for (var k in e) {
+        if (Object.prototype.hasOwnProperty.call(e, k)) { o[k] = e[k]; }
+    }
+    return CsPushRank.rank(o);
+};
+var prLead = function(result, station) {
+    for (var i = 0; i < result.leads.length; i++) {
+        if (result.leads[i].station === station) { return result.leads[i]; }
+    }
+    return null;
+};
+var prSig = function(result, station, signal) {
+    var l = prLead(result, station);
+    return l === null ? undefined : l.signals[signal];
+};
+var prOrder = function(result) {
+    var o = [];
+    for (var i = 0; i < result.leads.length; i++) { o.push(result.leads[i].station); }
+    return o.join(",");
+};
+var prHas = function(list, text) {
+    for (var i = 0; i < list.length; i++) {
+        if (String(list[i]).indexOf(text) >= 0) { return true; }
+    }
+    return false;
+};
+var prTexts = function(result) {
+    var t = result.notes.slice(0);
+    for (var i = 0; i < result.leads.length; i++) {
+        var l = result.leads[i];
+        t = t.concat(l.reasons);
+        for (var k in l.signals) {
+            if (Object.prototype.hasOwnProperty.call(l.signals, k) && l.signals[k] !== null) {
+                t.push(l.signals[k].text);
+            }
+        }
+    }
+    return t;
+};
+
+// (a) cost. A chain east to A5 (400 ft), a long branch south to C2
+// (10000 ft), a spur with a 40 ft plumb pitch at A3 and a walk to P2,
+// and an island X1-X2 nobody can reach. Pace 100 ft/min, 5 min work.
+var prCost = prFix([
+    ["A1", "A2"], ["A2", "A3"], ["A3", "A4"], ["A4", "A5"],
+    ["A1", "C1"], ["C1", "C2"],
+    ["A3", "P1", 0, "", -90], ["P1", "P2"],
+    ["X1", "X2"]
+], {
+    A1: [0, 0, 0], A2: [100, 0, 0], A3: [200, 0, 0], A4: [300, 0, 0], A5: [400, 0, 0],
+    C1: [0, -5000, 0], C2: [0, -10000, 0],
+    P1: [200, 0, -40], P2: [200, 100, -40],
+    X1: [1000, 1000, 0], X2: [1100, 1000, 0]
+});
+var prC = prRank(prCost);
+eqs(prSig(prC, "A5", "cost").score, 100, "pr engine: cost 13 min (<= 15) scores 100");
+eqs(prSig(prC, "A5", "cost").text, "4 min in, no pitch, no rope", "pr engine: cost text, no pitch");
+eqs(prLead(prC, "A5").minutes, 13, "pr engine: minutes is the whole plan (4 in + 5 work + 4 out)");
+near(prSig(prC, "C2", "cost").score, 15.6, 1e-9, "pr engine: 205 min scores (240-205)/225*100");
+eqs(prSig(prC, "C2", "cost").text, "100 min in, no pitch, no rope", "pr engine: far cost text");
+near(prSig(prC, "P2", "cost").score, 80.0, 1e-9,
+    "pr engine: pitch route 26.3 min scores 95.0 minus 15 for the pitch");
+eqs(prSig(prC, "P2", "cost").text, "14 min in, 1 pitch, 50 ft of rope",
+    "pr engine: pitch cost text names the pitch and the rope to pack");
+ok(prSig(prC, "X2", "cost") === null && prSig(prC, "X1", "cost") === null,
+    "pr engine: an unreachable lead has no cost");
+ok(prLead(prC, "X2").minutes === null, "pr engine: an unreachable lead has no minutes");
+eqs(prOrder(prC).split(",").slice(-2).join(","), "X1,X2", "pr engine: unreachable leads are listed last");
+ok(prHas(prC.notes, "X2 is not on the surveyed line"), "pr engine: an unreachable lead gets a note");
+ok(prOrder(prC).indexOf("A5") < prOrder(prC).indexOf("C2"),
+    "pr engine: the near lead outranks the far one");
+eqs(prSig(prC, "A5", "blank").score, 100, "pr engine: clear ahead 500 ft scores 100");
+eqs(prSig(prC, "A5", "blank").text, "nothing surveyed for more than 500 ft ahead",
+    "pr engine: clear ahead text");
+ok(prSig(prC, "A5", "connect") === null, "pr engine: nothing ahead is no connection");
+
+// (b) blank. A4 looks east; a passage from A1 swings round south and
+// crosses the line of sight at x (more than 3 hops from A4).
+var prBlankFix = function(x) {
+    var p = { A1: [0, 0, 0], A2: [100, 0, 0], A3: [200, 0, 0], A4: [300, 0, 0],
+        S1: [0, -400, 0], S2: [x, -400, 0], S3: [x, -100, 0], S4: [x, 100, 0] };
+    return prFix([["A1", "A2"], ["A2", "A3"], ["A3", "A4"], ["A1", "S1"],
+        ["S1", "S2"], ["S2", "S3"], ["S3", "S4"]], p);
+};
+var prB340 = prRank(prBlankFix(640));
+eqs(prSig(prB340, "A4", "blank").score, 100, "pr engine: a hit at 340 ft scores min(100, 340/300*100)");
+eqs(prSig(prB340, "A4", "blank").text, "nothing surveyed for 340 ft ahead", "pr engine: blank text at 340 ft");
+ok(prSig(prB340, "A4", "connect") === null, "pr engine: a hit beyond 150 ft is no connection");
+var prB200 = prRank(prBlankFix(500));
+near(prSig(prB200, "A4", "blank").score, 66.7, 1e-9, "pr engine: a hit at 200 ft scores 200/300*100");
+eqs(prSig(prB200, "A4", "blank").text, "nothing surveyed for 200 ft ahead", "pr engine: blank text at 200 ft");
+// Plumb arriving legs: no bearing, so no direction signals.
+var prPlumb = prRank(prFix([["A1", "A2"], ["A2", "A3"], ["A2", "A4"]],
+    { A1: [0, 0, 0], A2: [100, 0, 0], A3: [100, 0, -50], A4: [101, 0, 50] }));
+ok(prSig(prPlumb, "A3", "blank") === null && prSig(prPlumb, "A3", "connect") === null,
+    "pr engine: a plumb arriving leg gives no blank and no connect");
+ok(prSig(prPlumb, "A4", "blank") === null,
+    "pr engine: a leg with plan run under 5% of its length is plumb");
+// No arriving leg: the first station's note is its only lead.
+var prStart = prRank(prFix([["A1", "A2"]], { A1: [0, 0, 0], A2: [100, 0, 0] },
+    { startNote: "LEAD up the slope" }));
+ok(prLead(prStart, "A1") !== null, "pr engine: the start station's lead note makes it a lead");
+ok(prSig(prStart, "A1", "blank") === null && prSig(prStart, "A1", "connect") === null,
+    "pr engine: a lead with no arriving leg has no direction signals");
+eqs(prSig(prStart, "A1", "cost").text, "0 min in, no pitch, no rope",
+    "pr engine: a lead at the start costs only the work time");
+eqs(prLead(prStart, "A1").minutes, 5, "pr engine: at the start the plan is the 5 min of work");
+// Positions missing: no direction signals, never a guess.
+var prNoPos = prRank({ survey: prBlankFix(640).survey, resolved: { stations: {} } });
+ok(prSig(prNoPos, "A4", "blank") === null && prSig(prNoPos, "A4", "cost") === null,
+    "pr engine: no positions gives no blank and no cost");
+
+// (c) connect. A4 looks east; a loop A1-N1-N2 comes back and N2-N3
+// crosses the line of sight x-300 ft ahead, 800 ft by the survey.
+var prConFix = function(x, extra) {
+    return prFix([["A1", "A2", 0], ["A2", "A3", 0], ["A3", "A4", 0, "LEAD draft"],
+        ["A1", "N1", 1], ["N1", "N2", 1], ["N2", "N3", 1]],
+        { A1: [0, 0, 0], A2: [100, 0, 0], A3: [200, 0, 0], A4: [300, 0, 0],
+            N1: [0, 100, 0], N2: [x, 100, 0], N3: [x, -600, -100] },
+        extra || { trips: [CsModel.newTrip(), CsModel.newTrip()] });
+};
+var prK = prRank(prConFix(400));
+eqs(prSig(prK, "A4", "connect").score, 60, "pr engine: connect at 100 ft scores 100 - 100/150*60");
+eqs(prSig(prK, "A4", "connect").text, "points at N2, 100 ft away (800 ft by the surveyed way)",
+    "pr engine: connect text names the station and both distances");
+near(prSig(prK, "A4", "blank").score, 33.3, 1e-9, "pr engine: the same hit leaves 100/300 blank");
+eqs(prSig(prK, "A4", "blank").text, "nothing surveyed for 100 ft ahead", "pr engine: blank text at 100 ft");
+var prK40 = prRank(prConFix(340));
+eqs(prSig(prK40, "A4", "connect").score, 84, "pr engine: connect at 40 ft scores 100 - 40/150*60");
+eqs(prSig(prK40, "A4", "connect").text, "points at N2, 40 ft away (740 ft by the surveyed way)",
+    "pr engine: connect text at 40 ft");
+eqs(prSig(prK40, "A4", "blank").score, 0, "pr engine: a hit within 60 ft zeroes blank");
+eqs(prSig(prK40, "A4", "blank").text, "surveyed passage 40 ft ahead",
+    "pr engine: a zeroed blank says what is ahead");
+// The lead's own passage (within 3 hops) is never a hit: A4 looks west
+// along A1-A2, 20 ft to the side, 3 legs back.
+var prOwn = prRank(prFix([["A1", "A2"], ["A2", "A3"], ["A3", "A4"]],
+    { A1: [0, 0, 0], A2: [200, 0, 0], A3: [200, 20, 0], A4: [100, 20, 0] }));
+eqs(prSig(prOwn, "A4", "blank").score, 100, "pr engine: legs within 3 hops are not ahead");
+ok(prSig(prOwn, "A4", "connect") === null, "pr engine: the lead's own passage is no connection");
+// Past 3 hops but only 260 ft round by the survey (< 3 x 100 ft): a
+// passage parallel to itself, not a connection; still ground ahead.
+var prPar = prRank(prFix([["H1", "H2"], ["H2", "H3"], ["H3", "H4"], ["H4", "H5"],
+    ["H5", "H6"], ["H6", "H7"]],
+    { H1: [0, 0, 0], H2: [20, 0, 0], H3: [60, 0, 0], H4: [60, 60, 0], H5: [60, 120, 0],
+        H6: [0, 120, 0], H7: [0, 100, 0] }));
+ok(prSig(prPar, "H7", "connect") === null,
+    "pr engine: a hit near by the survey (< 3x straight) is no connection");
+near(prSig(prPar, "H7", "blank").score, 33.3, 1e-9, "pr engine: the parallel hit still limits blank");
+// A metre survey measures the same cave the same way (thresholds in ft).
+var prKm = (function() {
+    var f = prConFix(400);
+    var s = f.resolved.stations;
+    for (var n in s) {
+        if (!Object.prototype.hasOwnProperty.call(s, n)) { continue; }
+        s[n].x /= CsUnits.FEET_PER_METER;
+        s[n].y /= CsUnits.FEET_PER_METER;
+        s[n].z /= CsUnits.FEET_PER_METER;
+    }
+    f.survey.distanceUnit = "m";
+    return prRank(f);
+})();
+eqs(JSON.stringify(prLead(prKm, "A4").signals), JSON.stringify(prLead(prK, "A4").signals),
+    "pr engine: a metre survey scores and words the same as its feet twin");
+
+// (d) elevation: T2 highest (0), T3 deepest (-100), T4 middle (-45),
+// T5 20 ft below the top; range 100, mid -50.
+var prElevFix = function(zs) {
+    return prFix([["T1", "T2", 0, "LEAD high"], ["T2", "T5", 0, ""], ["T1", "T4"], ["T1", "T3"],
+        ["T2", "T6", 0, "LEAD over"], ["T6", "T7"]],
+        { T1: [0, 0, zs[0]], T2: [100, 0, zs[1]], T5: [200, 0, zs[2]], T4: [0, 100, zs[3]],
+            T3: [0, -100, zs[4]], T6: [100, 100, zs[5]], T7: [100, 200, zs[6]] });
+};
+var prE = prRank(prElevFix([-50, 0, -20, -45, -100, null, -30]));
+eqs(prSig(prE, "T7", "elevation").score, 40, "pr engine: 30 ft below the top scores 100*20/50");
+eqs(prSig(prE, "T7", "elevation").text, "30 ft below the highest surveyed station",
+    "pr engine: nearer the top says how far below it");
+eqs(prSig(prE, "T5", "elevation").score, 60, "pr engine: 20 ft below the top scores 60");
+eqs(prSig(prE, "T3", "elevation").score, 100, "pr engine: the lowest station scores 100");
+eqs(prSig(prE, "T3", "elevation").text, "at the deepest surveyed level", "pr engine: deepest text");
+eqs(prSig(prE, "T4", "elevation").score, 10, "pr engine: 5 ft off the middle scores 10");
+eqs(prSig(prE, "T4", "elevation").text, "near the middle elevation", "pr engine: middle text");
+ok(prSig(prE, "T6", "elevation") === null, "pr engine: a lead with no z has no elevation");
+var prE2 = prRank(prElevFix([-50, 0, -20, -45, -100, -5, -70]));
+eqs(prSig(prE2, "T6", "elevation").score, 90, "pr engine: 5 ft below the highest scores 90");
+eqs(prSig(prE2, "T7", "elevation").text, "30 ft above the deepest surveyed station",
+    "pr engine: nearer the bottom says how far above it");
+var prE3 = prRank(prFix([["U1", "U2"], ["U2", "U3", 0, "LEAD down"], ["U3", "U4"]],
+    { U1: [0, 0, 0], U2: [100, 0, 10], U3: [200, 0, 0], U4: [300, 0, 20] }));
+eqs(prSig(prE3, "U3", "elevation").score, 100, "pr engine: the lowest of a 20 ft range scores 100");
+var prE4 = prRank(prFix([["U1", "U2"], ["U2", "U3", 0, "LEAD down"], ["U3", "U4"]],
+    { U1: [0, 0, 0], U2: [100, 0, 10], U3: [200, 0, 0], U4: [300, 0, 19.5] }));
+ok(prSig(prE4, "U3", "elevation") === null, "pr engine: a range under 20 ft gives no elevation");
+eqs(prSig(prE, "T2", "elevation").text, "at the highest surveyed level", "pr engine: highest text");
+
+// (e) recency: four trips, leads last touched by trips 0..3.
+var prRecFix = function(dates) {
+    var trips = [];
+    for (var i = 0; i < 4; i++) {
+        var t = CsModel.newTrip();
+        t.date = dates === undefined ? "" : dates[i];
+        trips.push(t);
+    }
+    return prFix([["R0", "R1", 0], ["R0", "R5", 0], ["R1", "R2", 1], ["R1", "R3", 2],
+        ["R1", "R4", 3]],
+        { R0: [0, 0, 0], R1: [100, 0, 0], R5: [0, 100, 0], R2: [200, 0, 0],
+            R3: [100, 100, 0], R4: [100, -100, 0] }, { trips: trips });
+};
+var prR = prRank(prRecFix());
+eqs(prSig(prR, "R5", "recency").score, 100, "pr engine: undated, the oldest trip scores 100");
+eqs(prSig(prR, "R5", "recency").text, "surveyed on the oldest trip (trip 1 of 4)",
+    "pr engine: oldest trip text");
+near(prSig(prR, "R2", "recency").score, 66.7, 1e-9, "pr engine: trip 2 of 4 scores 2/3");
+eqs(prSig(prR, "R2", "recency").text, "last surveyed on trip 2 of 4", "pr engine: middle trip text");
+eqs(prSig(prR, "R4", "recency").score, 0, "pr engine: the newest trip scores 0");
+eqs(prSig(prR, "R4", "recency").text, "surveyed on the newest trip (trip 4 of 4)",
+    "pr engine: newest trip text");
+var prDates = ["2024-01-10", "2025-03-20", "2026-06-01", "2026-09-29"];
+var prRd = prRank(prRecFix(prDates), { today: "2026-10-15" });
+eqs(prSig(prRd, "R2", "recency").score, 75, "pr engine: 18 whole months scores 18/24*100");
+eqs(prSig(prRd, "R2", "recency").text, "last surveyed 2025-03, 18 months ago",
+    "pr engine: dated text (the 15th is before the 20th: 18, not 19)");
+eqs(prSig(prRd, "R5", "recency").score, 100, "pr engine: 33 months is capped at 100");
+near(prSig(prRd, "R3", "recency").score, 16.7, 1e-9, "pr engine: 4 months scores 4/24*100");
+eqs(prSig(prRd, "R4", "recency").text, "last surveyed 2026-09, less than a month ago",
+    "pr engine: under a month says so");
+eqs(prSig(prRd, "R4", "recency").score, 0, "pr engine: under a month scores 0");
+var prRnt = prRank(prRecFix(prDates));
+eqs(prSig(prRnt, "R5", "recency").text, "surveyed on the oldest trip (trip 1 of 4)",
+    "pr engine: dates without today rank by trip order");
+var prRmix = prRank(prRecFix(["2024-01-10", "", "2026-06-01", "2026-09-29"]), { today: "2026-10-15" });
+eqs(prSig(prRmix, "R2", "recency").text, "last surveyed on trip 2 of 4",
+    "pr engine: one undated trip means trip order for every lead");
+ok(prSig(prC, "A5", "recency") === null, "pr engine: a single undated trip gives no recency");
+var prR1 = prRank(prFix([["A1", "A2"]], { A1: [0, 0, 0], A2: [100, 0, 0] },
+    { date: "2025-09-01" }), { today: "2026-09-29" });
+eqs(prSig(prR1, "A2", "recency").text, "last surveyed 2025-09, 12 months ago",
+    "pr engine: a single dated trip still measures time since");
+var prRows = CsStationTable.rows(prRecFix().survey, prRecFix().resolved, {});
+for (var pri = 0; pri < prRows.length; pri++) {
+    if (prRows[pri].station === "R2") { prRows[pri].trips = []; }
+}
+var prRnone = prRank(prRecFix(), { rows: prRows });
+ok(prSig(prRnone, "R2", "recency") === null, "pr engine: a lead with no trips has no recency");
+
+// (f) hints, whole words, case-insensitive.
+var prHintFix = prFix([["K0", "K1", 0, "LEAD draft, going"], ["K0", "K2", 0, "lead, too tight"],
+    ["K0", "K3", 0, "lead big but choked"], ["K0", "K4", 0, "lead"],
+    ["K0", "K5", 0, "lead, tightly packed"], ["K0", "K6", 0, "LEAD DRAFT"]],
+    { K0: [0, 0, 0], K1: [100, 0, 0], K2: [0, 100, 0], K3: [-100, 0, 0], K4: [0, -100, 0],
+        K5: [100, 100, 0], K6: [-100, -100, 0] });
+var prH = prRank(prHintFix);
+eqs(prSig(prH, "K1", "hints").score, 100, "pr engine: two positive words score 50 + 50");
+eqs(prSig(prH, "K1", "hints").text, "note says: draft, going", "pr engine: hints text lists the words");
+eqs(prSig(prH, "K2", "hints").score, 25, "pr engine: one negative word scores 25");
+eqs(prSig(prH, "K2", "hints").text, "note says: tight", "pr engine: negative hint text");
+eqs(prSig(prH, "K3", "hints").score, 50, "pr engine: mixed words cancel");
+eqs(prSig(prH, "K3", "hints").text, "note says: big, choked", "pr engine: mixed words in note order");
+ok(prSig(prH, "K4", "hints") === null, "pr engine: no hint word gives null");
+ok(prSig(prH, "K5", "hints") === null, "pr engine: whole words only (tightly is not tight)");
+eqs(prSig(prH, "K6", "hints").score, 75, "pr engine: hint words match case-insensitively");
+var prHc = prRank(prHintFix, { positive: ["tightly"], negative: [] });
+eqs(prSig(prHc, "K5", "hints").text, "note says: tightly", "pr engine: custom hint words are used");
+ok(prSig(prHc, "K1", "hints") === null, "pr engine: custom lists replace the defaults");
+var prHrows = CsStationTable.rows(prHintFix.survey, prHintFix.resolved, {});
+for (pri = 0; pri < prHrows.length; pri++) {
+    if (prHrows[pri].station === "K4") { prHrows[pri].team = "felt a breeze"; }
+}
+eqs(prSig(prRank(prHintFix, { rows: prHrows }), "K4", "hints").text, "note says: breeze",
+    "pr engine: team notes are read for hints");
+ok(CsPushRank.POSITIVE.join(",") ===
+    "draft,wind,airflow,breeze,going,continues,big,borehole,booming,echo" &&
+    CsPushRank.NEGATIVE.join(",") === "tight,ended,choked,sump,pinches,blocked,dead",
+    "pr engine: the default hint words are the spec's");
+
+// (g) presets, overrides, normalisation. A4 at 100 ft from N2 has all
+// six: cost 100, blank 33.3, connect 60, elevation 100, recency 100,
+// hints 75.
+var prA4 = prLead(prK, "A4");
+eqs(prA4.signals.elevation.text, "at the highest surveyed level", "pr engine: fixture A4 is highest");
+eqs(prA4.signals.recency.score, 100, "pr engine: fixture A4 is on the oldest of two trips");
+eqs(prA4.signals.hints.score, 75, "pr engine: fixture A4's note has one positive word");
+eqs(prA4.total, 76.9, "pr engine: balanced total is the weighted mean");
+eqs(prLead(prRank(prConFix(400), { preset: "quick" }), "A4").total, 85.6, "pr engine: quick preset total");
+eqs(prLead(prRank(prConFix(400), { preset: "potential" }), "A4").total, 69.6,
+    "pr engine: potential preset total");
+eqs(prLead(prRank(prConFix(400), { weights: { cost: 25, blank: 20, connect: 15, elevation: 10,
+    recency: 15, hints: 15 } }), "A4").total, 76.9, "pr engine: weights on a 0-100 scale normalise the same");
+eqs(prLead(prRank(prConFix(400), { weights: { cost: 0 } }), "A4").total, 69.2,
+    "pr engine: a partial weight override keeps the preset's other weights");
+eqs(prLead(prK, "N3").signals.hints, null, "pr engine: fixture N3 has no hints");
+eqs(prLead(prRank(prConFix(400), { weights: { cost: 1, blank: 1, connect: 10, elevation: 1,
+    recency: 1, hints: 10 } }), "N3").total, 73.4,
+    "pr engine: missing signals drop out of the normalisation");
+eqs(JSON.stringify(CsPushRank.PRESETS), JSON.stringify({
+    quick: { cost: 0.5, blank: 0.1, connect: 0.1, elevation: 0.05, recency: 0.1, hints: 0.15 },
+    potential: { cost: 0.1, blank: 0.25, connect: 0.25, elevation: 0.15, recency: 0.1, hints: 0.15 },
+    balanced: { cost: 0.25, blank: 0.2, connect: 0.15, elevation: 0.1, recency: 0.15, hints: 0.15 }
+}), "pr engine: the presets are the spec's");
+eqs(JSON.stringify(CsPushRank.weightsFor("nonsense")), JSON.stringify(CsPushRank.PRESETS.balanced),
+    "pr engine: an unknown preset is balanced");
+var prW = CsPushRank.weightsFor("quick");
+prW.cost = 99;
+eqs(CsPushRank.PRESETS.quick.cost, 0.5, "pr engine: weightsFor hands out a copy");
+// Every total is the mean of its signals as weighted.
+var prTotalsOk = true;
+var prAllRuns = [prC, prK, prK40, prE, prR, prRd, prH];
+for (var prr = 0; prr < prAllRuns.length; prr++) {
+    for (pri = 0; pri < prAllRuns[prr].leads.length; pri++) {
+        var prL = prAllRuns[prr].leads[pri];
+        var prWb = CsPushRank.PRESETS.balanced;
+        var prSum = 0, prWs = 0;
+        for (var prk in prWb) {
+            if (prL.signals[prk] !== null) {
+                prSum += prWb[prk] * prL.signals[prk].score;
+                prWs += prWb[prk];
+            }
+        }
+        var prExp = prWs > 0 ? Math.round(prSum / prWs * 10) / 10 : 0;
+        if (Math.abs(prExp - prL.total) > 0.051) { prTotalsOk = false; }
+    }
+}
+ok(prTotalsOk, "pr engine: every total is sum(w*score)/sum(w) over its non-null signals");
+
+// (h) sorting, ties, statuses.
+var prTieFix = prFix([["K0", "B10"], ["K0", "B2"]],
+    { K0: [0, 0, 0], B2: [100, 0, 0], B10: [-100, 0, 0] });
+var prT = prRank(prTieFix);
+eqs(prOrder(prT), "B2,B10", "pr engine: equal totals fall back to natural station order");
+eqs(prLead(prT, "B2").total, prLead(prT, "B10").total, "pr engine: the tie fixture really ties");
+eqs(prLead(prT, "B2").status, "open", "pr engine: an unmarked lead is open");
+eqs(prOrder(prRank(prTieFix, { statuses: { B2: "done" } })), "B10", "pr engine: done is hidden");
+eqs(prOrder(prRank(prTieFix, { statuses: { B2: "skip" } })), "B10", "pr engine: skip is hidden");
+var prTd = prRank(prTieFix, { statuses: { B2: "done" }, includeDone: true });
+eqs(prOrder(prTd), "B2,B10", "pr engine: includeDone shows done leads");
+eqs(prLead(prTd, "B2").status, "done", "pr engine: a shown done lead says done");
+var prTa = prRank(prTieFix, { statuses: { B10: "assigned", B2: "pushed" } });
+eqs(prOrder(prTa), "B2,B10", "pr engine: assigned and pushed stay visible");
+eqs(prLead(prTa, "B10").status + "," + prLead(prTa, "B2").status, "assigned,pushed",
+    "pr engine: assigned and pushed carry their status");
+var prTrows = CsStationTable.rows(prTieFix.survey, prTieFix.resolved, {});
+for (pri = 0; pri < prTrows.length; pri++) { prTrows[pri].status = ""; }
+for (pri = 0; pri < prTrows.length; pri++) {
+    if (prTrows[pri].station === "B10") { prTrows[pri].status = "done"; }
+}
+eqs(prOrder(prRank(prTieFix, { rows: prTrows })), "B2", "pr engine: a status already on the rows is honoured");
+eqs(prOrder(prRank(prTieFix, { rows: prTrows, statuses: { B2: "skip" } })), "",
+    "pr engine: statuses apply on top of the rows' own");
+var prStill = true;
+for (pri = 0; pri < prTrows.length; pri++) {
+    if (prTrows[pri].station === "B2" && prTrows[pri].status !== "") { prStill = false; }
+}
+ok(prStill, "pr engine: the caller's rows are not modified");
+eqs(prOrder(prRank(prFix([["K0", "J1", 0, "junk"]], { K0: [0, 0, 0], J1: [1, 0, 0] },
+    { fixed: { J1: { x: 0, y: 0, z: 0 } } }))), "",
+    "pr engine: a station that is neither a lead nor an open end is not ranked");
+ok(prLead(prRank(prFix([["K0", "J1", 0, "the Big Room"], ["J1", "J2"]],
+    { K0: [0, 0, 0], J1: [1, 0, 0], J2: [2, 0, 0] }), { keyword: "big" }), "J1") !== null,
+    "pr engine: the lead keyword is honoured when the engine builds rows");
+
+// (i) determinism.
+eqs(JSON.stringify(prRank(prConFix(400))), JSON.stringify(prRank(prConFix(400))),
+    "pr engine: the same input ranks the same, byte for byte");
+eqs(JSON.stringify(prRank(prCost)), JSON.stringify(prC), "pr engine: ranking twice is stable");
+
+// (j) degenerate input never throws.
+var prNoThrow = true;
+var prBad = [undefined, null, {}, { survey: null }, { survey: CsModel.newSurvey() },
+    { survey: CsModel.newSurvey(), resolved: null },
+    { survey: prCost.survey, resolved: null },
+    { survey: prCost.survey, resolved: { stations: { A5: { x: "a", y: null } } } },
+    { survey: prCost.survey, resolved: prCost.resolved, rows: "junk", weights: "x",
+        today: "yesterday", positive: "draft", negative: 7, preset: 12, statuses: 3 },
+    { survey: prCost.survey, resolved: prCost.resolved, weights: { cost: -5, blank: NaN } },
+    { survey: prCost.survey, resolved: prCost.resolved, weights: { cost: 0, blank: 0,
+        connect: 0, elevation: 0, recency: 0, hints: 0 } },
+    { survey: { shots: [null, {}, { from: "A", to: "A" }] }, resolved: { stations: null } }];
+for (pri = 0; pri < prBad.length; pri++) {
+    try {
+        var prOut = CsPushRank.rank(prBad[pri]);
+        if (Object.prototype.toString.call(prOut.leads) !== "[object Array]" ||
+                Object.prototype.toString.call(prOut.notes) !== "[object Array]") {
+            prNoThrow = false;
+        }
+    } catch (prErr) {
+        prNoThrow = false;
+    }
+}
+ok(prNoThrow, "pr engine: degenerate input never throws and always answers {leads, notes}");
+eqs(CsPushRank.rank(undefined).leads.length, 0, "pr engine: nothing in, no leads out");
+var prZ = prRank(prCost, { rows: [{ station: "Z9", kinds: ["lead"], trips: [], degree: 0,
+    notes: [], noteText: "lead", leadNotes: [], keyText: "lead", z: null, loops: [], flags: [] }] });
+eqs(prOrder(prZ), "Z9", "pr engine: a caller's row is ranked as given");
+eqs(prLead(prZ, "Z9").total, 0, "pr engine: a lead with no computable signal totals 0");
+ok(prHas(prZ.notes, "Z9 has nothing to rank it by"), "pr engine: and gets a note saying so");
+var prZero = prRank(prCost, { weights: { cost: 0, blank: 0, connect: 0, elevation: 0,
+    recency: 0, hints: 0 } });
+eqs(prLead(prZero, "A5").total, 0, "pr engine: all-zero weights total 0");
+
+// (k) reasons: strongest weighted contribution first, the cost always.
+eqs(prA4.reasons.join(" | "), [prA4.signals.cost.text, prA4.signals.recency.text,
+    prA4.signals.hints.text, prA4.signals.elevation.text].join(" | "),
+    "pr engine: reasons are the four strongest contributions, strongest first");
+var prA4c = prLead(prRank(prConFix(400), { weights: { cost: 0 } }), "A4");
+eqs(prA4c.reasons.join(" | "), [prA4.signals.recency.text, prA4.signals.hints.text,
+    prA4.signals.elevation.text, prA4.signals.connect.text, prA4.signals.cost.text].join(" | "),
+    "pr engine: the cost text is always included, after the four strongest");
+ok(prHas(prLead(prC, "X2").reasons, "not on the surveyed line"),
+    "pr engine: an unreachable lead's reasons say why it has no cost");
+
+// (l) no coordinates, no long decimals, in any text. The connect fixture
+// is moved to UTM-like coordinates: the ranking must not change and no
+// text may carry a piece of a position.
+var prFar = prConFix(400);
+for (var prn in prFar.resolved.stations) {
+    if (!Object.prototype.hasOwnProperty.call(prFar.resolved.stations, prn)) { continue; }
+    prFar.resolved.stations[prn].x += 512345.678;
+    prFar.resolved.stations[prn].y += 4012345.678;
+    prFar.resolved.stations[prn].z += 1234.5;
+}
+var prFarR = prRank(prFar);
+eqs(JSON.stringify(prFarR), JSON.stringify(prK), "pr engine: moving the cave changes nothing");
+var prAllTexts = [];
+prAllRuns.push(prFarR, prB340, prB200, prPlumb, prStart, prOwn, prPar, prE2, prRnt, prZ, prKm);
+for (prr = 0; prr < prAllRuns.length; prr++) { prAllTexts = prAllTexts.concat(prTexts(prAllRuns[prr])); }
+var prClean = prAllTexts.length > 50;
+for (pri = 0; pri < prAllTexts.length; pri++) {
+    var prTx = String(prAllTexts[pri]);
+    if (/\d\.\d/.test(prTx) || /512|4012|1234/.test(prTx) || /\(\s*-?\d+(\.\d+)?\s*,\s*-?\d/.test(prTx)) {
+        prClean = false;
+    }
+}
+ok(prClean, "pr engine: no text carries a coordinate or a long decimal");
 
 // ---------------------------------------------------------------------
 // Report.

@@ -85,6 +85,8 @@ include(includeBasePath + "/CsTeams.js");
 include(includeBasePath + "/CsSqueeze.js");
 // Suggest split: proposes each team's people and stops (CsTeams, CsTripPlan, CsPeople).
 include(includeBasePath + "/CsTeamSplit.js");
+// What's left to push: ranks every lead with reasons (CsStationTable, CsTripPlan).
+include(includeBasePath + "/CsPushRank.js");
 // Forecast lookup for the callout card. Independent of the survey engines.
 include(includeBasePath + "/CsWeather.js");
 include(includeBasePath + "/CsCalloutLocal.js");
