@@ -158,6 +158,13 @@
       "shots": []
     },
     {
+      "id": "expedition-planner-sop",
+      "title": "Plan a trip with the Expedition Planner (the standard way)",
+      "class": "process",
+      "file": "expedition-planner-sop.html",
+      "shots": []
+    },
+    {
       "id": "3d-view",
       "title": "3D View",
       "class": "tool",
