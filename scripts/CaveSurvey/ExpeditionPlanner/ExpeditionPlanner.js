@@ -2406,8 +2406,11 @@ ExpeditionPlanner.teamLabel = function(team, index0) {
     return n === "" ? "Team " + (index0 + 1) : n;
 };
 
-/** "3 people · 2 stops · 2 days", with a same-day mark when conflicted. */
-ExpeditionPlanner.teamSummary = function(team, hasConflict) {
+/**
+ * "3 people · 2 stops · 2 days", with a same-day mark when conflicted and
+ * a squeeze mark when a member may not fit the route (teamSqueeze).
+ */
+ExpeditionPlanner.teamSummary = function(team, hasConflict, hasSqueeze) {
     var t = (team !== null && typeof team === "object") ? team : {};
     var count = function(v) {
         return Object.prototype.toString.call(v) === "[object Array]" ? v.length : 0;
@@ -2418,14 +2421,20 @@ ExpeditionPlanner.teamSummary = function(team, hasConflict) {
     var text = (p === 1 ? qsTr("1 person") : qsTr("%1 people").arg(p)) + " · " +
         (st === 1 ? qsTr("1 stop") : qsTr("%1 stops").arg(st)) + " · " +
         (d === 1 ? qsTr("1 day") : qsTr("%1 days").arg(d));
-    return hasConflict === true ? text + " · ⚠ " + qsTr("same-day overlap") : text;
+    if (hasConflict === true) {
+        text += " · ⚠ " + qsTr("same-day overlap");
+    }
+    if (hasSqueeze === true) {
+        text += " · ⚠ " + qsTr("squeeze");
+    }
+    return text;
 };
 
 /** A team section's header title: "Alpha — 3 people · 2 stops · 2 days". */
-ExpeditionPlanner.teamHeaderTitle = function(team, index0, hasConflict) {
-    return (hasConflict === true ? "⚠ " : "") +
+ExpeditionPlanner.teamHeaderTitle = function(team, index0, hasConflict, hasSqueeze) {
+    return (hasConflict === true || hasSqueeze === true ? "⚠ " : "") +
         ExpeditionPlanner.teamLabel(team, index0) + " — " +
-        ExpeditionPlanner.teamSummary(team, hasConflict);
+        ExpeditionPlanner.teamSummary(team, hasConflict, hasSqueeze);
 };
 
 /** "Ana Ruiz is on Team 1 and Team 2 on 2026-10-04". */
@@ -2493,10 +2502,14 @@ ExpeditionPlanner.refreshTeamHeaders = function() {
             continue;
         }
         var conflicted = bad["#" + s.teams[i].name] === true;
+        // Its squeeze line, and the mark when a member may not fit.
+        var sq = ExpeditionPlanner.teamSqueeze(s.teams[i]);
+        var squeezed = sq.issues.length > 0;
+        ExpeditionPlanner.showTeamSqueeze(i + 1, sq);
         try {
             h.text = CsPanel.headerText(ExpeditionPlanner.teamHeaderTitle(s.teams[i], i,
-                conflicted), open[s.teams[i].id] === true);
-            h.styleSheet = csEpHeaderStyle(conflicted);
+                conflicted, squeezed), open[s.teams[i].id] === true);
+            h.styleSheet = csEpHeaderStyle(conflicted || squeezed);
         } catch (eHead) {
         }
     }
@@ -2843,6 +2856,18 @@ ExpeditionPlanner.buildTeamSection = function(parent, layout, team, index0, opts
         v.addWidget(new QLabel("<span style=\"color:#777\">" + CsPanel.escapeHtml(
             qsTr("Tick Going under People to offer someone here.")) + "</span>"), 0, 0);
     }
+    // Who may not fit this team's route: filled (and shown) by
+    // refreshTeamHeaders, which runs after every build of the sections.
+    var squeeze = new QLabel("");
+    squeeze.objectName = pre + "Squeeze";
+    try {
+        squeeze.wordWrap = true;
+        squeeze.toolTip = qsTr("From the survey's recorded passage widths (LRUD) " +
+            "and each member's squeeze limit. See Who fits where.");
+    } catch (eSqWrap) {
+    }
+    squeeze.visible = false;
+    v.addWidget(squeeze, 0, 0);
 
     // Schedule.
     v.addWidget(new QLabel(ExpeditionPlanner.labelText(
@@ -4302,8 +4327,12 @@ ExpeditionPlanner.missingText = function(items, teams) {
     return qsTr("Missing: %1").arg(parts.join("; "));
 };
 
-/** The status line after a build: files, warnings, files left in place, problems. */
-ExpeditionPlanner.buildStatusText = function(written, conflicts, leftovers, problems) {
+/**
+ * The status line after a build: files, warnings, files left in place,
+ * problems, then the squeeze warnings (optional: ["Team 2: Ana Ruiz
+ * (limit 12 in) may not fit ..."]).
+ */
+ExpeditionPlanner.buildStatusText = function(written, conflicts, leftovers, problems, squeeze) {
     var text = qsTr("Saved %1").arg(written.join(", "));
     if (problems.length > 0) {
         text += " (" + problems.join("; ") + ")";
@@ -4318,6 +4347,10 @@ ExpeditionPlanner.buildStatusText = function(written, conflicts, leftovers, prob
     if (leftovers.length > 0) {
         text += ". " + qsTr("Left in place from an earlier build: %1").arg(leftovers.join(", "));
     }
+    var sq = Object.prototype.toString.call(squeeze) === "[object Array]" ? squeeze : [];
+    if (sq.length > 0) {
+        text += ". " + qsTr("Squeeze: %1").arg(sq.join("; "));
+    }
     return text;
 };
 
@@ -4329,14 +4362,18 @@ ExpeditionPlanner.buildStatusText = function(written, conflicts, leftovers, prob
  * callout-card.html plus CsTeams.fileName per team. Deletes nothing.
  *
  * \param form readCalloutForm()'s {trip, contacts, roster, includeRoster, pace}
+ * Every renderer gets its team's squeeze (teamSqueeze: {issues, note}),
+ * and res.squeeze lists the issues as "Team: sentence" for the status
+ * line. A squeeze never stops a build.
+ *
  * \return {written: [names], missing, problems, conflicts, leftovers,
- *   error, planned: [{team, plan}], paceUsed}
+ *   squeeze, error, planned: [{team, plan}], paceUsed}
  */
 ExpeditionPlanner.buildFiles = function(form, folder) {
     var s = ExpeditionPlanner.state;
     var teams = s.teams;
     var res = { written: [], missing: [], problems: [], conflicts: [], leftovers: [],
-        error: "", planned: [], paceUsed: 0 };
+        squeeze: [], error: "", planned: [], paceUsed: 0 };
     var pace = (form.pace === undefined) ? null : form.pace;
     if (pace !== null && isNaN(pace)) {
         res.error = qsTr("The walking pace must be a number of feet per minute " +
@@ -4387,6 +4424,15 @@ ExpeditionPlanner.buildFiles = function(form, folder) {
     var title = CsCave.nameOf(s.docPath) || qsTr("Cave");
     var generated = ExpeditionPlanner.today();
     var names = ExpeditionPlanner.buildFileList(teams);
+    // Each team's squeeze: printed on its sheets and named in the status line.
+    var squeeze = [];
+    for (var q = 0; q < teams.length; q++) {
+        squeeze.push(ExpeditionPlanner.teamSqueeze(teams[q]));
+        for (var qi = 0; qi < squeeze[q].issues.length; qi++) {
+            res.squeeze.push(ExpeditionPlanner.teamLabel(teams[q], q) + ": " +
+                squeeze[q].issues[qi].text);
+        }
+    }
     var pages = [];
     if (teams.length === 1) {
         // Today's card exactly, from the one team.
@@ -4399,7 +4445,7 @@ ExpeditionPlanner.buildFiles = function(form, folder) {
             trip: single, contacts: form.contacts,
             roster: CsTeams.memberRows(one, s.people),
             includeRoster: form.includeRoster, forecast: forecast,
-            generated: generated }) });
+            generated: generated, squeeze: squeeze[0] }) });
     } else {
         var buffer = typeof form.contacts.bufferMin === "number" ? form.contacts.bufferMin : 120;
         var ctxTeams = [];
@@ -4407,7 +4453,8 @@ ExpeditionPlanner.buildFiles = function(form, folder) {
             ctxTeams.push({ team: teams[c], plan: res.planned[c].plan,
                 windows: CsTeams.windows(res.planned[c].plan, trip, teams[c], buffer),
                 members: CsTeams.memberRows(teams[c], s.people),
-                route: { survey: s.drawn.survey, resolved: s.drawn.resolved } });
+                route: { survey: s.drawn.survey, resolved: s.drawn.resolved },
+                squeeze: squeeze[c] });
         }
         pages.push({ name: names[0], html: CsCalloutCard.topsideHtml({ title: title,
             trip: trip, teams: ctxTeams, contacts: form.contacts,
@@ -4418,7 +4465,8 @@ ExpeditionPlanner.buildFiles = function(form, folder) {
                 trip: trip, team: teams[f], plan: res.planned[f].plan,
                 windows: ctxTeams[f].windows, members: ctxTeams[f].members,
                 contacts: form.contacts, forecast: forecast, generated: generated,
-                survey: s.drawn.survey, resolved: s.drawn.resolved }) });
+                survey: s.drawn.survey, resolved: s.drawn.resolved,
+                squeeze: squeeze[f] }) });
         }
     }
     for (var w = 0; w < pages.length; w++) {
@@ -4476,7 +4524,7 @@ ExpeditionPlanner.buildCard = function() {
         return "";
     }
     ExpeditionPlanner.calloutSay(ExpeditionPlanner.buildStatusText(res.written,
-        res.conflicts, res.leftovers, res.problems));
+        res.conflicts, res.leftovers, res.problems, res.squeeze));
     var path = folder + "/callout-card.html";
     try {
         // Same call CaveShelf.reveal ships.

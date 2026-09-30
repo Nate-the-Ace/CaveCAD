@@ -36039,9 +36039,12 @@ var tmFakeQtShared = null;
         var P = W.prototype;
         var quiet = ["setContentsMargins", "setSpacing", "addStretch", "addSpacing",
             "setHorizontalSpacing", "setVerticalSpacing", "setColumnStretch", "setRowStretch",
-            "setHorizontalHeaderLabels", "setMinimumHeight", "setMaximumHeight",
+            "setMinimumHeight", "setMaximumHeight",
             "setMaximumWidth", "setMinimumWidth", "setEditable", "setFrameShape", "raise", "show"];
         for (var q = 0; q < quiet.length; q++) { P[quiet[q]] = noop; }
+        // Tables remember their header labels and column count (the squeeze matrix reads them).
+        P.setHorizontalHeaderLabels = function(l) { this.headerLabels = l.slice(0); };
+        P.setColumnCount = function(n) { this.columnCount = n; };
         P.addWidget = function(w) { this.kids.push(w); };
         P.addLayout = function(l) { this.kids.push(l); };
         P.setLayout = function(l) { this.lay = l; this.kids.push(l); };
@@ -36255,7 +36258,7 @@ var tmFakeQtShared = null;
         EP.basePath = "/fake";
         try {
             var builders = ["buildTripSection", "buildRosterSection", "buildTeamsSection",
-                "buildEscalationSection", "buildCardSection"];
+                "buildFitSection", "buildEscalationSection", "buildCardSection"];
             for (var b = 0; b < builders.length; b++) {
                 try {
                     EP[builders[b]](new QVBoxLayout());
@@ -37662,6 +37665,429 @@ ok(ssFeasOk, "ss engine: feasible is false exactly when a hard warning exists");
     ok(tNote > tf.indexOf("<h2>Members</h2>") && tNote < tf.indexOf("<h2>Schedule</h2>"),
         "sq render: team file grey note under the members table");
     ok(tf.indexOf(rawIssue) < 0 && tf.indexOf("<squeeze>") < 0, "sq render: team file escapes both");
+})();
+
+// ---------------------------------------------------------------------
+// Squeeze view -- the panel: fitRows and its texts, teamSqueeze and its
+// cache, the header mark, extra stops, the Build status line and the
+// renderer contexts, and the "Who fits where" section on FAKE widgets
+// only (a real widget in a -no-gui run can crash at exit and pop a
+// dialog on the desktop). The sidecar and saveTeams are stubbed.
+// ---------------------------------------------------------------------
+(function() {
+    var EP = ExpeditionPlanner;
+    var fns = ["fitRows", "fitCellText", "fitHeaderText", "fitTightestText", "teamSqueeze",
+        "teamSqueezeHtml", "addFitStop", "buildFitSection", "fillFit", "fitMaybeRefresh",
+        "fitAddClicked", "fitRefreshClicked"];
+    var absent = [];
+    for (var f = 0; f < fns.length; f++) {
+        if (typeof EP[fns[f]] !== "function") { absent.push(fns[f]); }
+    }
+    eqs(absent.join(","), "", "sq panel: the squeeze panel functions exist");
+    if (absent.length > 0) { return; }
+    var threw = function(fn) {
+        try { fn(); return false; } catch (e) { return true; }
+    };
+    var ana = ssP("p-ana", "Ana Ruiz");
+    var cy = ssP("p-cy", "Cy Diaz");
+    var bo = ssP("p-bo", "Bo Chen");
+    var walk = ssP("", "Walk In");
+    var party = [ana, cy, walk];
+    var realState = EP.state;
+    var realChild = EP.child;
+    var realSave = EP.saveTeams;
+    var realEnsure = EP.ensureDock;
+    var realGuard = EP.planGuard;
+    var realMatrix = CsSqueeze.matrix;
+    var realForTeam = CsSqueeze.forTeam;
+    var teamsNow = function() {
+        return [ { id: "sq-t1", name: "Alpha", goal: "", dayOffset: 0, members: [ana, cy],
+                stops: ["N2", "E4"], days: [ssDay(8)], packing: "" },
+            { id: "sq-t2", name: "Beta", goal: "", dayOffset: 0, members: [bo],
+                stops: ["E4", "N1"], days: [ssDay(6)], packing: "" } ];
+    };
+    var fresh = function() {
+        EP.state = { drawn: { survey: ssSv, resolved: ssRes }, docPath: "/fake/Cave/Cave.dxf",
+            store: { settings: { pace: { paceFtPerMin: 10 },
+                trip: { startDate: "2026-10-03", party: party, teams: [] } } },
+            loadError: "", stations: ["E1", "E2", "E3", "E4", "N1", "N2", "S0", "W1", "W2", "X1", "X2"],
+            plan: null, planShown: null, people: ssDir, peopleError: "", rosterRows: [],
+            filling: false, teams: teamsNow(), teamOpen: {}, activeTeamId: "",
+            teamMessage: "", removedCount: 0, packingPending: null, suggestUndo: null,
+            fitOpen: false, fitExtra: [], squeezeCache: null };
+        return EP.state;
+    };
+    try {
+        EP.child = function() { return null; };
+        EP.saveTeams = function() { return ""; };
+        EP.planGuard = function() { return true; };
+        var s = fresh();
+
+        // The texts.
+        eqs(EP.fitCellText("fits") + "|" + EP.fitCellText("no") + "|" + EP.fitCellText("unknown") +
+            "|" + EP.fitCellText("unreachable"), "fits|NO|?|-", "sq panel: cell texts fits, NO, ?, -");
+        eqs(EP.fitCellText("junk"), "?", "sq panel: an unknown cell kind reads ?");
+        eqs(EP.fitHeaderText({ name: "Ana Ruiz", limit: 14 }), "Ana Ruiz (14 in)",
+            "sq panel: a header is the name and the limit");
+        eqs(EP.fitHeaderText({ name: "Ana Ruiz", limit: null }), "Ana Ruiz (no limit)",
+            "sq panel: a person without a limit says no limit");
+        eqs(EP.fitHeaderText({ name: "Oda", limit: 12.34 }), "Oda (12.3 in)",
+            "sq panel: a header limit is rounded to 1 decimal");
+        eqs(EP.fitTightestText({ reachable: true, inches: 9.666, near: "A6" }), "9.7 in near A6",
+            "sq panel: tightest text is the width and where");
+        eqs(EP.fitTightestText({ reachable: true, inches: null, near: null }), "not measured",
+            "sq panel: tightest text with no width is not measured");
+        eqs(EP.fitTightestText({ reachable: false, inches: null, near: null }),
+            "not on the surveyed line", "sq panel: tightest text of an unreachable stop");
+        ok(!threw(function() { EP.fitTightestText(null); EP.fitHeaderText(null); EP.fitCellText(null); }),
+            "sq panel: the text helpers never throw");
+
+        // fitRows: team stops in team order, deduped, then the extra ones.
+        var fr = EP.fitRows(s, party, ["W2", "N2", "X2", " "]);
+        eqs(fr.rows.map(function(r) { return r.stop; }).join(","), "N2,E4,N1,W2,X2",
+            "sq panel: rows are every team stop in team order, deduped, then the extra stops");
+        eqs(fr.headers.join("|"), "Stop|Tightest passage|Ana Ruiz (12 in)|Cy Diaz (8 in)|Walk In (no limit)",
+            "sq panel: headers are Stop, Tightest passage, then each person going");
+        eqs(fr.rows[0].tightestText + "|" + fr.rows[0].cells.join(",") + "|" + fr.rows[0].cellKinds.join(","),
+            "10 in near N2|NO,fits,?|no,fits,unknown", "sq panel: the N2 row");
+        eqs(fr.rows[1].tightestText + "|" + fr.rows[1].cells.join(","), "not measured|?,?,?",
+            "sq panel: an unmeasured stop is ? for everyone");
+        ok(fr.rows[2].tightestText.indexOf("48 in near ") === 0 && fr.rows[2].cells.join(",") === "fits,fits,?",
+            "sq panel: the N1 row");
+        eqs(fr.rows[4].tightestText + "|" + fr.rows[4].cells.join(",") + "|" + fr.rows[4].cellKinds.join(","),
+            "not on the surveyed line|-,-,-|unreachable,unreachable,unreachable",
+            "sq panel: an unreachable stop is - for everyone");
+        ok(fr.matrix !== null && fr.matrix.stops.length === 5 && fr.matrix.people.length === 3,
+            "sq panel: fitRows hands back the engine's matrix");
+        var none = EP.fitRows({ teams: [] }, [], []);
+        ok(none.rows.length === 0 && none.headers.join("|") === "Stop|Tightest passage",
+            "sq panel: nothing to show is two headers and no rows");
+        ok(!threw(function() { EP.fitRows(null, null, null); }), "sq panel: fitRows never throws");
+        var seenOpts = null;
+        CsSqueeze.matrix = function(sv, res, stops, people, dir, opts) {
+            seenOpts = { sv: sv, res: res, stops: stops, people: people, dir: dir, opts: opts };
+            return realMatrix(sv, res, stops, people, dir, opts);
+        };
+        try {
+            EP.fitRows(s, party, []);
+        } finally {
+            CsSqueeze.matrix = realMatrix;
+        }
+        ok(seenOpts !== null && seenOpts.sv === ssSv && seenOpts.res === ssRes && seenOpts.dir === ssDir &&
+            seenOpts.people === party && seenOpts.opts.unit === "ft" && seenOpts.opts.config.paceFtPerMin === 10,
+            "sq panel: fitRows gives the engine the drawn survey, the directory, the party, unit and pace");
+
+        // teamSqueeze: issues, note, nothing, never throws, the cache.
+        var t1 = s.teams[0];
+        var sq1 = EP.teamSqueeze(t1);
+        eqs(sq1.issues.length + "|" + (sq1.issues.length > 0 ? sq1.issues[0].text : "") + "|" + sq1.note,
+            "1|Ana Ruiz (limit 12 in) may not fit the tightest passage on the route (10 in near N2).|",
+            "sq panel: teamSqueeze names the member who may not fit");
+        var sqE = EP.teamSqueeze({ id: "x", name: "X", members: [ana], stops: ["E4"] });
+        eqs(sqE.issues.length + "|" + sqE.note, "0|" + CsSqueeze.NOTE,
+            "sq panel: teamSqueeze of an unmeasured route is the grey note");
+        var sq0 = EP.teamSqueeze({ id: "y", name: "Y", members: [ana], stops: [] });
+        eqs(sq0.issues.length + "|" + sq0.note, "0|", "sq panel: a team without stops has nothing to say");
+        eqs(JSON.stringify(EP.teamSqueeze(null)), "{\"issues\":[],\"note\":\"\"}",
+            "sq panel: teamSqueeze of nothing");
+        ok(!threw(function() { EP.teamSqueeze({ stops: "x", members: 4 }); }), "sq panel: teamSqueeze never throws");
+        s.drawn = null;
+        eqs(EP.teamSqueeze(t1).issues.length, 0, "sq panel: no survey, no squeeze warning");
+        s = fresh();
+        t1 = s.teams[0];
+        var routes = 0;
+        CsSqueeze.forTeam = function(a, b, c, d) { routes++; return realForTeam(a, b, c, d); };
+        try {
+            EP.teamSqueeze(t1);
+            EP.teamSqueeze(t1);
+            eqs(routes, 1, "sq panel: teamSqueeze routes a stop set once (cached)");
+            t1.stops.push("N1");
+            EP.teamSqueeze(t1);
+            eqs(routes, 2, "sq panel: a stop change invalidates the cache");
+            t1.members = [cy];
+            eqs(EP.teamSqueeze(t1).issues.length + ":" + routes, "0:2",
+                "sq panel: a member change is answered fresh, without re-routing");
+            t1.members = [ana, cy];
+            eqs(EP.teamSqueeze(t1).issues.length, 1, "sq panel: putting the member back brings the warning back");
+            s.drawn = { survey: ssSv, resolved: ssRes };
+            EP.teamSqueeze(t1);
+            eqs(routes, 3, "sq panel: a drawing re-read invalidates the cache");
+        } finally {
+            CsSqueeze.forTeam = realForTeam;
+        }
+        var html = EP.teamSqueezeHtml({ issues: [{ text: "A <b> may not fit." }], note: CsSqueeze.NOTE });
+        ok(html.indexOf("color:#c00") > 0 && html.indexOf("A &lt;b&gt; may not fit.") > 0 &&
+            html.indexOf("color:#777") > 0 && html.indexOf(CsSqueeze.NOTE) > 0,
+            "sq panel: the team line is red issues and a grey note, escaped");
+        eqs(EP.teamSqueezeHtml({ issues: [], note: "" }), "", "sq panel: nothing to say is an empty line");
+
+        // The header mark.
+        eqs(EP.teamSummary(t1, false, true), "2 people · 3 stops · 1 day · ⚠ squeeze",
+            "sq panel: a squeezed team's summary ends in the red mark and squeeze");
+        ok(EP.teamSummary(t1, true, true).indexOf("same-day overlap") > 0 &&
+            EP.teamSummary(t1, true, true).indexOf("⚠ squeeze") > 0,
+            "sq panel: both marks when both apply");
+        eqs(EP.teamSummary(t1, false), "2 people · 3 stops · 1 day", "sq panel: no squeeze, no mark");
+        ok(EP.teamHeaderTitle(t1, 0, false, true).indexOf("⚠ Alpha — ") === 0,
+            "sq panel: a squeezed header starts with the warning mark");
+
+        // Extra stops: validated like the team pickers, deduped.
+        s = fresh();
+        eqs(EP.addFitStop("").why, "Type or pick a station first.", "sq panel: a blank extra stop is refused");
+        eqs(EP.addFitStop("zz9").why, "zz9 is not a station in this drawing",
+            "sq panel: an unknown extra stop is refused");
+        var dupe = EP.addFitStop("n2");
+        eqs(dupe.done + "|" + dupe.why, "false|N2 is already listed.", "sq panel: a team's stop is already listed");
+        var added = EP.addFitStop(" w2 ");
+        eqs(added.done + "|" + s.fitExtra.join(","), "true|W2", "sq panel: an extra stop is added by its own name");
+        eqs(EP.addFitStop("W2").why, "W2 is already listed.", "sq panel: an extra stop is added once");
+
+        // Build: the status line and the renderer contexts.
+        eqs(EP.buildStatusText(["callout-card.html"], [], [], []), "Saved callout-card.html",
+            "sq panel: the status line is unchanged without squeeze warnings");
+        eqs(EP.buildStatusText(["callout-card.html"], [], [], [], ["Beta: Ana Ruiz (limit 12 in) may not fit x."]),
+            "Saved callout-card.html. Squeeze: Beta: Ana Ruiz (limit 12 in) may not fit x.",
+            "sq panel: the status line appends the squeeze warnings");
+    } finally {
+        EP.child = realChild;
+        EP.saveTeams = realSave;
+        EP.planGuard = realGuard;
+        EP.state = realState;
+        CsSqueeze.matrix = realMatrix;
+        CsSqueeze.forTeam = realForTeam;
+    }
+
+    // buildFiles: every renderer gets its team's squeeze, and the status line names them.
+    (function() {
+        var realPath = CsStationSidecar.sidecarPath;
+        var realRead = CsStationSidecar.readSidecar;
+        var realWrite = CsStationSidecar.writeSidecar;
+        var realText = CsStationSidecar.writeText;
+        var realSaveContacts = CsCalloutLocal.saveContacts;
+        var realLookup = CsWeather.lookup;
+        var realHtml = CsCalloutCard.html;
+        var realTop = CsCalloutCard.topsideHtml;
+        var realTeamHtml = CsCalloutCard.teamHtml;
+        var realList = EP.listTeamFiles;
+        var realAnchor = EP.anchorOf;
+        var disk = { text: "" };
+        var seen = { html: [], top: [], team: [] };
+        CsStationSidecar.sidecarPath = function() { return "/fake/Cave/stations.json"; };
+        CsStationSidecar.readSidecar = function() { return CsStationStore.parse(disk.text); };
+        CsStationSidecar.writeSidecar = function(path, st) { disk.text = CsStationStore.serialize(st); return true; };
+        CsStationSidecar.writeText = function() { return true; };
+        CsCalloutLocal.saveContacts = function() { return true; };
+        CsWeather.lookup = function() { return { days: [], error: "" }; };
+        CsCalloutCard.html = function(plan, ctx) { seen.html.push(ctx); return "<html>"; };
+        CsCalloutCard.topsideHtml = function(ctx) { seen.top.push(ctx); return "<html>"; };
+        CsCalloutCard.teamHtml = function(ctx) { seen.team.push(ctx); return "<html>"; };
+        EP.listTeamFiles = function() { return []; };
+        EP.anchorOf = function() { return null; };
+        EP.child = function() { return null; };
+        var form = function() {
+            return { trip: CsStationStore.cleanTrip({ startDate: "2026-10-03", weatherPlace: "",
+                party: [ana, cy, bo] }),
+                contacts: { topName: "T", topPhone: "1", escalation: "Call", bufferMin: 120 },
+                roster: CsPeople.resolveParty([ana, cy, bo], ssDir), includeRoster: true, pace: null };
+        };
+        var start = function(teams) {
+            disk.text = JSON.stringify({ version: CsStationStore.VERSION, entries: [],
+                settings: { trip: { startDate: "2026-10-03", party: [ana, cy, bo], teams: [] } } });
+            seen = { html: [], top: [], team: [] };
+            var st = fresh();
+            st.store = CsStationStore.parse(disk.text).store;
+            st.teams = teams;
+            return st;
+        };
+        try {
+            start([ { id: "sq-t1", name: "Alpha", goal: "", dayOffset: 0, members: [ana, cy],
+                stops: ["N2"], days: [ssDay(8)], packing: "" } ]);
+            var r1 = EP.buildFiles(form(), "/fake/Cave");
+            eqs(r1.missing.length + ":" + r1.written.join(","), "0:callout-card.html",
+                "sq panel: a one-team trip with a squeeze still builds");
+            var c1 = seen.html.length > 0 ? seen.html[0] : {};
+            ok(c1.squeeze && c1.squeeze.issues.length === 1 &&
+                c1.squeeze.issues[0].text.indexOf("Ana Ruiz (limit 12 in) may not fit") === 0,
+                "sq panel: the single card's ctx carries the team's squeeze issues");
+            eqs((r1.squeeze || []).join("|"),
+                "Alpha: Ana Ruiz (limit 12 in) may not fit the tightest passage on the route (10 in near N2).",
+                "sq panel: buildFiles lists the squeeze warnings with the team's name");
+            ok(EP.buildStatusText(r1.written, r1.conflicts, r1.leftovers, r1.problems, r1.squeeze)
+                .indexOf("Squeeze: Alpha: Ana Ruiz (limit 12 in) may not fit") > 0,
+                "sq panel: the Build status line names the squeeze warning");
+            start([ { id: "sq-t1", name: "Alpha", goal: "", dayOffset: 0, members: [cy],
+                    stops: ["N2"], days: [ssDay(8)], packing: "" },
+                { id: "sq-t2", name: "Beta", goal: "", dayOffset: 1, members: [ana],
+                    stops: ["N2", "E4"], days: [ssDay(6)], packing: "" },
+                { id: "sq-t3", name: "Gamma", goal: "", dayOffset: 2, members: [bo],
+                    stops: ["E4"], days: [ssDay(6)], packing: "" } ]);
+            var r2 = EP.buildFiles(form(), "/fake/Cave");
+            eqs(r2.written.length + ":" + seen.top.length + ":" + seen.team.length, "4:1:3",
+                "sq panel: several teams with a squeeze still build every file");
+            var tt = seen.top.length > 0 ? seen.top[0].teams : [];
+            ok(tt.length === 3 && tt[0].squeeze.issues.length === 0 && tt[0].squeeze.note === "" &&
+                tt[1].squeeze.issues.length === 1 && tt[1].squeeze.issues[0].text.indexOf("Ana Ruiz") === 0 &&
+                tt[2].squeeze.issues.length === 0 && tt[2].squeeze.note === CsSqueeze.NOTE,
+                "sq panel: the topside ctx carries each team's squeeze");
+            ok(seen.team.length === 3 && seen.team[1].squeeze.issues.length === 1 &&
+                seen.team[2].squeeze.note === CsSqueeze.NOTE && seen.team[0].squeeze.issues.length === 0,
+                "sq panel: each team file's ctx carries its own squeeze");
+            eqs((r2.squeeze || []).length + ":" + ((r2.squeeze || [])[0] || "").indexOf("Beta: Ana Ruiz"), "1:0",
+                "sq panel: only the team with an issue is in the status warnings (a note is not a warning)");
+        } finally {
+            CsStationSidecar.sidecarPath = realPath;
+            CsStationSidecar.readSidecar = realRead;
+            CsStationSidecar.writeSidecar = realWrite;
+            CsStationSidecar.writeText = realText;
+            CsCalloutLocal.saveContacts = realSaveContacts;
+            CsWeather.lookup = realLookup;
+            CsCalloutCard.html = realHtml;
+            CsCalloutCard.topsideHtml = realTop;
+            CsCalloutCard.teamHtml = realTeamHtml;
+            EP.listTeamFiles = realList;
+            EP.anchorOf = realAnchor;
+            EP.child = realChild;
+            EP.state = realState;
+        }
+    })();
+    (function() {
+        var src = readTextFile(repoRoot + "/scripts/CaveSurvey/ExpeditionPlanner/ExpeditionPlanner.js");
+        ok(src.indexOf("res.conflicts, res.leftovers, res.problems, res.squeeze)") > 0,
+            "sq panel: Build cards passes the squeeze warnings to the status line");
+        var order = [src.indexOf("ExpeditionPlanner.buildTeamsSection,"),
+            src.indexOf("ExpeditionPlanner.buildFitSection,"),
+            src.indexOf("ExpeditionPlanner.buildEscalationSection,")];
+        ok(order[0] > 0 && order[0] < order[1] && order[1] < order[2],
+            "sq panel: Who fits where sits between Teams and Escalation");
+    })();
+
+    // On fake widgets: lazy fill, Refresh, extra stops, team lines and header marks.
+    var FQ = tmFakeQtShared;
+    if (FQ === null || !FQ.install()) {
+        ok(true, "sq panel: (fake Qt could not be installed; widget tests skipped)");
+        return;
+    }
+    var hits = 0;
+    var root = null;
+    var calls = 0;
+    var w = function(name) {
+        var x = root.findChild(name);
+        return (x === null || x === undefined) ? null : x;
+    };
+    var text = function(name) { var x = w(name); return x === null ? "" : String(x.text); };
+    try {
+        EP.saveTeams = function() { return ""; };
+        EP.planGuard = function() { return true; };
+        CsSqueeze.matrix = function(a, b, c, d, e, g) { calls++; return realMatrix(a, b, c, d, e, g); };
+        root = new QWidget();
+        var rootLay = new QVBoxLayout();
+        root.setLayout(rootLay);
+        EP.ensureDock = function() { hits++; return root; };
+        var st = fresh();
+        hits = 0;
+        EP.buildTeamsSection(rootLay);
+        EP.buildFitSection(rootLay);
+        eqs(hits, 0, "sq panel: building Who fits where reaches no dock (no child()/ensureDock)");
+        var missing = [];
+        var fitNames = ["Section", "Header", "Body", "Table", "Picker", "Add", "Refresh", "Status"];
+        for (var fn = 0; fn < fitNames.length; fn++) {
+            if (w("ExpeditionPlannerFit" + fitNames[fn]) === null) { missing.push(fitNames[fn]); }
+        }
+        eqs(missing.join(","), "", "sq panel: every Who fits where widget has its objectName");
+        ok(text("ExpeditionPlannerFitHeader").indexOf(CsPanel.SHUT_MARK) === 0 &&
+            text("ExpeditionPlannerFitHeader").indexOf("Who fits where") > 0 &&
+            w("ExpeditionPlannerFitBody").visible === false, "sq panel: the section starts folded");
+        eqs(calls, 0, "sq panel: building the section never calls the engine");
+        EP.rebuildTeamSections();
+        EP.fillPicker();
+        EP.refreshTeamHeaders();
+        eqs(calls, 0, "sq panel: a folded section never calls the engine (rebuild, refresh)");
+        eqs(w("ExpeditionPlannerFitPicker").items.join(","), st.stations.join(","),
+            "sq panel: the fit picker offers the drawing's stations");
+        // Team lines and header marks (these need no matrix).
+        ok(w("ExpeditionPlannerTeam1_Squeeze") !== null && w("ExpeditionPlannerTeam1_Squeeze").visible === true &&
+            text("ExpeditionPlannerTeam1_Squeeze").indexOf("Ana Ruiz (limit 12 in) may not fit") >= 0 &&
+            text("ExpeditionPlannerTeam1_Squeeze").indexOf("#c00") >= 0,
+            "sq panel: a team with a squeeze shows it in red on its line");
+        ok(text("ExpeditionPlannerTeam1_Header").indexOf("⚠ squeeze") > 0 &&
+            w("ExpeditionPlannerTeam1_Header").styleSheet.indexOf("#c00") >= 0,
+            "sq panel: the squeezed team's header carries the red mark");
+        ok(w("ExpeditionPlannerTeam2_Squeeze").visible === false && text("ExpeditionPlannerTeam2_Squeeze") === "" &&
+            text("ExpeditionPlannerTeam2_Header").indexOf("squeeze") < 0,
+            "sq panel: a team that fits has a hidden line and no mark");
+        w("ExpeditionPlannerTeam1_Member_1").click();
+        ok(st.teams[0].members.length === 1 && w("ExpeditionPlannerTeam1_Squeeze").visible === false &&
+            text("ExpeditionPlannerTeam1_Header").indexOf("squeeze") < 0,
+            "sq panel: taking the member off clears the line and the mark");
+        w("ExpeditionPlannerTeam1_Member_1").click();
+        eqs(st.teams[0].members.length + ":" + w("ExpeditionPlannerTeam1_Squeeze").visible, "2:true",
+            "sq panel: putting them back brings the warning back");
+        eqs(calls, 0, "sq panel: team edits while folded never call the matrix");
+        // Expand: one fill.
+        w("ExpeditionPlannerFitHeader").click();
+        eqs(calls, 1, "sq panel: expanding fills the matrix once");
+        ok(st.fitOpen === true && w("ExpeditionPlannerFitBody").visible === true, "sq panel: the section is open");
+        var table = w("ExpeditionPlannerFitTable");
+        eqs(table.rowCount + ":" + table.columnCount, "3:5", "sq panel: a row per stop, a column per person going");
+        eqs((table.headerLabels || []).join("|"),
+            "Stop|Tightest passage|Ana Ruiz (12 in)|Cy Diaz (8 in)|Walk In (no limit)",
+            "sq panel: the table headers");
+        eqs(table.item(0, 0).text() + "|" + table.item(0, 1).text() + "|" + table.item(0, 2).text() + "|" +
+            table.item(0, 3).text() + "|" + table.item(0, 4).text(), "N2|10 in near N2|NO|fits|?",
+            "sq panel: the N2 row in the table");
+        EP.refreshTeamHeaders();
+        eqs(calls, 1, "sq panel: a refresh with nothing changed does not refill");
+        w("ExpeditionPlannerFitRefresh").click();
+        eqs(calls, 2, "sq panel: Refresh refills");
+        // A team's stop changes while open: refilled.
+        w("ExpeditionPlannerTeam2_StopPicker").setEditText("w2");
+        w("ExpeditionPlannerTeam2_StopAdd").click();
+        eqs(calls + ":" + table.rowCount + ":" + table.item(3, 0).text(), "3:4:W2",
+            "sq panel: a team stop change while open refills the matrix");
+        // Extra stops through the picker.
+        w("ExpeditionPlannerFitPicker").setEditText("zz9");
+        w("ExpeditionPlannerFitAdd").click();
+        ok(text("ExpeditionPlannerFitStatus").indexOf("zz9 is not a station") === 0 && calls === 3,
+            "sq panel: an unknown extra stop is named and nothing refills");
+        w("ExpeditionPlannerFitPicker").setEditText("x2");
+        w("ExpeditionPlannerFitAdd").click();
+        eqs(calls + ":" + table.rowCount + ":" + table.item(4, 0).text() + ":" + table.item(4, 2).text() + ":" +
+            w("ExpeditionPlannerFitPicker").editText, "4:5:X2:-:",
+            "sq panel: Add stop puts the extra stop in the matrix and empties the box");
+        w("ExpeditionPlannerFitPicker").setEditText("X2");
+        w("ExpeditionPlannerFitAdd").click();
+        ok(text("ExpeditionPlannerFitStatus").indexOf("X2 is already listed.") === 0 && calls === 4,
+            "sq panel: an extra stop already listed is not added twice");
+        // The party changes while open: refilled.
+        st.store.settings.trip.party = [ana, cy];
+        EP.rebuildTeamSections();
+        eqs(calls + ":" + table.columnCount, "5:4", "sq panel: a party change while open refills the matrix");
+        // Fold: nothing more.
+        w("ExpeditionPlannerFitHeader").click();
+        ok(st.fitOpen === false, "sq panel: folding closes it");
+        w("ExpeditionPlannerTeam1_StopPicker").setEditText("n1");
+        w("ExpeditionPlannerTeam1_StopAdd").click();
+        st.store.settings.trip.party = [ana];
+        EP.rebuildTeamSections();
+        eqs(calls, 5, "sq panel: once folded again, changes never call the engine");
+        // Teardown: an old team line is hidden and renamed.
+        // (the section it sits in is what teardown hides, as for every team widget).
+        var oldLine = w("ExpeditionPlannerTeam1_Squeeze");
+        var oldSection = w("ExpeditionPlannerTeam1_Section");
+        EP.rebuildTeamSections();
+        ok(oldLine !== null && oldLine !== w("ExpeditionPlannerTeam1_Squeeze") &&
+            oldSection.visible === false &&
+            String(oldLine.objectName).indexOf("ExpeditionPlannerRemoved") === 0,
+            "sq panel: a torn-down team's squeeze line is renamed and its section hidden");
+    } finally {
+        EP.ensureDock = realEnsure;
+        EP.saveTeams = realSave;
+        EP.planGuard = realGuard;
+        EP.state = realState;
+        CsSqueeze.matrix = realMatrix;
+        csEpPackingTimer = null;
+        FQ.restore();
+    }
 })();
 
 // ---------------------------------------------------------------------
