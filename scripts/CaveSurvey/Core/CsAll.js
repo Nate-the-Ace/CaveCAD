@@ -81,6 +81,8 @@ include(includeBasePath + "/CsTripPlan.js");
 include(includeBasePath + "/CsCalloutCard.js");
 // The teams engine: per-team dates, conflicts, windows, file names.
 include(includeBasePath + "/CsTeams.js");
+// Suggest split: proposes each team's people and stops (CsTeams, CsTripPlan, CsPeople).
+include(includeBasePath + "/CsTeamSplit.js");
 // Forecast lookup for the callout card. Independent of the survey engines.
 include(includeBasePath + "/CsWeather.js");
 include(includeBasePath + "/CsCalloutLocal.js");

@@ -166,6 +166,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsTripPlan.js",
     "scripts/CaveSurvey/Core/CsCalloutCard.js",
     "scripts/CaveSurvey/Core/CsTeams.js",
+    "scripts/CaveSurvey/Core/CsTeamSplit.js",
     "scripts/CaveSurvey/Core/CsWeather.js",
     "scripts/CaveSurvey/Core/CsCalloutLocal.js",
     "scripts/CaveSurvey/Core/CsPeople.js",
@@ -36447,6 +36448,350 @@ if (typeof ExpeditionPlanner !== "undefined" &&
         }
     })();
 })();
+
+// ---------------------------------------------------------------------
+// Suggest split -- the engine (CsTeamSplit) and CsTripPlan.routeTightness
+// ---------------------------------------------------------------------
+
+// A star from S0: an east corridor E1..E4 (100 ft legs, LRUD unknown), a
+// north branch whose N1-N2 leg is 10 in wide (5 in + 5 in), a west branch
+// ending in a plumb 40 ft pitch W1-W2, and an island X1-X2 nobody can reach.
+function ssShot(from, to, d, az, inc, lr) {
+    var s = shotOf(from, to, d, az, inc);
+    if (lr !== undefined) { s.left = lr; s.right = lr; s.up = 5; s.down = 1; }
+    return s;
+}
+function ssSurvey() {
+    var s = CsModel.newSurvey();
+    s.shots.push(ssShot("S0", "E1", 100, 90));
+    s.shots.push(ssShot("E1", "E2", 100, 90));
+    s.shots.push(ssShot("E2", "E3", 100, 90));
+    s.shots.push(ssShot("E3", "E4", 100, 90));
+    s.shots.push(ssShot("S0", "N1", 100, 0, 0, 2));
+    s.shots.push(ssShot("N1", "N2", 100, 0, 0, 5 / 12));
+    s.shots.push(ssShot("S0", "W1", 100, 270));
+    s.shots.push(ssShot("W1", "W2", 40, 0, -90));
+    s.shots.push(ssShot("X1", "X2", 50, 0));
+    return s;
+}
+var ssSv = ssSurvey();
+var ssRes = CsNetwork.resolve(ssSv, {});
+var ssCfg = { paceFtPerMin: 10 };
+var ssDay = function(hours) { return { entry: "08:00", workHours: hours, night: "out" }; };
+var ssTeam = function(n, name, days) {
+    return { id: "ss-team-" + n, name: name, goal: "", dayOffset: 0, members: [],
+        stops: [], days: days || [ssDay(8)], packing: "" };
+};
+var ssDir = [
+    { id: "p-ana", name: "Ana Ruiz", squeeze: 12, skills: [] },
+    { id: "p-bo", name: "Bo Chen", squeeze: null, skills: [] },
+    { id: "p-cy", name: "Cy Diaz", squeeze: 8, skills: [] },
+    { id: "p-zed", name: "Zed Vance", squeeze: null, skills: ["vertical"] },
+    { id: "p-fa", name: "Fay Aid", squeeze: null, skills: ["first_aid"] },
+    { id: "p-cp", name: "Cal Pulse", squeeze: null, skills: ["cpr"] },
+    { id: "p-l1", name: "Lee One", squeeze: null, skills: ["leader"] },
+    { id: "p-l2", name: "Lou Two", squeeze: null, skills: ["leader"] }
+];
+var ssP = function(id, name) { return { id: id, name: name }; };
+var ssInput = function(extra) {
+    var o = { teamCount: 2, teams: [ssTeam(1, "Team 1"), ssTeam(2, "Team 2")],
+        freeStops: [], lockedStops: [], freePeople: [], lockedPeople: [],
+        directory: ssDir, survey: ssSv, resolved: ssRes, unit: "ft",
+        config: ssCfg, start: "S0" };
+    for (var k in extra) {
+        if (Object.prototype.hasOwnProperty.call(extra, k)) { o[k] = extra[k]; }
+    }
+    return o;
+};
+var ssMax = function(r) {
+    var m = 0;
+    for (var i = 0; i < r.teams.length; i++) { m = Math.max(m, r.teams[i].minutes.total); }
+    return m;
+};
+var ssNames = function(team) {
+    return team.members.map(function(p) { return p.name; }).sort().join(",");
+};
+var ssKinds = function(team) {
+    return team.warnings.map(function(w) { return w.kind; }).join(",");
+};
+var ssAllHard = function(r) {
+    for (var i = 0; i < r.teams.length; i++) {
+        for (var k = 0; k < r.teams[i].warnings.length; k++) {
+            if (r.teams[i].warnings[k].hard === true) { return true; }
+        }
+    }
+    return false;
+};
+var ssHasText = function(list, text) {
+    for (var i = 0; i < list.length; i++) {
+        var t = typeof list[i] === "string" ? list[i] : list[i].text;
+        if (t.indexOf(text) >= 0) { return true; }
+    }
+    return false;
+};
+
+// routeTightness: inches from the survey unit; null when nothing is known.
+var ssPlanN2 = CsTripPlan.build(ssSv, ssRes, { start: "S0", targets: ["N2"], unit: "ft" });
+near(CsTripPlan.routeTightness(ssSv, ssPlanN2), 10, 1e-6,
+    "ss engine: routeTightness is the 10 in N1-N2 leg");
+var ssAt = CsTripPlan.routeTightestAt(ssSv, ssPlanN2);
+ok(ssAt !== null && ssAt.near === "N2", "ss engine: routeTightestAt names the station near it");
+var ssPlanE4 = CsTripPlan.build(ssSv, ssRes, { start: "S0", targets: ["E4"], unit: "ft" });
+ok(CsTripPlan.routeTightness(ssSv, ssPlanE4) === null,
+    "ss engine: routeTightness is null when no width is known on the route");
+var ssPlanN1 = CsTripPlan.build(ssSv, ssRes, { start: "S0", targets: ["N1"], unit: "ft" });
+near(CsTripPlan.routeTightness(ssSv, ssPlanN1), 48, 1e-6,
+    "ss engine: routeTightness only reads the legs the route walks");
+var ssPlanMix = CsTripPlan.build(ssSv, ssRes, { start: "S0", targets: ["E4", "N2"], unit: "ft" });
+near(CsTripPlan.routeTightness(ssSv, ssPlanMix), 10, 1e-6,
+    "ss engine: routeTightness ignores unknown legs beside known ones");
+var ssPlanM = CsTripPlan.build(ssSv, ssRes, { start: "S0", targets: ["N2"], unit: "m" });
+near(CsTripPlan.routeTightness(ssSv, ssPlanM), 10 / 12 * CsUnits.FEET_PER_METER * 12, 1e-6,
+    "ss engine: routeTightness converts a metre survey to inches");
+ok(CsTripPlan.routeTightness(ssSv, null) === null &&
+    CsTripPlan.routeTightness(null, ssPlanN2) === null,
+    "ss engine: routeTightness never throws on nothing");
+
+// Balance: the greedy seed piles the whole corridor on one team (each next
+// stop grows that team least), the improvement brings the maximum down.
+var ssSeedMax = CsTripPlan.build(ssSv, ssRes, { start: "S0",
+    targets: ["E1", "E2", "E3", "E4"], unit: "ft", config: ssCfg }).totals.minutesAll;
+near(ssSeedMax, 160, 1e-6, "ss engine: the corridor on one team takes 160 min (the seed)");
+var ssBal = CsTeamSplit.suggest(ssInput({ freeStops: ["E1", "E2", "E3", "E4"] }));
+ok(ssMax(ssBal) < ssSeedMax, "ss engine: improvement lowers the largest team total below the seed");
+near(ssMax(ssBal), 120, 1e-6, "ss engine: the balanced corridor split peaks at 120 min");
+eqs(ssBal.teams.length, 2, "ss engine: two teams out");
+eqs(ssBal.teams[0].stops.length + ssBal.teams[1].stops.length, 4,
+    "ss engine: every free stop is placed");
+ok(ssBal.teams[0].stops.length > 0 && ssBal.teams[1].stops.length > 0,
+    "ss engine: both teams get stops");
+var ssBalT = ssBal.teams[0].minutes;
+near(ssBalT.total, ssBalT["in"] + ssBalT.work + ssBalT.out, 1e-6,
+    "ss engine: minutes total is in + work + out");
+eqs(ssBal.teams[0].index, 0, "ss engine: teams carry their index");
+eqs(ssBal.teams[1].name, "Team 2", "ss engine: teams carry their name");
+// Stops come out in route order.
+var ssOrd = CsTripPlan.build(ssSv, ssRes, { start: "S0", targets: ssBal.teams[0].stops,
+    unit: "ft", config: ssCfg });
+eqs(ssBal.teams[0].stops.join(","), ssOrd.stops.map(function(s) { return s.station; }).join(","),
+    "ss engine: a team's stops are in route order");
+
+// Determinism.
+eqs(JSON.stringify(CsTeamSplit.suggest(ssInput({ freeStops: ["E1", "E2", "E3", "E4"] }))),
+    JSON.stringify(ssBal), "ss engine: the same input twice gives an identical result");
+var ssBig = ssInput({ teamCount: 3, freeStops: ["E1", "E2", "E3", "E4", "N1", "N2", "W1", "W2"],
+    freePeople: [ssP("p-ana", "Ana Ruiz"), ssP("p-bo", "Bo Chen"), ssP("p-zed", "Zed Vance"),
+        ssP("p-fa", "Fay Aid"), ssP("p-l1", "Lee One")] });
+eqs(JSON.stringify(CsTeamSplit.suggest(ssBig)), JSON.stringify(CsTeamSplit.suggest(ssBig)),
+    "ss engine: a larger input is deterministic too");
+
+// Locked stops and locked people never move.
+var ssLock = CsTeamSplit.suggest(ssInput({ freeStops: ["E1", "E2", "E3"],
+    lockedStops: [{ station: "E4", team: 1 }, { station: "N2", team: 1 }],
+    lockedPeople: [{ id: "p-bo", name: "Bo Chen", team: 1 }],
+    freePeople: [ssP("p-l1", "Lee One"), ssP("p-l2", "Lou Two")] }));
+ok(ssLock.teams[1].stops.indexOf("E4") >= 0 && ssLock.teams[1].stops.indexOf("N2") >= 0,
+    "ss engine: locked stops stay on their team");
+ok(ssLock.teams[0].stops.indexOf("E4") < 0 && ssLock.teams[0].stops.indexOf("N2") < 0,
+    "ss engine: locked stops are not copied elsewhere");
+ok(ssNames(ssLock.teams[1]).indexOf("Bo Chen") >= 0 &&
+    ssNames(ssLock.teams[0]).indexOf("Bo Chen") < 0,
+    "ss engine: a locked person stays on their team");
+var ssLockAll = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "E1", team: 0 }, { station: "E2", team: 0 }, { station: "E3", team: 0 }],
+    lockedPeople: [{ id: "p-bo", name: "Bo Chen", team: 0 }, { id: "p-ana", name: "Ana Ruiz", team: 0 }] }));
+eqs(ssLockAll.teams[0].stops.length, 3, "ss engine: locks win over balance (stops)");
+eqs(ssNames(ssLockAll.teams[0]), "Ana Ruiz,Bo Chen", "ss engine: locks win over balance (people)");
+eqs(ssLockAll.teams[1].stops.length, 0, "ss engine: nothing free, nothing moved");
+
+// Hard: vertical. The only Vertical person (last by name) goes to the pitch team.
+var ssVert = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "E2", team: 0 }, { station: "W2", team: 1 }],
+    freePeople: [ssP("p-bo", "Bo Chen"), ssP("p-l1", "Lee One"), ssP("p-l2", "Lou Two"),
+        ssP("p-zed", "Zed Vance")] }));
+ok(ssVert.teams[1].needsVertical === true && ssVert.teams[0].needsVertical === false,
+    "ss engine: needsVertical follows the pitch");
+ok(ssNames(ssVert.teams[1]).indexOf("Zed Vance") >= 0,
+    "ss engine: the scarce Vertical person goes to the pitch team");
+ok(ssKinds(ssVert.teams[1]).indexOf("vertical") < 0, "ss engine: no vertical warning when covered");
+eqs(ssVert.feasible, true, "ss engine: covered pitch is feasible");
+var ssNoVert = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "E2", team: 0 }, { station: "W2", team: 1 }],
+    freePeople: [ssP("p-bo", "Bo Chen"), ssP("p-l1", "Lee One")] }));
+ok(ssHasText(ssNoVert.teams[1].warnings,
+    "Team 2: the route has a pitch and nobody on the team has the Vertical skill."),
+    "ss engine: the vertical warning text");
+ok(ssNoVert.teams[1].warnings[0].kind === "vertical" && ssNoVert.teams[1].warnings[0].hard === true,
+    "ss engine: vertical is a hard warning");
+eqs(ssNoVert.feasible, false, "ss engine: a hard warning makes the proposal infeasible");
+// A locked Vertical person on the wrong team is not moved: still a warning.
+var ssVertLocked = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "E2", team: 0 }, { station: "W2", team: 1 }],
+    lockedPeople: [{ id: "p-zed", name: "Zed Vance", team: 0 }],
+    freePeople: [ssP("p-bo", "Bo Chen")] }));
+ok(ssNames(ssVertLocked.teams[0]).indexOf("Zed Vance") >= 0 &&
+    ssKinds(ssVertLocked.teams[1]).indexOf("vertical") >= 0,
+    "ss engine: a locked Vertical person stays put and the pitch team is warned");
+
+// Hard: squeeze. N2's route is 10 in; Ana (12 in) is kept off it, Bo (no
+// limit) may go, Cy (8 in) fits.
+var ssSq = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "N2", team: 0 }, { station: "E2", team: 1 }],
+    freePeople: [ssP("p-ana", "Ana Ruiz"), ssP("p-bo", "Bo Chen"), ssP("p-cy", "Cy Diaz")] }));
+near(ssSq.teams[0].tightestInches, 10, 1e-6, "ss engine: tightestInches of the narrow route");
+ok(ssSq.teams[1].tightestInches === null, "ss engine: tightestInches null when unknown");
+ok(ssNames(ssSq.teams[0]).indexOf("Ana Ruiz") < 0, "ss engine: a 12 in person is kept off a 10 in route");
+ok(ssNames(ssSq.teams[0]).indexOf("Bo Chen") >= 0, "ss engine: an unknown limit may go on a tight route");
+eqs(ssSq.feasible, true, "ss engine: squeeze respected is feasible");
+ok(ssHasText(ssSq.notes, "Team 2: passage widths on the route are unknown, squeeze limits not checked"),
+    "ss engine: unknown width is a note");
+ok(ssKinds(ssSq.teams[1]).indexOf("squeeze") < 0, "ss engine: unknown width is not a violation");
+var ssSqLocked = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "N2", team: 0 }],
+    lockedPeople: [{ id: "p-ana", name: "Ana Ruiz", team: 0 }] }));
+ok(ssHasText(ssSqLocked.teams[0].warnings,
+    "Team 1: Ana Ruiz (limit 12 in) may not fit the tightest passage on the route (10 in near N2)."),
+    "ss engine: the squeeze warning text");
+ok(ssSqLocked.teams[0].warnings[0].kind === "squeeze" && ssSqLocked.teams[0].warnings[0].hard === true,
+    "ss engine: squeeze is a hard warning");
+eqs(ssSqLocked.feasible, false, "ss engine: a squeeze violation is infeasible");
+// Name lookup when the id is unknown: trimmed and case-blind.
+var ssSqName = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "N2", team: 0 }],
+    lockedPeople: [{ id: "", name: "  ana ruiz ", team: 0 }] }));
+ok(ssKinds(ssSqName.teams[0]).indexOf("squeeze") >= 0,
+    "ss engine: a person is found by name when the id is blank");
+var ssSqUnknown = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "N2", team: 0 }],
+    lockedPeople: [{ id: "nobody", name: "Nobody Known", team: 0 }] }));
+ok(ssKinds(ssSqUnknown.teams[0]).indexOf("squeeze") < 0,
+    "ss engine: someone not in the directory has no limit");
+
+// Preferences: first aid (first_aid, cpr or wfr) and a Trip leader per team.
+var ssFa = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "E2", team: 0 }, { station: "N1", team: 1 }],
+    freePeople: [ssP("p-bo", "Bo Chen"), ssP("p-cp", "Cal Pulse"), ssP("p-fa", "Fay Aid"),
+        ssP("p-l1", "Lee One"), ssP("p-l2", "Lou Two"), ssP("p-cy", "Cy Diaz")] }));
+ok(ssKinds(ssFa.teams[0]).indexOf("first-aid") < 0 && ssKinds(ssFa.teams[1]).indexOf("first-aid") < 0,
+    "ss engine: each team gets a first-aid person (first_aid or cpr)");
+ok(ssKinds(ssFa.teams[0]).indexOf("leader") < 0 && ssKinds(ssFa.teams[1]).indexOf("leader") < 0,
+    "ss engine: each team gets a Trip leader");
+ok(Math.abs(ssFa.teams[0].members.length - ssFa.teams[1].members.length) <= 1,
+    "ss engine: team sizes differ by at most one");
+var ssFa1 = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "E2", team: 0 }, { station: "N1", team: 1 }],
+    freePeople: [ssP("p-bo", "Bo Chen"), ssP("p-fa", "Fay Aid"), ssP("p-l1", "Lee One")] }));
+// Fay and Lee both go to Team 1 (index order), Bo evens the sizes.
+ok(ssNames(ssFa1.teams[0]).indexOf("Fay Aid") >= 0 && ssNames(ssFa1.teams[0]).indexOf("Lee One") >= 0,
+    "ss engine: the first-aid person and the leader fill the first team first");
+ok(ssHasText(ssFa1.teams[1].warnings,
+    "Team 2: nobody on the team has First aid, CPR or Wilderness first responder training."),
+    "ss engine: the first-aid warning text");
+ok(ssHasText(ssFa1.teams[1].warnings, "Team 2: nobody on the team is a Trip leader."),
+    "ss engine: the leader warning text");
+ok(ssFa1.teams[1].warnings.every(function(w) { return w.hard === false; }) &&
+    ssFa1.feasible === true, "ss engine: first aid and leader are preferences, not hard");
+ok(ssNames(ssFa1.teams[0]).indexOf("Fay Aid") >= 0 || ssNames(ssFa1.teams[1]).indexOf("Fay Aid") >= 0,
+    "ss engine: the first-aid person is placed");
+
+// Preferences: balance (30% off the mean of teams with stops, 2+ such teams).
+var ssUnbal = CsTeamSplit.suggest(ssInput({
+    lockedStops: [{ station: "E4", team: 0 }, { station: "E3", team: 0 }, { station: "E2", team: 0 },
+        { station: "N1", team: 1 }] }));
+ok(ssKinds(ssUnbal.teams[0]).indexOf("balance") >= 0 && ssKinds(ssUnbal.teams[1]).indexOf("balance") >= 0,
+    "ss engine: a lopsided locked split warns on balance");
+ok(ssHasText(ssUnbal.teams[0].warnings, "above") && ssHasText(ssUnbal.teams[1].warnings, "below"),
+    "ss engine: balance says above or below");
+var ssOneTeam = CsTeamSplit.suggest(ssInput({ teamCount: 2,
+    lockedStops: [{ station: "E4", team: 0 }, { station: "E3", team: 0 }] }));
+ok(ssKinds(ssOneTeam.teams[0]).indexOf("balance") < 0,
+    "ss engine: no balance warning with only one team that has stops");
+ok(ssBal.teams[0].warnings.every(function(w) { return w.kind !== "balance"; }),
+    "ss engine: a balanced split has no balance warning");
+
+// Preferences: schedule (work needed vs scheduled work hours).
+var ssSched = CsTeamSplit.suggest(ssInput({ teams: [ssTeam(1, "Team 1", [ssDay(0.5)]),
+    ssTeam(2, "Team 2", [])],
+    lockedStops: [{ station: "E1", team: 0 }, { station: "E2", team: 0 }, { station: "N1", team: 1 },
+        { station: "N2", team: 1 }] }));
+ok(ssKinds(ssSched.teams[0]).indexOf("schedule") >= 0,
+    "ss engine: 40 min of work in a 30 min day warns on schedule");
+ok(ssKinds(ssSched.teams[1]).indexOf("schedule") < 0, "ss engine: no days, no schedule warning");
+ok(ssSched.teams[0].warnings.filter(function(w) { return w.kind === "schedule"; })[0].text
+    .indexOf("Team 1: ") === 0, "ss engine: the schedule warning names the team");
+var ssSchedPitch = CsTeamSplit.suggest(ssInput({ teams: [ssTeam(1, "Team 1", [ssDay(0.4)]),
+    ssTeam(2, "Team 2")], lockedStops: [{ station: "W2", team: 0 }],
+    lockedPeople: [{ id: "p-zed", name: "Zed Vance", team: 0 }] }));
+ok(ssKinds(ssSchedPitch.teams[0]).indexOf("schedule") >= 0,
+    "ss engine: pitch rigging counts toward the work needed");
+
+// Team count above the current count adds "Team N" copying the last team's days.
+var ssMore = CsTeamSplit.suggest(ssInput({ teamCount: 4,
+    teams: [ssTeam(1, "Alpha"), ssTeam(2, "Team 3", [ssDay(0.25)])],
+    freeStops: ["E1", "E2", "E3", "E4", "N1", "N2"] }));
+eqs(ssMore.teams.length, 4, "ss engine: teamCount adds teams");
+eqs(ssMore.teams[2].name, "Team 4", "ss engine: an added team skips a used number");
+eqs(ssMore.teams[3].name, "Team 5", "ss engine: the next added team takes the next unused number");
+ok(ssMore.teams[2].added === true && ssMore.teams[0].added === false,
+    "ss engine: added teams are marked");
+ok(ssMore.teams[2].stops.length > 0 && ssKinds(ssMore.teams[2]).indexOf("schedule") >= 0,
+    "ss engine: an added team's days copy the last team's (its 15 min day is short)");
+var ssFewer = CsTeamSplit.suggest(ssInput({ teamCount: 1 }));
+eqs(ssFewer.teams.length, 2, "ss engine: teamCount below the current count keeps every team");
+
+// Fewer people than teams.
+var ssFew = CsTeamSplit.suggest(ssInput({ teamCount: 3, freeStops: ["E1", "N1", "W1"],
+    freePeople: [ssP("p-bo", "Bo Chen")] }));
+eqs(ssFew.teams[0].members.length + ssFew.teams[1].members.length + ssFew.teams[2].members.length, 1,
+    "ss engine: one person is placed once");
+ok(ssHasText(ssFew.notes, "Team 2 has nobody.") && ssHasText(ssFew.notes, "Team 3 has nobody."),
+    "ss engine: empty teams are reported");
+
+// Unreachable stop.
+var ssUnr = CsTeamSplit.suggest(ssInput({ freeStops: ["E1", "X2"] }));
+ok(ssHasText(ssUnr.notes, "X2 cannot be reached from S0"), "ss engine: an unreachable stop is noted");
+ok(ssUnr.teams[0].stops.indexOf("X2") < 0 && ssUnr.teams[1].stops.indexOf("X2") < 0,
+    "ss engine: an unreachable free stop is left out");
+
+// No free stops: people still placed. No free people: stops still split.
+var ssNoStops = CsTeamSplit.suggest(ssInput({
+    freePeople: [ssP("p-bo", "Bo Chen"), ssP("p-cy", "Cy Diaz")] }));
+eqs(ssNoStops.teams[0].members.length + ssNoStops.teams[1].members.length, 2,
+    "ss engine: no free stops, people still placed");
+eqs(ssNoStops.teams[0].members.length, 1, "ss engine: people spread evenly");
+var ssNoPeople = CsTeamSplit.suggest(ssInput({ freeStops: ["E1", "N1"] }));
+eqs(ssNoPeople.teams[0].stops.length + ssNoPeople.teams[1].stops.length, 2,
+    "ss engine: no free people, stops still split");
+
+// Degenerate input never throws.
+var ssNoThrow = function(inp, what) {
+    var r = null;
+    try { r = CsTeamSplit.suggest(inp); } catch (e) { r = "threw " + e; }
+    ok(r !== null && typeof r === "object" && Object.prototype.toString.call(r.teams) === "[object Array]",
+        "ss engine: never throws: " + what + (typeof r === "string" ? " (" + r + ")" : ""));
+    return r;
+};
+ssNoThrow(null, "null input");
+ssNoThrow({}, "empty object");
+ssNoThrow(ssInput({ directory: [] , freePeople: [ssP("p-ana", "Ana Ruiz")],
+    freeStops: ["N2"] }), "empty directory");
+ssNoThrow(ssInput({ directory: null, survey: null, resolved: null,
+    freeStops: ["E1"] }), "no survey");
+ssNoThrow(ssInput({ teams: [], teamCount: 2, freeStops: ["E1"] }), "no current teams");
+ssNoThrow(ssInput({ lockedStops: [{ station: "E1", team: 7 }, null],
+    lockedPeople: [{ id: "p-bo", name: "Bo Chen", team: -1 }, null], freePeople: [null, {}],
+    freeStops: [null, "", "E1", "E1"] }), "junk locks and entries");
+ssNoThrow(ssInput({ directory: [{ name: "Ana Ruiz", squeeze: "wide", skills: "vertical" }],
+    freePeople: [ssP("", "Ana Ruiz")] }), "unknown skills and limits");
+
+// feasible is false exactly when a hard warning exists.
+var ssFeas = [ssBal, ssLock, ssVert, ssNoVert, ssSq, ssSqLocked, ssFa, ssFa1, ssUnbal, ssSched,
+    ssMore, ssFew, ssUnr];
+var ssFeasOk = true;
+for (var ssf = 0; ssf < ssFeas.length; ssf++) {
+    if (ssFeas[ssf].feasible !== !ssAllHard(ssFeas[ssf])) { ssFeasOk = false; }
+}
+ok(ssFeasOk, "ss engine: feasible is false exactly when a hard warning exists");
 
 // ---------------------------------------------------------------------
 // Report.
