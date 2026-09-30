@@ -37157,6 +37157,23 @@ ok(ssFeasOk, "ss engine: feasible is false exactly when a hard warning exists");
 })();
 
 // ---------------------------------------------------------------------
+// Suggest split: a recorded width of 0 is unmeasured, not a real width
+// ---------------------------------------------------------------------
+
+(function() {
+    var sv = { distanceUnit: "ft", shots: [ { left: 0, right: 0 }, { left: 0, right: 0 }, { left: 1, right: 0.5 } ] };
+    var planOf = function(edges) {
+        return { unit: "ft", stops: [ { steps: [ { edges: edges } ] } ], back: { steps: [] } };
+    };
+    ok(CsTripPlan.routeTightness(sv, planOf([ { shot: 0, to: "A" }, { shot: 1, to: "B" } ])) === null,
+        "ss zero: a route whose only recorded widths are 0 has no known width");
+    near(CsTripPlan.routeTightness(sv, planOf([ { shot: 0, to: "A" }, { shot: 2, to: "C" } ])), 18, 1e-6,
+        "ss zero: a real width beside unmeasured zeros is the tightest (1.5 ft = 18 in)");
+    ok(CsTripPlan.routeTightestAt(sv, planOf([ { shot: 0, to: "A" } ])) === null,
+        "ss zero: routeTightestAt is null for zero-only widths");
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

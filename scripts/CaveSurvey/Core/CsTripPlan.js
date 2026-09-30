@@ -502,6 +502,10 @@ CsTripPlan.routeTightestAt = function(survey, plan) {
                 var l = num(sh.left), r = num(sh.right);
                 if (l === null || r === null) { continue; }
                 var width = l + r;
+                // 0 on both sides is an unmeasured LRUD, not a zero-width
+                // passage (found live: A5/A6 read 0 and every squeeze limit
+                // "failed" on every route). Only a width above 0 counts.
+                if (!(width > 0)) { continue; }
                 if (best === null || width < best.width) {
                     best = { width: width, near: edges[e].to };
                 }
