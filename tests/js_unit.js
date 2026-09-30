@@ -36259,7 +36259,7 @@ var tmFakeQtShared = null;
         EP.basePath = "/fake";
         try {
             var builders = ["buildTripSection", "buildRosterSection", "buildTeamsSection",
-                "buildFitSection", "buildEscalationSection", "buildCardSection"];
+                "buildFitSection", "buildPushSection", "buildEscalationSection", "buildCardSection"];
             for (var b = 0; b < builders.length; b++) {
                 try {
                     EP[builders[b]](new QVBoxLayout());
@@ -38564,6 +38564,383 @@ for (pri = 0; pri < prAllTexts.length; pri++) {
     }
 }
 ok(prClean, "pr engine: no text carries a coordinate or a long decimal");
+
+// ---------------------------------------------------------------------
+// What's left to push -- the panel: the pure helpers (pushWeightsFor,
+// parseHintWords, pushInput, pushRowText, addLeadToTeam), fillPushTable,
+// and the section on FAKE widgets only (a real widget in a -no-gui run
+// can crash at exit and pop a dialog on the desktop). saveTeams and
+// planGuard are stubbed; the engine is wrapped only to count its calls.
+// ---------------------------------------------------------------------
+(function() {
+    var EP = ExpeditionPlanner;
+    var fns = ["pushWeightsFor", "parseHintWords", "pushInput", "pushRowText", "fillPushTable",
+        "addLeadToTeam", "buildPushSection", "fillPush", "pushMaybeRefresh", "pushAddClicked",
+        "pushRefreshClicked", "pushPresetClicked", "pushTeamsRefresh"];
+    var absent = [];
+    for (var f = 0; f < fns.length; f++) {
+        if (typeof EP[fns[f]] !== "function") { absent.push(fns[f]); }
+    }
+    eqs(absent.join(","), "", "pr panel: the push panel functions exist");
+    if (absent.length > 0) { return; }
+    var threw = function(fn) {
+        try { fn(); return false; } catch (e) { return true; }
+    };
+    var S = CsPushRank.SIGNALS;
+    var realState = EP.state;
+    var realChild = EP.child;
+    var realSave = EP.saveTeams;
+    var realEnsure = EP.ensureDock;
+    var realGuard = EP.planGuard;
+    var realToday = EP.todayIso;
+    var realAddStop = EP.addTeamStop;
+    var realRank = CsPushRank.rank;
+    var names = [];
+    for (var nm in prCost.resolved.stations) {
+        if (Object.prototype.hasOwnProperty.call(prCost.resolved.stations, nm)) { names.push(nm); }
+    }
+    var team = function(id, name) {
+        return { id: id, name: name, goal: "", dayOffset: 0, members: [], stops: [], days: [],
+            packing: "" };
+    };
+    var fresh = function() {
+        EP.state = { drawn: { survey: prCost.survey, resolved: prCost.resolved },
+            docPath: "/fake/Cave/Cave.dxf",
+            store: { entries: [{ station: "A5", note: "", status: "done", team: "", who: "" },
+                { station: "C2", note: "", status: "assigned", team: "going, big draft", who: "" }],
+                settings: { pace: { paceFtPerMin: 100 },
+                    trip: { startDate: "2026-10-03", party: [], teams: [] } } },
+            loadError: "", stations: names.slice(0), plan: null, planShown: null,
+            people: [], peopleError: "", rosterRows: [], filling: false,
+            teams: [team("pr-t1", "Alpha"), team("pr-t2", "")], teamOpen: {}, activeTeamId: "",
+            teamMessage: "", removedCount: 0, packingPending: null, suggestUndo: null,
+            fitOpen: false, fitExtra: [], fitSig: null, fitDrawn: null, squeezeCache: null,
+            pushOpen: false };
+        return EP.state;
+    };
+    try {
+        EP.child = function() { return null; };
+        EP.saveTeams = function() { return ""; };
+        EP.planGuard = function() { return true; };
+        EP.todayIso = function() { return "2026-09-30"; };
+        var s = fresh();
+
+        // pushWeightsFor: whole numbers 0-100 for the spin boxes.
+        var presets = ["quick", "potential", "balanced"];
+        for (var p = 0; p < presets.length; p++) {
+            var pw = EP.pushWeightsFor(presets[p]);
+            var sum = 0;
+            var whole = true;
+            for (var k = 0; k < S.length; k++) {
+                sum += pw[S[k]];
+                if (pw[S[k]] !== Math.round(pw[S[k]]) || pw[S[k]] < 0 || pw[S[k]] > 100) { whole = false; }
+            }
+            ok(whole && sum === 100, "pr panel: pushWeightsFor(" + presets[p] + ") is whole numbers summing to 100");
+        }
+        eqs(JSON.stringify(EP.pushWeightsFor("balanced")),
+            JSON.stringify({ cost: 25, blank: 20, connect: 15, elevation: 10, recency: 15, hints: 15 }),
+            "pr panel: the balanced weights");
+        eqs(EP.pushWeightsFor("quick").cost + ":" + EP.pushWeightsFor("potential").connect, "50:25",
+            "pr panel: quick cost 50, potential connect 25");
+        eqs(JSON.stringify(EP.pushWeightsFor("nonsense")), JSON.stringify(EP.pushWeightsFor("balanced")),
+            "pr panel: an unknown preset is balanced");
+        var pwc = EP.pushWeightsFor("quick");
+        pwc.cost = 1;
+        eqs(EP.pushWeightsFor("quick").cost, 50, "pr panel: pushWeightsFor hands out a copy");
+
+        // parseHintWords.
+        eqs(EP.parseHintWords("Draft, wind;  BIG\nwind,, ;draft ").join("|"), "draft|wind|big",
+            "pr panel: hint words split on , ; and newlines, trimmed, lower-cased, deduped");
+        eqs(EP.parseHintWords("").length + ":" + EP.parseHintWords("  , ;\n").length + ":" +
+            EP.parseHintWords(null).length + ":" + EP.parseHintWords(undefined).length, "0:0:0:0",
+            "pr panel: nothing typed is an empty list (the engine's defaults)");
+        eqs(EP.parseHintWords("big room, big room").join("|"), "big room",
+            "pr panel: a hint may be two words");
+
+        // pushInput.
+        var base = { preset: "balanced", custom: false, weights: EP.pushWeightsFor("balanced"),
+            positive: "", negative: "", includeDone: false };
+        var inp = EP.pushInput(s, base);
+        ok(inp.survey === prCost.survey && inp.resolved === prCost.resolved,
+            "pr panel: pushInput passes the drawn survey and resolved network");
+        eqs(inp.unit + "|" + inp.today + "|" + inp.preset + "|" + inp.includeDone, "ft|2026-09-30|balanced|false",
+            "pr panel: pushInput unit, today (local date), preset and includeDone");
+        ok(inp.weights === undefined && inp.positive === undefined && inp.negative === undefined,
+            "pr panel: a preset and empty hint fields leave the engine's weights and words");
+        eqs(inp.statuses.A5 + "|" + inp.statuses.C2 + "|" + (inp.statuses.A4 === undefined),
+            "done|assigned|true", "pr panel: pushInput carries the Station Table marks as statuses");
+        ok(inp.config !== null && typeof inp.config === "object" && inp.config.paceFtPerMin === 100,
+            "pr panel: pushInput carries the stored pace");
+        var ranked = CsPushRank.rank(inp);
+        ok(prLead(ranked, "A5") === null && prLead(ranked, "C2") !== null &&
+            prLead(ranked, "C2").status === "assigned", "pr panel: a done lead is hidden, assigned shows");
+        ok(prHas(prLead(ranked, "C2").reasons, "note says: going, big, draft") ||
+            prHas(prLead(ranked, "C2").reasons, "note says: draft") ||
+            prLead(ranked, "C2").signals.hints !== null,
+            "pr panel: a Station Table team note counts as a hint");
+        var withDone = EP.pushInput(s, { preset: "balanced", custom: false, positive: "", negative: "",
+            includeDone: true });
+        ok(withDone.includeDone === true && prLead(CsPushRank.rank(withDone), "A5") !== null &&
+            prLead(CsPushRank.rank(withDone), "A5").status === "done",
+            "pr panel: Show done and skipped brings the done lead back");
+        var cw = { cost: 70, blank: 0, connect: 5, elevation: 5, recency: 10, hints: 10 };
+        var custom = EP.pushInput(s, { preset: "quick", custom: true, weights: cw,
+            positive: "Echo, Booming", negative: "dead; choked", includeDone: false });
+        eqs(JSON.stringify(custom.weights), JSON.stringify(cw), "pr panel: custom weights pass through");
+        eqs(custom.positive.join("|") + "/" + custom.negative.join("|"), "echo|booming/dead|choked",
+            "pr panel: typed hint words replace the defaults");
+        var quick = EP.pushInput(s, { preset: "quick", custom: false, weights: cw });
+        ok(quick.preset === "quick" && quick.weights === undefined,
+            "pr panel: a preset (not custom) ignores the spin values");
+        var none = fresh();
+        none.drawn = null;
+        var noneIn = EP.pushInput(none, base);
+        ok(noneIn.survey === null && CsPushRank.rank(noneIn).leads.length === 0,
+            "pr panel: no survey gives an input the engine answers with no leads");
+        ok(!threw(function() { EP.pushInput(null, null); EP.pushInput({}, {}); }),
+            "pr panel: pushInput never throws");
+        s = fresh();
+
+        // pushRowText.
+        var rt = EP.pushRowText({ station: "B20", status: "open", total: 42.26,
+            reasons: ["4 min in, no pitch, no rope", "note says: draft"] }, 3);
+        eqs(rt.rank + "|" + rt.station + "|" + rt.score + "|" + rt.status + "|" + rt.why,
+            "3|B20|42.3|open|4 min in, no pitch, no rope · note says: draft",
+            "pr panel: a row's text");
+        eqs(EP.pushRowText({ station: "B21", status: "done", total: 7, reasons: [] }, 1).score, "7.0",
+            "pr panel: a score always has one decimal");
+        eqs(EP.pushRowText({ station: "X2", status: "open", total: 0, reasons: [] }).why,
+            "nothing to rank it by", "pr panel: a lead with no reasons still reads sensibly");
+        eqs(EP.pushRowText({ station: "X2", status: "open", total: 0, reasons: [] }).rank, "",
+            "pr panel: no rank given, no rank shown");
+        ok(!threw(function() { EP.pushRowText(null); EP.pushRowText({}); }),
+            "pr panel: pushRowText never throws");
+
+        // fillPushTable on a fake table.
+        if (tmFakeQtShared !== null && tmFakeQtShared.install()) {
+            try {
+                var ft = new QTableWidget(0, 5);
+                var leads = CsPushRank.rank(EP.pushInput(s, base)).leads;
+                EP.fillPushTable(ft, leads);
+                eqs(ft.rowCount, leads.length, "pr panel: fillPushTable makes a row per lead");
+                eqs(ft.item(0, 0).text() + "|" + ft.item(1, 0).text() + "|" + ft.item(0, 1).text() + "|" +
+                    ft.item(0, 2).text() + "|" + ft.item(0, 3).text(),
+                    "1|2|" + leads[0].station + "|" + leads[0].total.toFixed(1) + "|" + leads[0].status,
+                    "pr panel: rank from 1, station, score, status");
+                eqs(ft.item(0, 4).text(), leads[0].reasons.join(" · "), "pr panel: Why is the reasons joined");
+                EP.fillPushTable(ft, []);
+                eqs(ft.rowCount, 0, "pr panel: an empty list empties the table");
+            } finally {
+                tmFakeQtShared.restore();
+            }
+        } else {
+            ok(true, "pr panel: (fake Qt could not be installed; fillPushTable skipped)");
+        }
+
+        // addLeadToTeam: through addTeamStop, by the team's id.
+        var ids = [];
+        EP.addTeamStop = function(id, station) { ids.push(id); return realAddStop(id, station); };
+        var r1 = EP.addLeadToTeam("a5", 1);
+        eqs(r1.done + "|" + r1.why + "|" + ids.join(","), "true|A5 added to Team 2|pr-t2",
+            "pr panel: addLeadToTeam adds to the chosen team by id and says so");
+        eqs(s.teams[1].stops.join(","), "A5", "pr panel: the stop is on the team");
+        var r2 = EP.addLeadToTeam("A5", 1);
+        eqs(r2.done + "|" + r2.why, "false|A5 is already a stop on Team 2.",
+            "pr panel: a stop already on the team is refused in words");
+        var r3 = EP.addLeadToTeam("ZZ9", 0);
+        eqs(r3.done + "|" + r3.why, "false|ZZ9 is not a station in this drawing",
+            "pr panel: the data layer's refusal is passed on");
+        var r4 = EP.addLeadToTeam("A5", 7);
+        eqs(r4.done + "|" + r4.why, "false|Pick a team first.", "pr panel: no such team is refused");
+        EP.saveTeams = function() { return "teams kept in memory only: save the drawing first"; };
+        var r5 = EP.addLeadToTeam("A4", 0);
+        eqs(r5.done + "|" + r5.why, "true|A4 added to Alpha (teams kept in memory only: save the drawing first)",
+            "pr panel: a save failure is named after the success");
+        EP.saveTeams = function() { return ""; };
+        EP.addTeamStop = realAddStop;
+    } finally {
+        EP.child = realChild;
+        EP.saveTeams = realSave;
+        EP.planGuard = realGuard;
+        EP.todayIso = realToday;
+        EP.addTeamStop = realAddStop;
+        EP.state = realState;
+    }
+
+    (function() {
+        var src = readTextFile(repoRoot + "/scripts/CaveSurvey/ExpeditionPlanner/ExpeditionPlanner.js");
+        var order = [src.indexOf("ExpeditionPlanner.buildFitSection,"),
+            src.indexOf("ExpeditionPlanner.buildPushSection,"),
+            src.indexOf("ExpeditionPlanner.buildEscalationSection,")];
+        ok(order[0] > 0 && order[0] < order[1] && order[1] < order[2],
+            "pr panel: What's left to push sits between Who fits where and Escalation");
+        var from = src.indexOf("// What's left to push (the lead ranking)");
+        var to = src.indexOf("// Build cards", from);
+        ok(from > 0 && to > from && src.substring(from, to).indexOf("deleteLater") < 0,
+            "pr panel: the push section code never calls deleteLater");
+    })();
+
+    // On fake widgets: lazy fill, presets, Custom, hints, done, Add selected.
+    var FQ = tmFakeQtShared;
+    if (FQ === null || !FQ.install()) {
+        ok(true, "pr panel: (fake Qt could not be installed; widget tests skipped)");
+        return;
+    }
+    var hits = 0;
+    var root = null;
+    var calls = 0;
+    var w = function(name) {
+        var x = root.findChild(name);
+        return (x === null || x === undefined) ? null : x;
+    };
+    var text = function(name) { var x = w(name); return x === null ? "" : String(x.text); };
+    var bold = function(name) { var x = w(name); return x !== null && String(x.styleSheet).indexOf("bold") >= 0; };
+    try {
+        EP.saveTeams = function() { return ""; };
+        EP.planGuard = function() { return true; };
+        EP.todayIso = function() { return "2026-09-30"; };
+        CsPushRank.rank = function(input) { calls++; return realRank(input); };
+        root = new QWidget();
+        var rootLay = new QVBoxLayout();
+        root.setLayout(rootLay);
+        EP.ensureDock = function() { hits++; return root; };
+        var st = fresh();
+        hits = 0;
+        EP.buildTeamsSection(rootLay);
+        EP.buildPushSection(rootLay);
+        eqs(hits, 0, "pr panel: building What's left to push reaches no dock (no child()/ensureDock)");
+        var missing = [];
+        var pushNames = ["Section", "Header", "Body", "Quick", "Potential", "Balanced", "Preset",
+            "W_cost", "W_blank", "W_connect", "W_elevation", "W_recency", "W_hints", "Pos", "Neg",
+            "Done", "Refresh", "Table", "Team", "Add", "Status", "Notes"];
+        for (var pn = 0; pn < pushNames.length; pn++) {
+            if (w("ExpeditionPlannerPush" + pushNames[pn]) === null) { missing.push(pushNames[pn]); }
+        }
+        eqs(missing.join(","), "", "pr panel: every What's left to push widget has its objectName");
+        ok(text("ExpeditionPlannerPushHeader").indexOf(CsPanel.SHUT_MARK) === 0 &&
+            text("ExpeditionPlannerPushHeader").indexOf("What's left to push") > 0 &&
+            w("ExpeditionPlannerPushBody").visible === false, "pr panel: the section starts folded");
+        eqs(calls, 0, "pr panel: building the section never calls the engine");
+        eqs(S.map(function(k) { return w("ExpeditionPlannerPushW_" + k).value; }).join(","), "25,20,15,10,15,15",
+            "pr panel: the spin boxes show the balanced weights");
+        ok(bold("ExpeditionPlannerPushBalanced") && !bold("ExpeditionPlannerPushQuick") &&
+            !bold("ExpeditionPlannerPushPotential") && text("ExpeditionPlannerPushPreset").indexOf("Balanced") >= 0,
+            "pr panel: Balanced is the marked preset");
+        ok(st.pushCustom !== true, "pr panel: the fills at build time do not mark Custom");
+        eqs(text("ExpeditionPlannerPushPos") + "/" + text("ExpeditionPlannerPushNeg"),
+            CsPushRank.POSITIVE.join(", ") + "/" + CsPushRank.NEGATIVE.join(", "),
+            "pr panel: the hint fields hold the engine's default words");
+        ok(w("ExpeditionPlannerPushDone").checked === false, "pr panel: done and skipped start hidden");
+        EP.rebuildTeamSections();
+        EP.refreshTeamHeaders();
+        EP.pushPresetClicked("quick");
+        EP.pushRefreshClicked();
+        eqs(calls, 0, "pr panel: a folded section never calls the engine (rebuild, refresh, preset, Refresh)");
+        EP.pushPresetClicked("balanced");
+        eqs(w("ExpeditionPlannerPushTeam").items.join(","), "Alpha,Team 2",
+            "pr panel: the team dropdown lists the team names");
+        // Add selected, nothing ranked yet.
+        w("ExpeditionPlannerPushAdd").click();
+        eqs(text("ExpeditionPlannerPushStatus"), "Select a lead in the table first.",
+            "pr panel: Add selected with no selection says so");
+        // Open: one fill.
+        w("ExpeditionPlannerPushHeader").click();
+        eqs(calls, 1, "pr panel: opening fills the table once");
+        ok(st.pushOpen === true && w("ExpeditionPlannerPushBody").visible === true, "pr panel: the section is open");
+        var table = w("ExpeditionPlannerPushTable");
+        var want = realRank(EP.pushInput(st, { preset: "balanced", custom: false, positive: "",
+            negative: "", includeDone: false })).leads;
+        eqs(table.rowCount + ":" + table.item(0, 1).text(), want.length + ":" + want[0].station,
+            "pr panel: the table holds the ranking");
+        var stationsShown = [];
+        for (var rr = 0; rr < table.rowCount; rr++) { stationsShown.push(table.item(rr, 1).text()); }
+        ok(stationsShown.indexOf("A5") < 0 && stationsShown.indexOf("C2") >= 0,
+            "pr panel: the done lead is hidden, the assigned one shown");
+        EP.refreshTeamHeaders();
+        eqs(calls, 1, "pr panel: a refresh with nothing changed does not refill");
+        w("ExpeditionPlannerPushRefresh").click();
+        eqs(calls, 2, "pr panel: Refresh refills");
+        // A preset click while open refills and repaints the spin boxes.
+        w("ExpeditionPlannerPushQuick").click();
+        eqs(calls + ":" + w("ExpeditionPlannerPushW_cost").value + ":" + bold("ExpeditionPlannerPushQuick") +
+            ":" + bold("ExpeditionPlannerPushBalanced") + ":" + (text("ExpeditionPlannerPushPreset").indexOf("Quick wins") >= 0),
+            "3:50:true:false:true", "pr panel: Quick wins refills, shows its weights and is marked");
+        ok(st.pushCustom !== true, "pr panel: a preset's own fill of the spin boxes does not mark Custom");
+        // A weight edited by hand: Custom.
+        w("ExpeditionPlannerPushW_cost").setValue(70);
+        ok(st.pushCustom === true && text("ExpeditionPlannerPushPreset").indexOf("Custom") >= 0 &&
+            !bold("ExpeditionPlannerPushQuick") && !bold("ExpeditionPlannerPushBalanced") && calls === 4,
+            "pr panel: editing a weight marks Custom, unmarks the presets and refills");
+        eqs(EP.pushInput(st, EP.pushControls(st)).weights.cost, 70, "pr panel: the custom weight reaches the engine");
+        // Choosing a preset resets the weights.
+        w("ExpeditionPlannerPushBalanced").click();
+        ok(st.pushCustom !== true && w("ExpeditionPlannerPushW_cost").value === 25 && calls === 5 &&
+            EP.pushInput(st, EP.pushControls(st)).weights === undefined,
+            "pr panel: a preset puts its weights back and drops Custom");
+        // Hint words.
+        w("ExpeditionPlannerPushPos").text = "draft";
+        w("ExpeditionPlannerPushPos").editingFinished.fire();
+        eqs(calls + ":" + EP.pushInput(st, EP.pushControls(st)).positive.join(","), "6:draft",
+            "pr panel: a hint edit refills with the typed words");
+        w("ExpeditionPlannerPushPos").editingFinished.fire();
+        eqs(calls, 6, "pr panel: leaving the hint field unchanged does not refill");
+        // Show done and skipped.
+        w("ExpeditionPlannerPushDone").click();
+        stationsShown = [];
+        for (rr = 0; rr < table.rowCount; rr++) { stationsShown.push(table.item(rr, 1).text()); }
+        ok(calls === 7 && stationsShown.indexOf("A5") >= 0, "pr panel: ticking Show done and skipped shows the done lead");
+        // Add selected.
+        table.cur = 0;
+        var picked = table.item(0, 1).text();
+        w("ExpeditionPlannerPushTeam").currentIndex = 1;
+        w("ExpeditionPlannerPushAdd").click();
+        eqs(text("ExpeditionPlannerPushStatus"), picked + " added to Team 2",
+            "pr panel: Add selected reports the stop added");
+        ok(st.teams[1].stops.indexOf(picked) >= 0 && st.teams[0].stops.indexOf(picked) < 0,
+            "pr panel: the stop went on the chosen team");
+        var stops2 = w("ExpeditionPlannerTeam2_Stops");
+        ok(stops2 !== null && stops2.rowCount === st.teams[1].stops.length,
+            "pr panel: the team's own stop list shows it");
+        w("ExpeditionPlannerPushAdd").click();
+        eqs(text("ExpeditionPlannerPushStatus"), picked + " is already a stop on Team 2.",
+            "pr panel: adding it again says it is already there");
+        // The team names follow the teams.
+        EP.setTeamField("pr-t1", "name", "Zulu");
+        EP.teamChanged("pr-t1", "");
+        eqs(w("ExpeditionPlannerPushTeam").items.join(",") + ":" + w("ExpeditionPlannerPushTeam").currentIndex,
+            "Zulu,Team 2:1", "pr panel: a renamed team is renamed in the dropdown, the choice kept");
+        // A new drawing while open refills.
+        var before = calls;
+        st.drawn = { survey: prCost.survey, resolved: prCost.resolved };
+        EP.refreshTeamHeaders();
+        eqs(calls, before + 1, "pr panel: a drawing change while open refills");
+        // Fold: nothing more.
+        w("ExpeditionPlannerPushHeader").click();
+        ok(st.pushOpen === false, "pr panel: folding closes it");
+        before = calls;
+        w("ExpeditionPlannerPushQuick").click();
+        st.drawn = { survey: prCost.survey, resolved: prCost.resolved };
+        EP.refreshTeamHeaders();
+        eqs(calls, before, "pr panel: once folded again, nothing calls the engine");
+        // No survey: says so without asking the engine.
+        w("ExpeditionPlannerPushHeader").click();
+        before = calls;
+        st.drawn = null;
+        w("ExpeditionPlannerPushRefresh").click();
+        ok(calls === before && table.rowCount === 0 &&
+            text("ExpeditionPlannerPushNotes").indexOf("no survey") >= 0,
+            "pr panel: no survey empties the table and says so");
+    } finally {
+        EP.ensureDock = realEnsure;
+        EP.saveTeams = realSave;
+        EP.planGuard = realGuard;
+        EP.todayIso = realToday;
+        EP.state = realState;
+        CsPushRank.rank = realRank;
+        csEpPackingTimer = null;
+        FQ.restore();
+    }
+})();
 
 // ---------------------------------------------------------------------
 // Report.

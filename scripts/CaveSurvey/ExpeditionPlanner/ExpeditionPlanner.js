@@ -88,6 +88,18 @@ ExpeditionPlanner.state = { drawn: null, docPath: null, store: null,
     // filled from (a signature and the drawn object), so a header refresh
     // refills it only when something it shows has changed.
     fitOpen: false, fitExtra: [], fitSig: null, fitDrawn: null,
+    // What's left to push: whether the section is unfolded (it starts
+    // folded and a folded section never runs the engine), the chosen
+    // preset, whether a weight was edited by hand (Custom), the six
+    // weights as the spin boxes show them (0-100), the hint word fields'
+    // text, the Show done and skipped tick, what the table was last
+    // filled from, the stations its rows show (row order), the team ids
+    // the dropdown lists and what it was filled from, and pushFilling
+    // (set while code fills the spin boxes: FILLING IS NOT EDITING).
+    // SESSION STATE ONLY, never saved; choosing a preset resets the weights.
+    pushOpen: false, pushPreset: "balanced", pushCustom: false, pushWeights: null,
+    pushPos: null, pushNeg: null, pushDone: false, pushSig: null, pushDrawn: null,
+    pushStations: [], pushTeamIds: [], pushTeamKey: null, pushFilling: false,
     // teamSqueeze's routes: {drawn, routes: {key: CsSqueeze.forTeam answer}},
     // dropped when the drawing is read again.
     squeezeCache: null };
@@ -98,7 +110,7 @@ ExpeditionPlanner.state = { drawn: null, docPath: null, store: null,
 //
 // ONE PAGE, NO TABS (Nathan, 2026-09-29: "Too easy to not enter
 // important information"). Top to bottom: Trip, People, Teams, Who
-// fits where (folded), Escalation, Card. Required fields carry a red asterisk, and Build
+// fits where (folded), What's left to push (folded), Escalation, Card. Required fields carry a red asterisk, and Build
 // cards refuses, naming every gap at once (CsTeams.missingAll), until
 // they are all filled in.
 //
@@ -486,6 +498,188 @@ ExpeditionPlanner.buildFitSection = function(layout) {
     layout.addWidget(holder, 0, 0);
 };
 
+/**
+ * 3c. WHAT'S LEFT TO PUSH: a fold-away section (folded by default, never
+ * remembered) ranking every lead (Core/CsPushRank.js): three preset
+ * buttons, six weight spin boxes, the hint word fields, Show done and
+ * skipped, Refresh, the read-only table, and a team dropdown with Add
+ * selected to team. Built from the widgets in hand only (see ensureDock):
+ * the first paint goes through a local lookup, never child(). The table
+ * is filled later, by fillPush, and only while the section is open.
+ */
+ExpeditionPlanner.buildPushSection = function(layout) {
+    var s = csEpPushDefaults(ExpeditionPlanner.state);
+    var made = {};
+    var keep = function(wd, name) {
+        wd.objectName = name;
+        made[name] = wd;
+        return wd;
+    };
+    var holder = new QWidget();
+    holder.objectName = "ExpeditionPlannerPushSection";
+    var holderLayout = new QVBoxLayout();
+    holderLayout.setContentsMargins(0, 0, 0, 0);
+    holderLayout.setSpacing(0);
+    var title = qsTr("What's left to push");
+    var shut = {};
+    if (s.pushOpen !== true) { shut[title] = true; }
+    var sec = CsPanel.section(holder, title, "", shut);
+    sec.host.objectName = "ExpeditionPlannerPushBody";
+    if (sec.header !== null) {
+        sec.header.objectName = "ExpeditionPlannerPushHeader";
+        try {
+            sec.header.styleSheet = "text-align: left; padding: 3px; font-weight: bold;";
+            sec.header.toolTip = qsTr("Click to open or fold the lead ranking");
+        } catch (eStyle) {
+        }
+        // After CsPanel's own handler, which has just folded or opened it:
+        // opening ranks the leads, folding stops every refill.
+        sec.header.clicked.connect(function() {
+            var st = ExpeditionPlanner.state;
+            st.pushOpen = sec.open === true;
+            if (st.pushOpen) {
+                ExpeditionPlanner.pushTeamsRefresh();
+                ExpeditionPlanner.fillPush(true);
+            }
+        });
+    }
+
+    var v = new QVBoxLayout();
+    v.setContentsMargins(12, 2, 0, 8);
+    v.setSpacing(4);
+    var intro = new QLabel("<span style=\"color:#777\">" + CsPanel.escapeHtml(
+        qsTr("Every lead (a lead note or an open end), best first, with why. " +
+            "Estimated from the survey and its notes only.")) + "</span>");
+    try {
+        intro.wordWrap = true;
+    } catch (eWrap) {
+    }
+    v.addWidget(intro, 0, 0);
+
+    // Presets, and which one is in use ("Custom" once a weight is edited).
+    var presetRow = new QHBoxLayout();
+    var presets = ExpeditionPlanner.PUSH_PRESETS;
+    for (var p = 0; p < presets.length; p++) {
+        var b = keep(new QPushButton(qsTr(presets[p].label)), presets[p].name);
+        b.toolTip = qsTr(presets[p].tip);
+        presetRow.addWidget(b, 0, 0);
+        csEpPushPresetClick(b, presets[p].key);
+    }
+    presetRow.addStretch(1);
+    presetRow.addWidget(keep(new QLabel(""), "ExpeditionPlannerPushPreset"), 0, 0);
+    v.addLayout(presetRow, 0);
+
+    // The six weights, two to a row.
+    var grid = CsPanel.formGrid(4);
+    var sigs = CsPushRank.SIGNALS;
+    for (var i = 0; i < sigs.length; i++) {
+        var meta = ExpeditionPlanner.PUSH_SIGNAL_LABELS[sigs[i]];
+        var label = new QLabel(qsTr(meta.label));
+        label.toolTip = qsTr(meta.tip);
+        var spin = keep(new QSpinBox(), "ExpeditionPlannerPushW_" + sigs[i]);
+        spin.toolTip = qsTr(meta.tip) + " " + qsTr("0 leaves it out; editing a weight makes the preset Custom.");
+        try {
+            spin.setMinimum(0);
+            spin.setMaximum(100);
+            spin.setMaximumWidth(70);
+        } catch (eSpin) {
+        }
+        var row = Math.floor(i / 2);
+        var col = (i % 2) * 2;
+        grid.addWidget(label, row, col);
+        grid.addWidget(spin, row, col + 1);
+    }
+    v.addLayout(grid, 0);
+
+    // Hint words.
+    var hints = CsPanel.formGrid(1);
+    hints.addWidget(new QLabel(qsTr("Worth more")), 0, 0);
+    var pos = keep(new QLineEdit(), "ExpeditionPlannerPushPos");
+    pos.text = s.pushPos;
+    pos.toolTip = qsTr("Words in a lead's notes that make it worth more, separated " +
+        "by commas. Blank uses the defaults.");
+    hints.addWidget(pos, 0, 1);
+    hints.addWidget(new QLabel(qsTr("Worth less")), 1, 0);
+    var neg = keep(new QLineEdit(), "ExpeditionPlannerPushNeg");
+    neg.text = s.pushNeg;
+    neg.toolTip = qsTr("Words in a lead's notes that make it worth less, separated " +
+        "by commas. Blank uses the defaults.");
+    hints.addWidget(neg, 1, 1);
+    v.addLayout(hints, 0);
+
+    var tickRow = new QHBoxLayout();
+    var done = keep(new QCheckBox(qsTr("Show done and skipped")), "ExpeditionPlannerPushDone");
+    done.toolTip = qsTr("Leads marked done or skip in the Station Table are hidden " +
+        "unless this is ticked.");
+    done.checked = s.pushDone === true;
+    var refresh = keep(new QPushButton(qsTr("Refresh")), "ExpeditionPlannerPushRefresh");
+    refresh.toolTip = qsTr("Rank the leads again.");
+    tickRow.addWidget(done, 0, 0);
+    tickRow.addStretch(1);
+    tickRow.addWidget(refresh, 0, 0);
+    v.addLayout(tickRow, 0);
+
+    var table = ExpeditionPlanner.calloutTable("ExpeditionPlannerPushTable",
+        [qsTr("Rank"), qsTr("Station"), qsTr("Score"), qsTr("Status"), qsTr("Why")], 120, 340);
+    table.toolTip = qsTr("Every lead, best first. Read-only: mark a lead done or " +
+        "skip in the Station Table.");
+    try {
+        table.selectionBehavior = QAbstractItemView.SelectRows;
+        table.selectionMode = QAbstractItemView.SingleSelection;
+        table.editTriggers = QAbstractItemView.NoEditTriggers;
+        table.wordWrap = true;
+    } catch (eSel) {
+    }
+    v.addWidget(table, 0, 0);
+
+    var addRow = new QHBoxLayout();
+    addRow.addWidget(new QLabel(qsTr("Team")), 0, 0);
+    // Not editable: a team is picked, never typed (no completer to crash).
+    var team = keep(new QComboBox(), "ExpeditionPlannerPushTeam");
+    team.toolTip = qsTr("The team Add selected to team puts the lead on.");
+    var add = keep(new QPushButton(qsTr("Add selected to team")), "ExpeditionPlannerPushAdd");
+    add.toolTip = qsTr("Put the selected lead on the chosen team's stops.");
+    addRow.addWidget(team, 1, 0);
+    addRow.addWidget(add, 0, 0);
+    v.addLayout(addRow, 0);
+
+    var status = new QLabel("");
+    status.objectName = "ExpeditionPlannerPushStatus";
+    var notes = new QLabel("");
+    notes.objectName = "ExpeditionPlannerPushNotes";
+    try {
+        status.wordWrap = true;
+        notes.wordWrap = true;
+        notes.visible = false;
+    } catch (eWrap2) {
+    }
+    v.addWidget(status, 0, 0);
+    v.addWidget(notes, 0, 0);
+
+    // First paint from the widgets in hand, BEFORE any handler is connected.
+    csEpPushPaint(s, function(name) { return made[name] === undefined ? null : made[name]; });
+    for (var k = 0; k < sigs.length; k++) {
+        csEpPushSpinChanged(made["ExpeditionPlannerPushW_" + sigs[k]], sigs[k]);
+    }
+    pos.editingFinished.connect(function() {
+        ExpeditionPlanner.pushHintsEdited("pushPos", String(pos.text));
+    });
+    neg.editingFinished.connect(function() {
+        ExpeditionPlanner.pushHintsEdited("pushNeg", String(neg.text));
+    });
+    csEpOnToggle(done, function(on) {
+        ExpeditionPlanner.pushDoneToggled(typeof on === "boolean" ? on :
+            ExpeditionPlanner.boxChecked(done));
+    });
+    refresh.clicked.connect(function() { ExpeditionPlanner.pushRefreshClicked(); });
+    add.clicked.connect(function() { ExpeditionPlanner.pushAddClicked(); });
+
+    sec.host.setLayout(v);
+    holderLayout.addWidget(sec.box, 0, 0);
+    holder.setLayout(holderLayout);
+    layout.addWidget(holder, 0, 0);
+};
+
 /** 4. ESCALATION: who topside is, and what they do. */
 ExpeditionPlanner.buildEscalationSection = function(layout) {
     ExpeditionPlanner.heading(layout, qsTr("Escalation"));
@@ -586,6 +780,7 @@ ExpeditionPlanner.buildPage = function() {
         ExpeditionPlanner.buildRosterSection,
         ExpeditionPlanner.buildTeamsSection,
         ExpeditionPlanner.buildFitSection,
+        ExpeditionPlanner.buildPushSection,
         ExpeditionPlanner.buildEscalationSection,
         ExpeditionPlanner.buildCardSection];
     for (var i = 0; i < sections.length; i++) {
@@ -2025,6 +2220,9 @@ ExpeditionPlanner.showCalloutSettings = function() {
     // Nor do the old drawing's extra Who-fits-where stops belong here.
     s.fitExtra = [];
     s.fitSig = null;
+    // Nor the old drawing's ranked leads (the push settings are kept).
+    s.pushSig = null;
+    s.pushStations = [];
     // The teams, migrated from the legacy single schedule when the file
     // has none. Loading writes nothing.
     ExpeditionPlanner.loadTeams(trip, s.store === null ? null : s.store.settings);
@@ -2532,6 +2730,10 @@ ExpeditionPlanner.refreshTeamHeaders = function() {
     ExpeditionPlanner.updateSuggestButtons();
     // An open Who fits where follows the teams, the party and the drawing.
     ExpeditionPlanner.fitMaybeRefresh();
+    // What's left to push: its team dropdown follows the teams; an open
+    // ranking follows the drawing and its Station Table marks.
+    ExpeditionPlanner.pushTeamsRefresh();
+    ExpeditionPlanner.pushMaybeRefresh();
 };
 
 /** After an edit of team `id`: it is the active team; repaint headers and status. */
@@ -4226,6 +4428,521 @@ ExpeditionPlanner.fitRefreshClicked = function() {
         return;
     }
     ExpeditionPlanner.fillFit(true);
+};
+
+// ---------------------------------------------------------------------
+// What's left to push (the lead ranking)
+// ---------------------------------------------------------------------
+//
+// Core/CsPushRank.js does the work: every lead (a lead note or an open
+// end) scored on six signals, each left out when it cannot be computed,
+// with the reasons in plain words. The panel only chooses the weights and
+// hint words, carries the Station Table marks in as statuses, and shows
+// the answer.
+//
+// The logic is in plain functions (pushWeightsFor, parseHintWords,
+// pushInput, pushRowText, addLeadToTeam) so it is tested without widgets.
+// The table is filled by fillPush, which finds its widgets by objectName
+// at the time and does nothing while the section is folded: a folded
+// section never runs the engine. pushMaybeRefresh (from
+// refreshTeamHeaders, which runs after every team, party or drawing
+// change) refills it only when the engine's input has changed: teams and
+// the party are not part of it, so only the dropdown follows them.
+//
+// The settings are session state (state.push*), never saved.
+
+/** The presets in button order: engine key, label, objectName, tooltip. */
+ExpeditionPlanner.PUSH_PRESETS = [
+    { key: "quick", label: "Quick wins", name: "ExpeditionPlannerPushQuick",
+        tip: "Favour leads that are cheap to reach and work." },
+    { key: "potential", label: "Big potential", name: "ExpeditionPlannerPushPotential",
+        tip: "Favour blank ground, likely connections and the cave's edges." },
+    { key: "balanced", label: "Balanced", name: "ExpeditionPlannerPushBalanced",
+        tip: "A bit of everything (the default)." }
+];
+
+/** Each signal's spin box label and tooltip. */
+ExpeditionPlanner.PUSH_SIGNAL_LABELS = {
+    cost: { label: "Cost", tip: "Time to walk in, work the lead and walk out; a pitch costs more." },
+    blank: { label: "Blank ground", tip: "How far the lead's heading runs before it meets surveyed passage." },
+    connect: { label: "Connection", tip: "The heading points at passage that is far away by the surveyed way." },
+    elevation: { label: "Elevation edge", tip: "How near the top or the bottom of the surveyed cave." },
+    recency: { label: "Time since visited", tip: "How long since the lead's trip." },
+    hints: { label: "Note hints", tip: "Words in the lead's notes, from the fields below." }
+};
+
+/** A preset's weights as whole numbers 0-100 for the spin boxes. */
+ExpeditionPlanner.pushWeightsFor = function(preset) {
+    var w = CsPushRank.weightsFor(preset);
+    var out = {};
+    for (var i = 0; i < CsPushRank.SIGNALS.length; i++) {
+        var k = CsPushRank.SIGNALS[i];
+        out[k] = Math.max(0, Math.min(100, Math.round(w[k] * 100)));
+    }
+    return out;
+};
+
+/**
+ * Hint words from a field: split on commas, semicolons and newlines,
+ * trimmed, lower-cased, deduped, blanks dropped. [] means "use the
+ * engine's defaults". An array is read as the list itself.
+ */
+ExpeditionPlanner.parseHintWords = function(text) {
+    var src = Object.prototype.toString.call(text) === "[object Array]" ? text.join(",") :
+        (text === undefined || text === null ? "" : String(text));
+    var parts = src.split(/[,;\r\n]+/);
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+        var w = parts[i].replace(/^\s+|\s+$/g, "").replace(/\s+/g, " ").toLowerCase();
+        if (w !== "" && out.indexOf(w) < 0) { out.push(w); }
+    }
+    return out;
+};
+
+var csEpPushHasPreset = function(key) {
+    return typeof key === "string" &&
+        Object.prototype.hasOwnProperty.call(CsPushRank.PRESETS, key);
+};
+
+/** Fill in any push setting the state lacks (older state objects, tests). */
+var csEpPushDefaults = function(s) {
+    if (!csEpPushHasPreset(s.pushPreset)) { s.pushPreset = "balanced"; }
+    if (s.pushWeights === null || typeof s.pushWeights !== "object") {
+        s.pushWeights = ExpeditionPlanner.pushWeightsFor(s.pushPreset);
+    }
+    if (typeof s.pushPos !== "string") { s.pushPos = CsPushRank.POSITIVE.join(", "); }
+    if (typeof s.pushNeg !== "string") { s.pushNeg = CsPushRank.NEGATIVE.join(", "); }
+    s.pushCustom = s.pushCustom === true;
+    s.pushDone = s.pushDone === true;
+    return s;
+};
+
+/** The controls as pushInput reads them, from the session state. */
+ExpeditionPlanner.pushControls = function(state) {
+    var s = csEpPushDefaults(csEpObj(state));
+    var w = {};
+    for (var i = 0; i < CsPushRank.SIGNALS.length; i++) {
+        w[CsPushRank.SIGNALS[i]] = s.pushWeights[CsPushRank.SIGNALS[i]];
+    }
+    return { preset: s.pushPreset, custom: s.pushCustom, weights: w,
+        positive: s.pushPos, negative: s.pushNeg, includeDone: s.pushDone };
+};
+
+/**
+ * The engine's input: the drawn survey, resolved network, unit and pace
+ * (as Who fits where reads them), the Station Table rows with this
+ * drawing's marks (stations.json) and those marks as {station: status},
+ * today's LOCAL date, the preset -- or, when a weight was edited, every
+ * weight as the spin boxes show it -- the hint words (none typed: the
+ * engine's defaults) and includeDone. Never throws.
+ * \param controls {preset, custom, weights, positive, negative, includeDone}
+ */
+ExpeditionPlanner.pushInput = function(state, controls) {
+    var s = csEpObj(state);
+    var c = csEpObj(controls);
+    var input = { survey: null, resolved: null, unit: "ft", config: {}, statuses: {},
+        today: "", preset: csEpPushHasPreset(c.preset) ? c.preset : "balanced",
+        includeDone: c.includeDone === true };
+    try {
+        var o = csEpSqueezeOpts(s);
+        input.survey = o.survey === undefined ? null : o.survey;
+        input.resolved = o.resolved === undefined ? null : o.resolved;
+        input.unit = o.unit;
+        input.config = o.config;
+    } catch (eOpts) {
+    }
+    try {
+        input.today = String(ExpeditionPlanner.todayIso());
+    } catch (eToday) {
+        input.today = "";
+    }
+    if (c.custom === true) {
+        var cw = csEpObj(c.weights);
+        input.weights = {};
+        for (var i = 0; i < CsPushRank.SIGNALS.length; i++) {
+            var k = CsPushRank.SIGNALS[i];
+            var n = Number(cw[k]);
+            if (isFinite(n) && n >= 0) { input.weights[k] = n; }
+        }
+    }
+    var pos = ExpeditionPlanner.parseHintWords(c.positive);
+    var neg = ExpeditionPlanner.parseHintWords(c.negative);
+    if (pos.length > 0) { input.positive = pos; }
+    if (neg.length > 0) { input.negative = neg; }
+    if (input.survey !== null) {
+        try {
+            var rows = CsStationTable.rows(input.survey, input.resolved, {});
+            var store = csEpObj(s.store);
+            if (Object.prototype.toString.call(store.entries) === "[object Array]") {
+                CsStationStore.reconcile(rows, store);
+            }
+            for (var r = 0; r < rows.length; r++) {
+                if (typeof rows[r].status === "string" && rows[r].status !== "") {
+                    input.statuses[rows[r].station] = rows[r].status;
+                }
+            }
+            input.rows = rows;
+        } catch (eRows) {
+            // The engine builds unmarked rows itself.
+            input.statuses = {};
+        }
+    }
+    return input;
+};
+
+/**
+ * A table row's text: {rank ("" when none given), station, score (one
+ * decimal), status, why (the reasons joined " · ")}. Never throws.
+ */
+ExpeditionPlanner.pushRowText = function(lead, rank) {
+    var l = csEpObj(lead);
+    var total = Number(l.total);
+    var reasons = csEpArr(l.reasons);
+    var why = [];
+    for (var i = 0; i < reasons.length; i++) {
+        var t = csEpTrim(reasons[i]);
+        if (t !== "") { why.push(t); }
+    }
+    return { rank: (typeof rank === "number" && isFinite(rank)) ? String(rank) : "",
+        station: csEpTrim(l.station),
+        score: (isFinite(total) ? total : 0).toFixed(1),
+        status: csEpTrim(l.status),
+        why: why.length > 0 ? why.join(" · ") : qsTr("nothing to rank it by") };
+};
+
+/** Fill the push table in hand: a row per lead, ranked from 1. */
+ExpeditionPlanner.fillPushTable = function(table, leads) {
+    var list = csEpArr(leads);
+    table.setRowCount(0);
+    table.setRowCount(list.length);
+    for (var r = 0; r < list.length; r++) {
+        var t = ExpeditionPlanner.pushRowText(list[r], r + 1);
+        var grey = t.status === "done" || t.status === "skip";
+        table.setItem(r, 0, ExpeditionPlanner.readOnlyItem(t.rank, grey));
+        table.setItem(r, 1, ExpeditionPlanner.readOnlyItem(t.station, grey));
+        table.setItem(r, 2, ExpeditionPlanner.readOnlyItem(t.score, grey));
+        table.setItem(r, 3, ExpeditionPlanner.readOnlyItem(t.status, grey));
+        table.setItem(r, 4, ExpeditionPlanner.readOnlyItem(t.why, grey, t.why));
+    }
+    // Rank, Station, Score and Status fit their text; Why takes the rest
+    // (the last section stretches) and wraps, so each row is as tall as
+    // its reasons.
+    try {
+        for (var c = 0; c < 4; c++) { table.resizeColumnToContents(c); }
+    } catch (eSize) {
+    }
+    try {
+        table.resizeRowsToContents();
+    } catch (eRows) {
+    }
+};
+
+/**
+ * Put `station` on team number `teamIndex` (0-based in state.teams)
+ * through addTeamStop, by that team's id. \return {done, why}: why is a
+ * plain sentence for the status line ("B20 added to Team 2", the data
+ * layer's refusal, or that it is already there).
+ */
+ExpeditionPlanner.addLeadToTeam = function(station, teamIndex) {
+    var teams = csEpArr(ExpeditionPlanner.state.teams);
+    if (typeof teamIndex !== "number" || teamIndex < 0 || teamIndex >= teams.length ||
+            Math.floor(teamIndex) !== teamIndex) {
+        return { done: false, why: qsTr("Pick a team first.") };
+    }
+    var team = teams[teamIndex];
+    var label = ExpeditionPlanner.teamLabel(team, teamIndex);
+    var name = ExpeditionPlanner.matchStation(csEpArr(ExpeditionPlanner.state.stations),
+        csEpTrim(station));
+    var r = ExpeditionPlanner.addTeamStop(team.id, station);
+    if (r.done === true) {
+        var said = qsTr("%1 added to %2").arg(name === null ? csEpTrim(station) : name).arg(label);
+        return { done: true, why: r.why === "" ? said : said + " (" + r.why + ")" };
+    }
+    if (r.why === "" && name !== null) {
+        return { done: false, why: qsTr("%1 is already a stop on %2.").arg(name).arg(label) };
+    }
+    return { done: false, why: r.why };
+};
+
+/** Mark the active preset (bold), name it (or Custom), show the weights; fill-guarded. */
+var csEpPushPaint = function(s, find) {
+    var presets = ExpeditionPlanner.PUSH_PRESETS;
+    var shown = qsTr("Custom");
+    for (var p = 0; p < presets.length; p++) {
+        var on = s.pushCustom !== true && presets[p].key === s.pushPreset;
+        if (on) { shown = qsTr(presets[p].label); }
+        var b = find(presets[p].name);
+        if (b !== null) {
+            try {
+                b.styleSheet = on ? "font-weight: bold;" : "";
+            } catch (eMark) {
+            }
+        }
+    }
+    var label = find("ExpeditionPlannerPushPreset");
+    if (label !== null) { label.text = qsTr("Preset: %1").arg(shown); }
+    var was = s.pushFilling;
+    s.pushFilling = true;
+    try {
+        for (var i = 0; i < CsPushRank.SIGNALS.length; i++) {
+            var k = CsPushRank.SIGNALS[i];
+            var spin = find("ExpeditionPlannerPushW_" + k);
+            if (spin === null) { continue; }
+            try {
+                spin.setValue(s.pushWeights[k]);
+            } catch (eVal) {
+            }
+        }
+    } finally {
+        s.pushFilling = was;
+    }
+};
+
+/** A preset button's click. */
+var csEpPushPresetClick = function(button, key) {
+    button.clicked.connect(function() { ExpeditionPlanner.pushPresetClicked(key); });
+};
+
+/** A weight spin box's valueChanged: a change by hand makes the preset Custom. */
+var csEpPushSpinChanged = function(spin, key) {
+    if (spin === undefined || spin === null) { return; }
+    var onValue = function(value) {
+        var s = ExpeditionPlanner.state;
+        if (s.pushFilling === true) { return; }
+        csEpPushDefaults(s);
+        var n = typeof value === "number" ? value : Number(spin.value);
+        if (!isFinite(n)) { return; }
+        s.pushWeights[key] = Math.max(0, Math.min(100, Math.round(n)));
+        s.pushCustom = true;
+        csEpPushPaint(s, ExpeditionPlanner.child);
+        ExpeditionPlanner.fillPush(true);
+    };
+    try {
+        spin["valueChanged(int)"].connect(onValue);
+    } catch (eVal) {
+        try {
+            spin.valueChanged.connect(onValue);
+        } catch (eVal2) {
+        }
+    }
+};
+
+/** A preset chosen: its weights back in the spin boxes, Custom dropped, refilled. */
+ExpeditionPlanner.pushPresetClicked = function(key) {
+    var s = csEpPushDefaults(ExpeditionPlanner.state);
+    s.pushPreset = csEpPushHasPreset(key) ? key : "balanced";
+    s.pushCustom = false;
+    s.pushWeights = ExpeditionPlanner.pushWeightsFor(s.pushPreset);
+    csEpPushPaint(s, ExpeditionPlanner.child);
+    ExpeditionPlanner.fillPush(true);
+};
+
+/** A hint field left (editingFinished): refilled only when its text changed. */
+ExpeditionPlanner.pushHintsEdited = function(field, text) {
+    var s = csEpPushDefaults(ExpeditionPlanner.state);
+    var t = String(text === undefined || text === null ? "" : text);
+    if (s[field] === t) { return; }
+    s[field] = t;
+    ExpeditionPlanner.fillPush(true);
+};
+
+/** Show done and skipped ticked or unticked. */
+ExpeditionPlanner.pushDoneToggled = function(on) {
+    var s = csEpPushDefaults(ExpeditionPlanner.state);
+    s.pushDone = on === true;
+    ExpeditionPlanner.fillPush(true);
+};
+
+/** What the table shows depends on: the engine's input bar the survey objects, and the marks. */
+var csEpPushSignature = function(s, input) {
+    var copy = {};
+    for (var k in input) {
+        if (Object.prototype.hasOwnProperty.call(input, k) && k !== "survey" &&
+                k !== "resolved" && k !== "rows") {
+            copy[k] = input[k];
+        }
+    }
+    // Station Table team notes count as hints, so every mark field counts.
+    copy.entries = csEpArr(csEpObj(s.store).entries);
+    return JSON.stringify(copy);
+};
+
+/** The combo's current index, or -1. currentIndex is a property on this bridge. */
+var csEpComboIndex = function(combo) {
+    var n = -1;
+    try {
+        n = Number(combo.currentIndex);
+    } catch (e) {
+        n = -1;
+    }
+    return (isFinite(n) && n >= 0) ? n : -1;
+};
+
+var csEpSetComboIndex = function(combo, i) {
+    try {
+        combo.setCurrentIndex(i);
+        return;
+    } catch (e) {
+    }
+    try {
+        combo.currentIndex = i;
+    } catch (e2) {
+    }
+};
+
+/**
+ * Refill the team dropdown when the teams' names or ids have changed,
+ * keeping the chosen team (by id) where it still exists. Runs whether
+ * the section is open or not: it costs nothing.
+ */
+ExpeditionPlanner.pushTeamsRefresh = function() {
+    var s = ExpeditionPlanner.state;
+    var combo = ExpeditionPlanner.child("ExpeditionPlannerPushTeam");
+    if (combo === null) {
+        return;
+    }
+    var teams = csEpArr(s.teams);
+    var names = [];
+    var ids = [];
+    for (var i = 0; i < teams.length; i++) {
+        names.push(ExpeditionPlanner.teamLabel(teams[i], i));
+        ids.push(String(csEpObj(teams[i]).id));
+    }
+    var key = JSON.stringify([names, ids]);
+    if (key === s.pushTeamKey) {
+        return;
+    }
+    var old = csEpArr(s.pushTeamIds);
+    var at = csEpComboIndex(combo);
+    var keepId = (at >= 0 && at < old.length) ? old[at] : "";
+    s.pushTeamKey = key;
+    s.pushTeamIds = ids;
+    try {
+        combo.clear();
+        for (var n = 0; n < names.length; n++) { combo.addItem(names[n]); }
+    } catch (eFill) {
+    }
+    var pick = ids.indexOf(keepId);
+    if (pick < 0) { pick = ids.indexOf(String(s.activeTeamId)); }
+    if (pick < 0) { pick = 0; }
+    if (ids.length > 0) { csEpSetComboIndex(combo, pick); }
+};
+
+/** The status line under the table. */
+ExpeditionPlanner.pushSay = function(text) {
+    var label = ExpeditionPlanner.child("ExpeditionPlannerPushStatus");
+    if (label !== null) { label.text = String(text === undefined || text === null ? "" : text); }
+};
+
+/** The grey notes line: why the table is empty, then the engine's notes; hidden when blank. */
+var csEpPushNotes = function(text) {
+    var label = ExpeditionPlanner.child("ExpeditionPlannerPushNotes");
+    if (label === null) {
+        return;
+    }
+    try {
+        label.text = text === "" ? "" : "<span style=\"color:#777\">" +
+            CsPanel.escapeHtml(text) + "</span>";
+        label.visible = text !== "";
+    } catch (e) {
+    }
+};
+
+/**
+ * Rank the leads into the table -- only while the section is open.
+ * `force` refills even when the engine's input has not changed (opening
+ * it, Refresh, a control changed). No survey: an empty table and a note,
+ * without asking the engine.
+ * \return true when the table was refilled
+ */
+ExpeditionPlanner.fillPush = function(force) {
+    var s = ExpeditionPlanner.state;
+    if (s.pushOpen !== true) {
+        return false;
+    }
+    var table = ExpeditionPlanner.child("ExpeditionPlannerPushTable");
+    if (table === null) {
+        return false;
+    }
+    csEpPushDefaults(s);
+    var input = ExpeditionPlanner.pushInput(s, ExpeditionPlanner.pushControls(s));
+    var sig = csEpPushSignature(s, input);
+    if (force !== true && sig === s.pushSig && s.pushDrawn === s.drawn) {
+        return false;
+    }
+    s.pushSig = sig;
+    s.pushDrawn = s.drawn;
+    var res = { leads: [], notes: [] };
+    if (input.survey !== null) {
+        try {
+            res = CsPushRank.rank(input);
+        } catch (eRank) {
+            res = { leads: [], notes: [] };
+        }
+    }
+    var leads = csEpArr(res.leads);
+    s.pushStations = [];
+    for (var i = 0; i < leads.length; i++) { s.pushStations.push(csEpTrim(csEpObj(leads[i]).station)); }
+    try {
+        ExpeditionPlanner.fillPushTable(table, leads);
+    } catch (eFill) {
+    }
+    var lines = [];
+    if (input.survey === null) {
+        lines.push(qsTr("This drawing holds no survey."));
+    } else if (leads.length === 0) {
+        lines.push(input.includeDone ? qsTr("No leads: no lead notes and no open ends.") :
+            qsTr("No leads to push. Leads marked done or skip are hidden: tick Show done and skipped."));
+    }
+    var notes = csEpArr(res.notes);
+    for (var n = 0; n < notes.length; n++) { lines.push(csEpTrim(notes[n])); }
+    csEpPushNotes(lines.join("; "));
+    return true;
+};
+
+/** Refill the ranking if it is open and its input has changed. */
+ExpeditionPlanner.pushMaybeRefresh = function() {
+    return ExpeditionPlanner.fillPush(false);
+};
+
+/** What's left to push: Refresh. */
+ExpeditionPlanner.pushRefreshClicked = function() {
+    if (!ExpeditionPlanner.planGuard()) {
+        return;
+    }
+    ExpeditionPlanner.fillPush(true);
+};
+
+/** Add selected to team: the table's selected lead onto the dropdown's team. */
+ExpeditionPlanner.pushAddClicked = function() {
+    var s = ExpeditionPlanner.state;
+    var table = ExpeditionPlanner.child("ExpeditionPlannerPushTable");
+    var row = table === null ? -1 : ExpeditionPlanner.selectedRowOf(table);
+    var stations = csEpArr(s.pushStations);
+    if (row < 0 || row >= stations.length || s.pushOpen !== true) {
+        ExpeditionPlanner.pushSay(qsTr("Select a lead in the table first."));
+        return;
+    }
+    if (!ExpeditionPlanner.planGuard()) {
+        return;
+    }
+    ExpeditionPlanner.pushTeamsRefresh();
+    var combo = ExpeditionPlanner.child("ExpeditionPlannerPushTeam");
+    var at = combo === null ? -1 : csEpComboIndex(combo);
+    var ids = csEpArr(s.pushTeamIds);
+    var teamAt = (at >= 0 && at < ids.length) ? ExpeditionPlanner.teamIndex(ids[at]) : -1;
+    var r = ExpeditionPlanner.addLeadToTeam(stations[row], teamAt);
+    ExpeditionPlanner.pushSay(r.why);
+    if (r.done !== true) {
+        return;
+    }
+    var team = s.teams[teamAt];
+    // The team's own stop list, as its Add stop button refreshes it.
+    var stops = ExpeditionPlanner.child("ExpeditionPlannerTeam" + (teamAt + 1) + "_Stops");
+    if (stops !== null) {
+        ExpeditionPlanner.fillStopsTable(stops, csEpTeamStops(team.id));
+    }
+    ExpeditionPlanner.teamChanged(team.id, "");
 };
 
 // ---------------------------------------------------------------------
