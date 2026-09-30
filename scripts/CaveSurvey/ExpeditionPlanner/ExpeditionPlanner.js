@@ -81,15 +81,24 @@ ExpeditionPlanner.state = { drawn: null, docPath: null, store: null,
     // The teams as they were before the last applied suggestion (a deep
     // copy), or null: Undo suggestion puts them back. Any manual team
     // edit or a drawing change drops it.
-    suggestUndo: null };
+    suggestUndo: null,
+    // Who fits where: whether the section is unfolded (it starts folded
+    // and a folded section never asks the engine anything), the extra
+    // stops added there (this drawing only), and what the matrix was last
+    // filled from (a signature and the drawn object), so a header refresh
+    // refills it only when something it shows has changed.
+    fitOpen: false, fitExtra: [], fitSig: null, fitDrawn: null,
+    // teamSqueeze's routes: {drawn, routes: {key: CsSqueeze.forTeam answer}},
+    // dropped when the drawing is read again.
+    squeezeCache: null };
 
 // ---------------------------------------------------------------------
 // The panel
 // ---------------------------------------------------------------------
 //
 // ONE PAGE, NO TABS (Nathan, 2026-09-29: "Too easy to not enter
-// important information"). Top to bottom: Trip, People, Teams,
-// Escalation, Card. Required fields carry a red asterisk, and Build
+// important information"). Top to bottom: Trip, People, Teams, Who
+// fits where (folded), Escalation, Card. Required fields carry a red asterisk, and Build
 // cards refuses, naming every gap at once (CsTeams.missingAll), until
 // they are all filled in.
 //
@@ -375,6 +384,108 @@ ExpeditionPlanner.buildTeamsSection = function(layout) {
     layout.addWidget(body, 0, 0);
 };
 
+/**
+ * 3b. WHO FITS WHERE: a fold-away section (CsPanel.section, folded by
+ * default, never remembered) holding the stops-by-people squeeze matrix,
+ * a picker for extra stops, Refresh and a status line. Built from the
+ * widgets in hand only (see ensureDock); the matrix is filled later, by
+ * fillFit, and only while the section is open.
+ */
+ExpeditionPlanner.buildFitSection = function(layout) {
+    var holder = new QWidget();
+    holder.objectName = "ExpeditionPlannerFitSection";
+    var holderLayout = new QVBoxLayout();
+    holderLayout.setContentsMargins(0, 0, 0, 0);
+    holderLayout.setSpacing(0);
+    var title = qsTr("Who fits where");
+    var shut = {};
+    if (ExpeditionPlanner.state.fitOpen !== true) { shut[title] = true; }
+    var sec = CsPanel.section(holder, title, "", shut);
+    sec.host.objectName = "ExpeditionPlannerFitBody";
+    if (sec.header !== null) {
+        sec.header.objectName = "ExpeditionPlannerFitHeader";
+        try {
+            sec.header.styleSheet = "text-align: left; padding: 3px; font-weight: bold;";
+            sec.header.toolTip = qsTr("Click to open or fold who fits where");
+        } catch (eStyle) {
+        }
+        // After CsPanel's own handler, which has just folded or opened it:
+        // opening fills the matrix, folding stops every refill.
+        sec.header.clicked.connect(function() {
+            var st = ExpeditionPlanner.state;
+            st.fitOpen = sec.open === true;
+            if (st.fitOpen) {
+                ExpeditionPlanner.fillFit(true);
+            }
+        });
+    }
+
+    var v = new QVBoxLayout();
+    v.setContentsMargins(12, 2, 0, 8);
+    v.setSpacing(4);
+    var intro = new QLabel("<span style=\"color:#777\">" + CsPanel.escapeHtml(
+        qsTr("Each stop's tightest measured passage against each person's " +
+            "squeeze limit. NO = may not fit; ? = limit or width unknown; " +
+            "- = not on the surveyed line.")) + "</span>");
+    try {
+        intro.wordWrap = true;
+    } catch (eWrap) {
+    }
+    v.addWidget(intro, 0, 0);
+    var table = ExpeditionPlanner.calloutTable("ExpeditionPlannerFitTable",
+        [qsTr("Stop"), qsTr("Tightest passage")], 90, 260);
+    table.toolTip = qsTr("Every stop on a team, plus the stops added below, by " +
+        "everyone ticked Going. Read-only: edit a person to change their limit.");
+    try {
+        table.selectionBehavior = QAbstractItemView.SelectRows;
+        table.selectionMode = QAbstractItemView.SingleSelection;
+        table.editTriggers = QAbstractItemView.NoEditTriggers;
+    } catch (eSel) {
+    }
+    v.addWidget(table, 0, 0);
+    var pickRow = new QHBoxLayout();
+    var picker = new QComboBox();
+    picker.objectName = "ExpeditionPlannerFitPicker";
+    picker.toolTip = qsTr("Type or pick a station to add to the matrix.");
+    try {
+        picker.setEditable(true);
+    } catch (eEdit) {
+        try {
+            picker.editable = true;
+        } catch (eEdit2) {
+        }
+    }
+    try {
+        // Enter must not add typed text to the list (see buildTeamSection).
+        picker.insertPolicy = QComboBox.NoInsert;
+    } catch (eIns) {
+    }
+    var add = new QPushButton(qsTr("Add stop"));
+    add.objectName = "ExpeditionPlannerFitAdd";
+    add.toolTip = qsTr("Add the station in the box to the matrix. It goes on no team.");
+    var refresh = new QPushButton(qsTr("Refresh"));
+    refresh.objectName = "ExpeditionPlannerFitRefresh";
+    refresh.toolTip = qsTr("Work the matrix out again.");
+    pickRow.addWidget(picker, 1, 0);
+    pickRow.addWidget(add, 0, 0);
+    pickRow.addWidget(refresh, 0, 0);
+    v.addLayout(pickRow, 0);
+    var status = new QLabel("");
+    status.objectName = "ExpeditionPlannerFitStatus";
+    try {
+        status.wordWrap = true;
+    } catch (eWrap2) {
+    }
+    v.addWidget(status, 0, 0);
+    add.clicked.connect(function() { ExpeditionPlanner.fitAddClicked(); });
+    refresh.clicked.connect(function() { ExpeditionPlanner.fitRefreshClicked(); });
+
+    sec.host.setLayout(v);
+    holderLayout.addWidget(sec.box, 0, 0);
+    holder.setLayout(holderLayout);
+    layout.addWidget(holder, 0, 0);
+};
+
 /** 4. ESCALATION: who topside is, and what they do. */
 ExpeditionPlanner.buildEscalationSection = function(layout) {
     ExpeditionPlanner.heading(layout, qsTr("Escalation"));
@@ -474,6 +585,7 @@ ExpeditionPlanner.buildPage = function() {
     var sections = [ExpeditionPlanner.buildTripSection,
         ExpeditionPlanner.buildRosterSection,
         ExpeditionPlanner.buildTeamsSection,
+        ExpeditionPlanner.buildFitSection,
         ExpeditionPlanner.buildEscalationSection,
         ExpeditionPlanner.buildCardSection];
     for (var i = 0; i < sections.length; i++) {
@@ -697,6 +809,10 @@ ExpeditionPlanner.fillPicker = function() {
         if (picker !== null) {
             ExpeditionPlanner.fillPickerWidget(picker, ExpeditionPlanner.state.stations);
         }
+    }
+    var fit = ExpeditionPlanner.child("ExpeditionPlannerFitPicker");
+    if (fit !== null) {
+        ExpeditionPlanner.fillPickerWidget(fit, ExpeditionPlanner.state.stations);
     }
 };
 
@@ -1906,6 +2022,9 @@ ExpeditionPlanner.showCalloutSettings = function() {
         s.store.settings.trip : CsStationStore.emptyTrip();
     // Another drawing: a suggestion applied to the old one cannot be undone here.
     s.suggestUndo = null;
+    // Nor do the old drawing's extra Who-fits-where stops belong here.
+    s.fitExtra = [];
+    s.fitSig = null;
     // The teams, migrated from the legacy single schedule when the file
     // has none. Loading writes nothing.
     ExpeditionPlanner.loadTeams(trip, s.store === null ? null : s.store.settings);
@@ -2398,6 +2517,8 @@ ExpeditionPlanner.refreshTeamHeaders = function() {
     ExpeditionPlanner.teamSay();
     ExpeditionPlanner.updatePacketButton();
     ExpeditionPlanner.updateSuggestButtons();
+    // An open Who fits where follows the teams, the party and the drawing.
+    ExpeditionPlanner.fitMaybeRefresh();
 };
 
 /** After an edit of team `id`: it is the active team; repaint headers and status. */
@@ -3731,6 +3852,351 @@ ExpeditionPlanner.suggestClicked = function() {
 };
 
 // ---------------------------------------------------------------------
+// Who fits where (the squeeze view)
+// ---------------------------------------------------------------------
+//
+// Core/CsSqueeze.js does the work: a stop's tightest measured passage on
+// the round trip from the survey's first station, against each person's
+// squeeze limit from the directory. A recorded width of 0 is UNMEASURED,
+// never a squeeze; an unknown limit or width is "?", never a block.
+//
+// The logic is in plain functions (fitRows, the text helpers,
+// teamSqueeze, addFitStop) so it is tested without widgets. The matrix
+// is filled by fillFit, which finds its table by objectName at the time
+// and does nothing while the section is folded: a folded section never
+// asks the engine anything. fitMaybeRefresh (from refreshTeamHeaders,
+// which runs after every team, party or drawing change) refills it only
+// when what it shows has changed.
+//
+// Every team also gets a squeeze line under its members and a red mark
+// in its header (refreshTeamHeaders), from teamSqueeze: CsSqueeze.forTeam
+// over the team's stops, cached per stop set until the drawing is read
+// again, then teamIssues and teamNotes against the members now.
+
+/** The survey, resolved network, unit and pace the squeeze engine needs; never child(). */
+var csEpSqueezeOpts = function(s) {
+    var drawn = (s.drawn !== null && s.drawn !== undefined) ? s.drawn : null;
+    var survey = drawn === null ? null : drawn.survey;
+    var unit = "ft";
+    try {
+        if (survey !== null && survey !== undefined) { unit = ExpeditionPlanner.unitOf(survey); }
+    } catch (eUnit) {
+        unit = "ft";
+    }
+    // The stored pace, as suggestInput reads it. Widths do not depend on
+    // it; it is passed so every route is planned the same way.
+    var stored = (s.store !== null && s.store !== undefined && s.store.settings) ?
+        s.store.settings.pace : null;
+    var config = ExpeditionPlanner.paceBlock(stored, null);
+    if (stored !== null && typeof stored === "object" && stored.paceFtPerMin !== undefined) {
+        config.paceFtPerMin = stored.paceFtPerMin;
+    }
+    return { survey: survey === undefined ? null : survey,
+        resolved: drawn === null ? null : drawn.resolved, unit: unit, config: config };
+};
+
+/** Every stop on any team (team order, trimmed, deduped), then the extra ones. */
+var csEpFitStops = function(s, extraStops) {
+    var out = [];
+    var seen = {};
+    var push = function(v) {
+        var st = csEpTrim(v);
+        if (st === "" || seen["#" + st] === true) { return; }
+        seen["#" + st] = true;
+        out.push(st);
+    };
+    var teams = csEpArr(s.teams);
+    for (var i = 0; i < teams.length; i++) {
+        var stops = csEpArr(csEpObj(teams[i]).stops);
+        for (var k = 0; k < stops.length; k++) { push(stops[k]); }
+    }
+    var extra = csEpArr(extraStops);
+    for (var x = 0; x < extra.length; x++) { push(extra[x]); }
+    return out;
+};
+
+/** A matrix cell as the table shows it: fits, NO, ? or - (unreachable). */
+ExpeditionPlanner.fitCellText = function(cell) {
+    if (cell === "fits") { return qsTr("fits"); }
+    if (cell === "no") { return qsTr("NO"); }
+    if (cell === "unreachable") { return "-"; }
+    return "?";
+};
+
+/** A person's column header: "Ana Ruiz (14 in)" or "Ana Ruiz (no limit)". */
+ExpeditionPlanner.fitHeaderText = function(person) {
+    var p = csEpObj(person);
+    var limit = (typeof p.limit === "number" && isFinite(p.limit) && p.limit > 0) ?
+        CsSqueeze.inches(p.limit) + " in" : qsTr("no limit");
+    return csEpTrim(p.name) + " (" + limit + ")";
+};
+
+/** A stop's Tightest passage: "10 in near A6", "not measured" or "not on the surveyed line". */
+ExpeditionPlanner.fitTightestText = function(stop) {
+    var o = csEpObj(stop);
+    if (o.reachable !== true) {
+        return qsTr("not on the surveyed line");
+    }
+    if (typeof o.inches !== "number" || !isFinite(o.inches) || o.inches <= 0) {
+        return qsTr("not measured");
+    }
+    var near = csEpTrim(o.near);
+    return CsSqueeze.inches(o.inches) + " in" + (near === "" ? "" : " near " + near);
+};
+
+/**
+ * The matrix, ready to fill a table: every stop on any team (team order,
+ * deduped) plus `extraStops`, by the Going people `party`, limits from
+ * the directory. Never throws.
+ * \return {matrix (CsSqueeze.matrix's answer), headers: [Stop, Tightest
+ *   passage, one per person], rows: [{stop, tightestText, cells: [text],
+ *   cellKinds: ["fits"|"no"|"unknown"|"unreachable"]}]}
+ */
+ExpeditionPlanner.fitRows = function(state, party, extraStops) {
+    var out = { matrix: { stops: [], people: [], cells: [] },
+        headers: [qsTr("Stop"), qsTr("Tightest passage")], rows: [] };
+    try {
+        var s = csEpObj(state);
+        var o = csEpSqueezeOpts(s);
+        var m = CsSqueeze.matrix(o.survey, o.resolved, csEpFitStops(s, extraStops),
+            csEpArr(party), csEpArr(s.people), { unit: o.unit, config: o.config });
+        out.matrix = m;
+        var p;
+        for (p = 0; p < m.people.length; p++) {
+            out.headers.push(ExpeditionPlanner.fitHeaderText(m.people[p]));
+        }
+        for (var i = 0; i < m.stops.length; i++) {
+            var kinds = csEpArr(m.cells[i]).slice(0);
+            var texts = [];
+            for (p = 0; p < kinds.length; p++) { texts.push(ExpeditionPlanner.fitCellText(kinds[p])); }
+            out.rows.push({ stop: m.stops[i].station,
+                tightestText: ExpeditionPlanner.fitTightestText(m.stops[i]),
+                cells: texts, cellKinds: kinds });
+        }
+    } catch (e) {
+        out.rows = [];
+    }
+    return out;
+};
+
+/**
+ * A team's squeeze from the panel state: {issues: CsSqueeze.teamIssues
+ * (the members who may not fit its whole route), note: CsSqueeze.teamNotes
+ * ("" or the unknown-width note)}. A team without stops, or no survey,
+ * has nothing to say. The route is cached per stop set until the drawing
+ * is read again; the members are checked fresh every time. Never throws.
+ */
+ExpeditionPlanner.teamSqueeze = function(team) {
+    try {
+        var s = ExpeditionPlanner.state;
+        var t = csEpObj(team);
+        var stops = [];
+        var seen = {};
+        var list = csEpArr(t.stops);
+        for (var i = 0; i < list.length; i++) {
+            var st = csEpTrim(list[i]);
+            if (st === "" || seen["#" + st] === true) { continue; }
+            seen["#" + st] = true;
+            stops.push(st);
+        }
+        if (stops.length === 0 || s.drawn === null || s.drawn === undefined) {
+            return { issues: [], note: "" };
+        }
+        var o = csEpSqueezeOpts(s);
+        if (s.squeezeCache === null || s.squeezeCache === undefined ||
+                s.squeezeCache.drawn !== s.drawn) {
+            s.squeezeCache = { drawn: s.drawn, routes: {} };
+        }
+        var key = "#" + o.unit + "|" + JSON.stringify(stops);
+        var route = s.squeezeCache.routes[key];
+        if (route === undefined) {
+            route = CsSqueeze.forTeam(o.survey, o.resolved, stops, { unit: o.unit, config: o.config });
+            s.squeezeCache.routes[key] = route;
+        }
+        return { issues: CsSqueeze.teamIssues(t, route, csEpArr(s.people)),
+            note: CsSqueeze.teamNotes({ stops: stops }, route) };
+    } catch (e) {
+        return { issues: [], note: "" };
+    }
+};
+
+/** A team's squeeze line (rich text): red issues, then the grey note; "" when nothing. */
+ExpeditionPlanner.teamSqueezeHtml = function(sq) {
+    var o = csEpObj(sq);
+    var parts = [];
+    var issues = csEpArr(o.issues);
+    for (var i = 0; i < issues.length; i++) {
+        parts.push("<span style=\"color:#c00\">⚠ " +
+            CsPanel.escapeHtml(csEpTrim(csEpObj(issues[i]).text)) + "</span>");
+    }
+    var note = csEpTrim(o.note);
+    if (note !== "") {
+        parts.push("<span style=\"color:#777\">" + CsPanel.escapeHtml(note) + "</span>");
+    }
+    return parts.join("<br>");
+};
+
+/** Show team `n`'s (1-based) squeeze line: hidden when there is nothing to say. */
+ExpeditionPlanner.showTeamSqueeze = function(n, sq) {
+    var label = ExpeditionPlanner.child("ExpeditionPlannerTeam" + n + "_Squeeze");
+    if (label === null) {
+        return;
+    }
+    var html = ExpeditionPlanner.teamSqueezeHtml(sq);
+    try {
+        label.text = html;
+        label.visible = html !== "";
+    } catch (e) {
+    }
+};
+
+/**
+ * Add an extra stop to the matrix: a station of this drawing, matched as
+ * the team pickers do, not already listed (on a team or added here).
+ * \return {done, why}
+ */
+ExpeditionPlanner.addFitStop = function(typed) {
+    var s = ExpeditionPlanner.state;
+    var t = csEpTrim(typed);
+    if (t === "") {
+        return { done: false, why: qsTr("Type or pick a station first.") };
+    }
+    var name = ExpeditionPlanner.matchStation(csEpArr(s.stations), t);
+    if (name === null) {
+        return { done: false, why: qsTr("%1 is not a station in this drawing").arg(t) };
+    }
+    if (csEpFitStops(s, s.fitExtra).indexOf(name) >= 0) {
+        return { done: false, why: qsTr("%1 is already listed.").arg(name) };
+    }
+    if (Object.prototype.toString.call(s.fitExtra) !== "[object Array]") { s.fitExtra = []; }
+    s.fitExtra.push(name);
+    return { done: true, why: "" };
+};
+
+/** What the matrix shows depends on: its stops, the party, and the directory's limits. */
+var csEpFitSignature = function(s, party) {
+    var people = [];
+    var dir = csEpArr(s.people);
+    for (var i = 0; i < dir.length; i++) {
+        var p = csEpObj(dir[i]);
+        people.push([p.id, p.name, p.squeeze]);
+    }
+    var going = [];
+    var list = csEpArr(party);
+    for (var g = 0; g < list.length; g++) {
+        going.push([csEpObj(list[g]).id, csEpObj(list[g]).name]);
+    }
+    return JSON.stringify({ stops: csEpFitStops(s, s.fitExtra), party: going, people: people });
+};
+
+/** A matrix cell item: NO in red, ? and - grey, fits plain. */
+var csEpFitItem = function(text, kind) {
+    var it = ExpeditionPlanner.readOnlyItem(text, kind === "unknown" || kind === "unreachable");
+    if (kind === "no") {
+        try {
+            it.setForeground(new QBrush(new QColor("#cc0000")));
+        } catch (eRed) {
+        }
+    }
+    return it;
+};
+
+/** Fill the matrix table in hand from fitRows' answer. */
+ExpeditionPlanner.fillFitTable = function(table, fr) {
+    try {
+        table.setColumnCount(fr.headers.length);
+    } catch (eCols) {
+    }
+    try {
+        table.setHorizontalHeaderLabels(fr.headers);
+    } catch (eHead) {
+    }
+    table.setRowCount(0);
+    table.setRowCount(fr.rows.length);
+    for (var r = 0; r < fr.rows.length; r++) {
+        var row = fr.rows[r];
+        table.setItem(r, 0, ExpeditionPlanner.readOnlyItem(row.stop));
+        table.setItem(r, 1, ExpeditionPlanner.readOnlyItem(row.tightestText,
+            row.tightestText === qsTr("not measured") ||
+            row.tightestText === qsTr("not on the surveyed line")));
+        for (var c = 0; c < row.cells.length; c++) {
+            table.setItem(r, c + 2, csEpFitItem(row.cells[c], row.cellKinds[c]));
+        }
+    }
+};
+
+/**
+ * Fill the matrix -- only while the section is open. `force` refills
+ * even when nothing it shows has changed (opening it, Refresh).
+ * \return true when the engine was asked
+ */
+ExpeditionPlanner.fillFit = function(force) {
+    var s = ExpeditionPlanner.state;
+    if (s.fitOpen !== true) {
+        return false;
+    }
+    var table = ExpeditionPlanner.child("ExpeditionPlannerFitTable");
+    if (table === null) {
+        return false;
+    }
+    var party = ExpeditionPlanner.readParty();
+    var sig = csEpFitSignature(s, party);
+    if (force !== true && sig === s.fitSig && s.fitDrawn === s.drawn) {
+        return false;
+    }
+    s.fitSig = sig;
+    s.fitDrawn = s.drawn;
+    var fr = ExpeditionPlanner.fitRows(s, party, s.fitExtra);
+    try {
+        ExpeditionPlanner.fillFitTable(table, fr);
+    } catch (eFill) {
+    }
+    var why = "";
+    if (s.drawn === null || s.drawn === undefined) {
+        why = qsTr("This drawing holds no survey.");
+    } else if (fr.rows.length === 0) {
+        why = qsTr("No stops yet: add stops to a team, or add one here.");
+    } else if (fr.matrix.people.length === 0) {
+        why = qsTr("Nobody is ticked Going.");
+    }
+    var status = ExpeditionPlanner.child("ExpeditionPlannerFitStatus");
+    if (status !== null) {
+        status.text = why;
+    }
+    return true;
+};
+
+/** Refill the matrix if it is open and what it shows has changed. */
+ExpeditionPlanner.fitMaybeRefresh = function() {
+    return ExpeditionPlanner.fillFit(false);
+};
+
+/** Who fits where: Add stop. */
+ExpeditionPlanner.fitAddClicked = function() {
+    if (!ExpeditionPlanner.planGuard()) {
+        return;
+    }
+    var picker = ExpeditionPlanner.child("ExpeditionPlannerFitPicker");
+    var status = ExpeditionPlanner.child("ExpeditionPlannerFitStatus");
+    var r = ExpeditionPlanner.addFitStop(picker === null ? "" : ExpeditionPlanner.pickerText(picker));
+    if (r.done !== true) {
+        if (status !== null) { status.text = r.why; }
+        return;
+    }
+    if (status !== null) { status.text = ""; }
+    if (picker !== null) { ExpeditionPlanner.setPickerText(picker, ""); }
+    ExpeditionPlanner.fillFit(true);
+};
+
+/** Who fits where: Refresh. */
+ExpeditionPlanner.fitRefreshClicked = function() {
+    if (!ExpeditionPlanner.planGuard()) {
+        return;
+    }
+    ExpeditionPlanner.fillFit(true);
+};
+
+// ---------------------------------------------------------------------
 // Build cards
 // ---------------------------------------------------------------------
 
@@ -4062,6 +4528,12 @@ ExpeditionPlanner.reload = function() {
         ExpeditionPlanner.showCalloutSettings();
     }
     ExpeditionPlanner.fillPicker();
+    if (!changed) {
+        // The survey was read again (new widths, maybe): the squeeze lines,
+        // the header marks and an open Who fits where follow it. A new
+        // drawing got all that from showCalloutSettings' rebuild.
+        ExpeditionPlanner.refreshTeamHeaders();
+    }
     ExpeditionPlanner.updateSummary();
 };
 
