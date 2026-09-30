@@ -46,6 +46,34 @@
 <li>Someone with no squeeze limit saved (or no details on this computer) shows <b>?</b>: edit the person to add their limit.</li>
 <li>It only shows who may not fit. It does not move anyone or any stop: <b>Suggest split</b> does that.</li>
 </ul>
+<h2>What's left to push</h2>
+<p>A folded section below <b>Who fits where</b>. Click its header to open it. It lists every lead in the drawing, best first, and says in plain words why each one ranks where it does. While it is folded nothing is worked out, so it costs nothing.</p>
+<p>A <b>lead</b> is a station whose note has the lead keyword (as in the <b>Station Table</b>), or an open end of the survey. Its <b>Status</b> is its Station Table mark: <b>open</b> when unmarked, or <b>assigned</b>, <b>pushed</b>, <b>done</b> or <b>skip</b>. Leads marked <b>done</b> or <b>skip</b> are hidden until you tick <b>Show done and skipped</b>; assigned and pushed leads always show, with their status.</p>
+<h3>The six signals</h3>
+<p>Each lead is scored 0 to 100 on six signals. A signal that cannot be worked out for a lead is left out of its score, never guessed, and the score is the weighted average of the signals it has.</p>
+<ul>
+<li><b>Cost</b>: the time to walk in from the survey's first station, work the lead and walk out, as <b>Plan trip</b> works it out. Quicker is better; a pitch on the way costs extra. The reason reads, for example, "14 min in, 1 pitch, 50 ft of rope". A lead not joined to the surveyed line has no cost and is listed last.</li>
+<li><b>Blank ground</b>: how far the lead's heading runs before it meets surveyed passage, looking up to 500 ft ahead. "nothing surveyed for 340 ft ahead" scores higher than passage just ahead.</li>
+<li><b>Connection</b>: the heading points at surveyed passage within 150 ft that is much further away by the surveyed way, so pushing the lead might close a loop or join two passages: "points at B12, 60 ft away (240 ft by the surveyed way)".</li>
+<li><b>Elevation edge</b>: how near the lead is to the highest or the deepest surveyed station. The edges of a cave are where it may go on.</li>
+<li><b>Time since visited</b>: how long since the lead's last survey trip, from the trip dates ("last surveyed 2025-03, 19 months ago"). When the trips have no dates it goes by trip order instead: the oldest trip scores highest.</li>
+<li><b>Note hints</b>: words in the lead's notes (and its Station Table team note). Words like <i>draft</i>, <i>going</i> or <i>big</i> make it worth more; <i>tight</i>, <i>sump</i> or <i>choked</i> worth less. Whole words only: "tightly" is not "tight".</li>
+</ul>
+<h3>Presets and weights</h3>
+<p>Three buttons set how much each signal counts: <b>Quick wins</b> (mostly cost), <b>Big potential</b> (blank ground, connections and edges) and <b>Balanced</b> (a bit of everything, the default). The one in use is shown in bold and named beside them. The six boxes below show its weights, 0 to 100; change any of them and the preset reads <b>Custom</b>. A weight of 0 leaves that signal out. Pressing a preset puts its weights back.</p>
+<h3>Hint words</h3>
+<p><b>Worth more</b> and <b>Worth less</b> hold the words the notes are searched for, separated by commas. Each distinct word found adds or takes away a quarter of the scale. Empty a field to go back to the default words.</p>
+<h3>The table</h3>
+<p>Columns: <b>Rank</b>, <b>Station</b>, <b>Score</b>, <b>Status</b> and <b>Why</b>, the strongest reasons joined by dots, always including what the lead costs to reach. Any note about the ranking (a lead that is not on the surveyed line, or one with nothing to rank it by) shows in grey under the table. The table is worked out when you open the section, when you press <b>Refresh</b>, when you change a preset, a weight, the hint words or the tick, and, while it is open, when the drawing or its Station Table marks change. Your settings last until you close CaveCAD; they are not saved.</p>
+<h3>Add selected to team</h3>
+<p>Select a lead, choose a team in the dropdown below the table, and press <b>Add selected to team</b>. The lead goes on that team's stops, just as if you had added it in the team's own section, and the line under the button says so ("B20 added to Team 2"). A lead already on that team, or one that is not a station of this drawing, is refused there with the reason.</p>
+<h3>What it cannot know</h3>
+<ul>
+<li>It estimates from the survey and its notes only. It cannot know what is actually beyond the end of the survey.</li>
+<li>Blank ground and Connection need a surveyed heading: the direction of the last leg into the lead, as a straight line. They are left out for a lead at the foot or head of a pitch (a vertical leg has no heading), for a lead the survey reaches only backwards (no leg arrives at it), and for stations with no position. The heading knows nothing about bends: the passage may turn just past the lead.</li>
+<li>Elevation edge needs a surveyed height range of at least 20 ft; Time since visited needs the lead's trip, and more than one trip when the trips have no dates.</li>
+<li>It does not change any lead's status: mark leads in the <b>Station Table</b>.</li>
+</ul>
 <h2>Suggest split</h2>
 <p>Not sure who should go with whom, or which stops each team should take? <b>Suggest split...</b>, beside <b>Add team</b>, <b>Remove team</b> and <b>Undo suggestion</b> in the Teams section, proposes a split you can look over before anything changes.</p>
 <p>It opens a window with three parts:</p>
