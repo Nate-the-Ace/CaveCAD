@@ -5207,6 +5207,26 @@ ExpeditionPlanner.buildFiles = function(form, folder) {
 };
 
 /**
+ * Open the sheets just built in the default browser for review and
+ * printing: the topside sheet (or the single card) first, then each
+ * team file. QUrl.fromLocalFile so a folder with spaces still opens.
+ * \return the names that would not open ([] when all did)
+ */
+ExpeditionPlanner.openInBrowser = function(folder, names) {
+    var failed = [];
+    for (var i = 0; i < names.length; i++) {
+        var ok = false;
+        try {
+            ok = QDesktopServices.openUrl(QUrl.fromLocalFile(folder + "/" + names[i])) !== false;
+        } catch (eOpen) {
+            ok = false;
+        }
+        if (!ok) { failed.push(names[i]); }
+    }
+    return failed;
+};
+
+/**
  * Build cards: write the file(s) beside the drawing and say what
  * happened. \return the path of callout-card.html, or ""
  */
@@ -5250,10 +5270,12 @@ ExpeditionPlanner.buildCard = function() {
     ExpeditionPlanner.calloutSay(ExpeditionPlanner.buildStatusText(res.written,
         res.conflicts, res.leftovers, res.problems, res.squeeze));
     var path = folder + "/callout-card.html";
-    try {
-        // Same call CaveShelf.reveal ships.
-        QDesktopServices.openUrl(new QUrl("file://" + path));
-    } catch (eOpen) {
+    var failed = ExpeditionPlanner.openInBrowser(folder, res.written);
+    if (failed.length > 0) {
+        ExpeditionPlanner.calloutSay(ExpeditionPlanner.buildStatusText(res.written,
+            res.conflicts, res.leftovers, res.problems, res.squeeze) + " " +
+            qsTr("Could not open in the browser: %1. Open the file from the " +
+                "drawing's folder.").arg(failed.join(", ")));
     }
     return path;
 };

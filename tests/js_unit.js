@@ -38942,6 +38942,32 @@ ok(prClean, "pr engine: no text carries a coordinate or a long decimal");
     }
 })();
 
+// Build opens every sheet in the browser (ob).
+(function() {
+    var realDS = (typeof QDesktopServices === "undefined") ? undefined : QDesktopServices;
+    var realQ = (typeof QUrl === "undefined") ? undefined : QUrl;
+    var opened = [];
+    QUrl = { fromLocalFile: function(p) { return { local: p }; } };
+    QDesktopServices = { openUrl: function(u) {
+        opened.push(u.local);
+        return u.local.indexOf("bad.html") < 0;
+    } };
+    try {
+        var f = ExpeditionPlanner.openInBrowser("/My Drive/Cave X",
+            ["callout-card.html", "team-1.html"]);
+        ok(f.length === 0, "ob: none failed");
+        ok(opened.join("|") === "/My Drive/Cave X/callout-card.html|/My Drive/Cave X/team-1.html",
+            "ob: topside first, then teams, folder with spaces intact");
+        var g = ExpeditionPlanner.openInBrowser("/x", ["bad.html", "ok.html"]);
+        ok(g.length === 1 && g[0] === "bad.html", "ob: refusal reported by name");
+        QDesktopServices = { openUrl: function() { throw new Error("no"); } };
+        ok(ExpeditionPlanner.openInBrowser("/x", ["a.html"]).length === 1, "ob: throw counts as failed");
+    } finally {
+        QDesktopServices = realDS;
+        QUrl = realQ;
+    }
+})();
+
 // ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
