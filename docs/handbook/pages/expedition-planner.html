@@ -30,6 +30,22 @@
 <li>Its own <b>Stops</b> and its own <b>Packing list</b>.</li>
 </ul>
 <p>The same person can be on several teams, on different days. If they are on two teams on the same date, the panel and both sheets warn you, naming the person and the date. The warning does not stop the build: it is up to you to decide whether it is a mistake.</p>
+<p>Teams you make by hand get the same squeeze check as <b>Suggest split</b>. When a member's squeeze limit is wider than the tightest measured passage on the team's route, a red line under the team's members names them, for example "Ana Ruiz (limit 12 in) may not fit the tightest passage on the route (10 in near A6).", and the team's header turns red with a <b>squeeze</b> mark. When no width is known anywhere on the route, a grey line says squeeze limits were not checked. Both follow the team's members and stops as you change them. See <b>Who fits where</b> below.</p>
+<h2>Who fits where</h2>
+<p>A folded section between <b>Teams</b> and <b>Escalation</b>. Click its header to open it. It shows a table of stops by people: one row for every stop on any team (in team order, each stop once), and one column for each person ticked <b>Going</b>, headed with their name and squeeze limit ("Ana Ruiz (14 in)", or "(no limit)" when none is saved).</p>
+<ul>
+<li><b>Tightest passage</b>, the second column, is the narrowest measured passage on the way from the survey's first station to that stop and back: "10 in near A6", <b>not measured</b> when no width is known on that way, or <b>not on the surveyed line</b> when the stop cannot be reached along the survey.</li>
+<li>Each person's cell says <b>fits</b>, <b>NO</b> (in red: their limit is wider than that passage, so they may not fit), <b>?</b> (grey: their limit or the passage width is unknown), or <b>-</b> (grey: the stop is not on the surveyed line).</li>
+<li>To check a stop no team has yet, pick or type a station under the table and press <b>Add stop</b>. It is added to this table only, not to a team. A name that is not a station of this drawing, or a stop already listed, is refused with a note under the box. Extra stops are forgotten when you switch to another drawing.</li>
+<li>The table is worked out when you open the section, when you press <b>Refresh</b>, and, while it is open, whenever the people going, a team's stops, a squeeze limit or the drawing changes. While it is folded nothing is worked out, so it costs nothing.</li>
+</ul>
+<p>The warnings also go on the cards. <b>Build cards</b> adds them to the status line ("Squeeze: Team 2: Ana Ruiz (limit 12 in) may not fit ..."), and still builds. The topside sheet prints each team's warnings under its roster, a team file prints them under its members, and a team whose route has no known width gets the grey note. A one-team card prints a warning under the roster only when there is one. With <b>Include roster</b> unticked the warnings, which name people, are left off.</p>
+<h3>What it cannot know</h3>
+<ul>
+<li>It uses only the passage widths recorded in the survey (left plus right, from the LRUD). A passage nobody measured is never called a squeeze, and a width recorded as 0 counts as unmeasured.</li>
+<li>Someone with no squeeze limit saved (or no details on this computer) shows <b>?</b>: edit the person to add their limit.</li>
+<li>It only shows who may not fit. It does not move anyone or any stop: <b>Suggest split</b> does that.</li>
+</ul>
 <h2>Suggest split</h2>
 <p>Not sure who should go with whom, or which stops each team should take? <b>Suggest split...</b>, beside <b>Add team</b>, <b>Remove team</b> and <b>Undo suggestion</b> in the Teams section, proposes a split you can look over before anything changes.</p>
 <p>It opens a window with three parts:</p>
