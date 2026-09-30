@@ -18,6 +18,7 @@
 <p>A trip can send more than one team underground, each with its own people, goal, days, stops and gear. The <b>Teams</b> section holds one collapsible section per team. Click a team's header to open or fold it. The header shows the team's name and a live summary such as "2 people &middot; 1 stop &middot; 1 day", and a red <b>same-day overlap</b> mark when one of its members is also on another team on the same date.</p>
 <ul>
 <li><b>Add team</b> adds a team. It starts with a copy of the previous team's schedule but no members and no stops. <b>Remove team</b> asks Yes or No (the default is No) and removes the team you last opened, added or edited. The last remaining team cannot be removed.</li>
+<li><b>Suggest split...</b> proposes who goes on which team and which stops each takes; see the next section.</li>
 <li>An older trip that was planned before teams existed opens as <b>Team 1</b>, with its schedule, party and packing list carried over.</li>
 </ul>
 <p>Each team has:</p>
@@ -29,6 +30,41 @@
 <li>Its own <b>Stops</b> and its own <b>Packing list</b>.</li>
 </ul>
 <p>The same person can be on several teams, on different days. If they are on two teams on the same date, the panel and both sheets warn you, naming the person and the date. The warning does not stop the build: it is up to you to decide whether it is a mistake.</p>
+<h2>Suggest split</h2>
+<p>Not sure who should go with whom, or which stops each team should take? <b>Suggest split...</b>, beside <b>Add team</b>, <b>Remove team</b> and <b>Undo suggestion</b> in the Teams section, proposes a split you can look over before anything changes.</p>
+<p>It opens a window with three parts:</p>
+<ul>
+<li><b>Teams</b>: how many teams you want, from your current number up to 8.</li>
+<li><b>Objectives</b>: a list with <b>Lock</b>, <b>Stop</b> and <b>Currently</b> columns. Each row has a real check box for the lock. Add more objectives with the station dropdown and <b>Add stop</b>.</li>
+<li><b>People going</b>: a list with <b>Lock</b>, <b>Person</b>, <b>Skills</b>, <b>Squeeze</b> and <b>Currently</b> columns, with a check box for the lock in each row.</li>
+</ul>
+<p>A stop or person already on a team starts <b>locked</b>, which keeps it on that team; free ones are shared out. <b>Free everything</b> unticks every lock. Asking for more teams than you have adds teams named "Team N", each with a schedule copied from the last team; when everything else is locked, a new team starts empty.</p>
+<ul>
+<li><b>Suggest</b> shows a preview and changes nothing.</li>
+<li><b>Apply</b> writes the preview into the team sections. It is enabled only after a preview, and goes disabled again if you change anything in the window.</li>
+<li><b>Undo suggestion</b>, in the Teams section, puts the teams back exactly as they were, until your next edit or drawing change.</li>
+</ul>
+<h3>What it decides</h3>
+<p>It decides which people go on each team and which stops each team takes. To estimate a team's time it plans that team's route with the trip planner (the walk in, the work at each stop, pitch time and the walk out), groups stops that are near each other, and balances the teams so the busiest team is as short as it can make it. It is deterministic: the same input gives the same answer. It is a good split, not a proven best one.</p>
+<h3>Limits and warnings</h3>
+<p>The preview marks problems in two ways. <b>Hard limits</b> are shown in red with a "!"; <b>Apply</b> is still allowed, the decision is yours.</p>
+<ul>
+<li>A team whose route has a pitch needs someone with the <b>Vertical</b> skill.</li>
+<li>Every member must fit the tightest passage on their team's route: the person's squeeze limit is checked against the survey's passage widths. A width recorded as 0 counts as unmeasured, not as a squeeze. When no width is known along a route, the preview only notes that squeeze limits were not checked.</li>
+</ul>
+<p><b>Preferences</b> are warned about and never block anything:</p>
+<ul>
+<li>Each team has someone with First aid, CPR or Wilderness first responder.</li>
+<li>Each team has a <b>Trip leader</b>.</li>
+<li>Balance: a team more than 30% above or below the average of the teams that have stops.</li>
+<li>Schedule fit: a team's stops need more work time than its own days schedule allows.</li>
+</ul>
+<h3>What it cannot know</h3>
+<ul>
+<li>It estimates from the survey. It cannot know who works well together, who has a car, or the conditions on the day.</li>
+<li>People are placed after the stops are fixed, so a squeeze or vertical problem produces a warning; it does not move a stop.</li>
+<li>A person with no saved details counts as having no skills and no squeeze limit.</li>
+</ul>
 <h2>Plan a trip</h2>
 <p>A team's <b>Stops</b> turn a few stations into a route, a time budget and a gear list.</p>
 <ol>
