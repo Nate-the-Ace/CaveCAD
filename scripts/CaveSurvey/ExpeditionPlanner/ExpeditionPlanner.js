@@ -77,7 +77,11 @@ ExpeditionPlanner.state = { drawn: null, docPath: null, store: null,
     // sections have been torn down (their widgets' new names count up),
     // and a packing edit waiting for its debounce: {id, text} or null.
     teamOpen: {}, activeTeamId: "", teamMessage: "", removedCount: 0,
-    packingPending: null };
+    packingPending: null,
+    // The teams as they were before the last applied suggestion (a deep
+    // copy), or null: Undo suggestion puts them back. Any manual team
+    // edit or a drawing change drops it.
+    suggestUndo: null };
 
 // ---------------------------------------------------------------------
 // The panel
@@ -347,14 +351,24 @@ ExpeditionPlanner.buildTeamsSection = function(layout) {
     layout.addWidget(new QLabel("<span style=\"color:#777\">" +
         CsPanel.escapeHtml(qsTr("Each team has its own people, schedule, " +
             "stops and packing list. Click a team to open it.")) + "</span>"), 0, 0);
-    var b = ExpeditionPlanner.buttonRow(layout, [qsTr("Add team"), qsTr("Remove team")]);
+    var b = ExpeditionPlanner.buttonRow(layout, [qsTr("Add team"), qsTr("Remove team"),
+        qsTr("Suggest split..."), qsTr("Undo suggestion")]);
     b[0].objectName = "ExpeditionPlannerTeamAdd";
     b[0].toolTip = qsTr("Add a team. It starts with the last team's schedule.");
     b[1].objectName = "ExpeditionPlannerTeamRemove";
     b[1].toolTip = qsTr("Remove the open team (asks first). The last team " +
         "cannot be removed.");
+    b[2].objectName = "ExpeditionPlannerSuggest";
+    b[2].toolTip = qsTr("Propose which people and stops go on each team. " +
+        "Shows a preview first; nothing changes until you press Apply.");
+    b[3].objectName = "ExpeditionPlannerSuggestUndo";
+    b[3].toolTip = qsTr("Put the teams back as they were before the last " +
+        "applied suggestion. Gone after any change to a team by hand.");
+    b[3].enabled = false;
     b[0].clicked.connect(function() { ExpeditionPlanner.addTeamClicked(); });
     b[1].clicked.connect(function() { ExpeditionPlanner.removeTeamClicked(); });
+    b[2].clicked.connect(function() { ExpeditionPlanner.suggestClicked(); });
+    b[3].clicked.connect(function() { ExpeditionPlanner.undoSuggestionClicked(); });
     var status = new QLabel("");
     status.objectName = "ExpeditionPlannerTeamStatus";
     try {
@@ -1796,6 +1810,8 @@ ExpeditionPlanner.showCalloutSettings = function() {
     };
     var trip = (s.store !== null && s.store.settings.trip) ?
         s.store.settings.trip : CsStationStore.emptyTrip();
+    // Another drawing: a suggestion applied to the old one cannot be undone here.
+    s.suggestUndo = null;
     // The teams, migrated from the legacy single schedule when the file
     // has none. Loading writes nothing.
     ExpeditionPlanner.loadTeams(trip, s.store === null ? null : s.store.settings);
@@ -2287,11 +2303,14 @@ ExpeditionPlanner.refreshTeamHeaders = function() {
     }
     ExpeditionPlanner.teamSay();
     ExpeditionPlanner.updatePacketButton();
+    ExpeditionPlanner.updateSuggestButtons();
 };
 
 /** After an edit of team `id`: it is the active team; repaint headers and status. */
 ExpeditionPlanner.teamChanged = function(id, why) {
     var s = ExpeditionPlanner.state;
+    // A change by hand: the last suggestion can no longer be undone.
+    ExpeditionPlanner.clearSuggestUndo();
     if (ExpeditionPlanner.teamIndex(id) >= 0) {
         s.activeTeamId = id;
     }
@@ -2772,6 +2791,8 @@ ExpeditionPlanner.buildTeamSection = function(parent, layout, team, index0, opts
 /** A packing edit: written after 700 ms without another one (or on flush). */
 ExpeditionPlanner.queuePacking = function(id, text) {
     var s = ExpeditionPlanner.state;
+    // Typing in a packing list is a change by hand (see teamChanged).
+    ExpeditionPlanner.clearSuggestUndo();
     if (s.packingPending !== null && s.packingPending !== undefined &&
             s.packingPending.id !== id) {
         ExpeditionPlanner.flushPacking();
@@ -2812,6 +2833,7 @@ ExpeditionPlanner.addTeamClicked = function() {
     }
     ExpeditionPlanner.flushPacking();
     var s = ExpeditionPlanner.state;
+    ExpeditionPlanner.clearSuggestUndo();
     var r = ExpeditionPlanner.addTeam();
     s.teamMessage = r.why;
     if (r.done === true && r.team) {
@@ -2852,6 +2874,7 @@ ExpeditionPlanner.removeTeamClicked = function() {
     if (answer !== QMessageBox.Yes) {
         return;
     }
+    ExpeditionPlanner.clearSuggestUndo();
     var r = ExpeditionPlanner.removeTeam(team.id);
     s.teamMessage = r.why;
     if (r.done !== true) {
@@ -2865,6 +2888,768 @@ ExpeditionPlanner.removeTeamClicked = function() {
     s.activeTeamId = next.id;
     s.plan = null;
     ExpeditionPlanner.rebuildTeamSections();
+};
+
+// ---------------------------------------------------------------------
+// Teams: Suggest split
+// ---------------------------------------------------------------------
+//
+// A popup proposes which people and stops go on each team
+// (Core/CsTeamSplit.js). Anything on a team now starts LOCKED there; the
+// free items (lock unticked) are what gets distributed. Suggest only
+// previews; Apply writes the proposal into state.teams (one save, one
+// rebuild) after keeping a deep copy in state.suggestUndo, and Undo
+// suggestion puts that copy back exactly. Any change by hand (teamChanged,
+// a packing edit, Add/Remove team) or a drawing change drops the copy.
+//
+// The logic is in plain functions (suggestRows, suggestInput,
+// suggestPreviewText, applySuggestion, undoSuggestion) so it is tested
+// without widgets. The popup is built ON CLICK, after the dock exists,
+// from the widgets in hand only: buildSuggestDialog never looks anything
+// up through child()/ensureDock. A closed popup is hidden and renamed,
+// never deleted (see teardownTeamSections).
+//
+// ONE TEAM PER PERSON AND PER STOP. The engine places each person and
+// stop once, so someone on two teams (allowed across days) or a stop on
+// two teams is shown, locked and kept on the FIRST of them; Apply takes
+// them off the others. Members no longer ticked Going are not offered in
+// the popup but stay locked on their team, so Apply never drops them.
+
+var csEpArr = function(v) {
+    return Object.prototype.toString.call(v) === "[object Array]" ? v : [];
+};
+
+var csEpObj = function(v) {
+    return (v !== null && typeof v === "object") ? v : {};
+};
+
+var csEpTrim = function(v) {
+    return (v === undefined || v === null ? "" : String(v)).replace(/^\s+|\s+$/g, "");
+};
+
+/** The index of the first team holding `person` (csEpSamePerson), or -1. */
+var csEpTeamOfPerson = function(teams, person) {
+    for (var i = 0; i < teams.length; i++) {
+        var members = csEpArr(csEpObj(teams[i]).members);
+        for (var m = 0; m < members.length; m++) {
+            if (csEpSamePerson(members[m], person)) { return i; }
+        }
+    }
+    return -1;
+};
+
+/** A person's lock key: "id:<id>", else "n:<case-blind name>". */
+ExpeditionPlanner.suggestPersonKey = function(p) {
+    var o = csEpObj(p);
+    var id = csEpTrim(o.id);
+    return id !== "" ? "id:" + id :
+        "n:" + csEpTrim(o.name).replace(/\s+/g, " ").toLowerCase();
+};
+
+/**
+ * What the popup's two tables list, with each lock tick's default.
+ * \param state the panel state (teams, people = the directory)
+ * \param party the Going people [{id, name}]
+ * \param extraStops stations added in the popup (free)
+ * \return {stops: [{station, team (index or -1), currently, lock}],
+ *   people: [{key, id, name, skills, squeeze, team, currently, lock}]}
+ *   lock is true exactly when the item is on a team now.
+ */
+ExpeditionPlanner.suggestRows = function(state, party, extraStops) {
+    var s = csEpObj(state);
+    var teams = csEpArr(s.teams);
+    var out = { stops: [], people: [] };
+    var seen = {};
+    var i, k;
+    for (i = 0; i < teams.length; i++) {
+        var stops = csEpArr(csEpObj(teams[i]).stops);
+        for (k = 0; k < stops.length; k++) {
+            var st = csEpTrim(stops[k]);
+            if (st === "" || seen["#" + st] === true) { continue; }
+            seen["#" + st] = true;
+            out.stops.push({ station: st, team: i,
+                currently: ExpeditionPlanner.teamLabel(teams[i], i), lock: true });
+        }
+    }
+    var extra = csEpArr(extraStops);
+    for (k = 0; k < extra.length; k++) {
+        var ex = csEpTrim(extra[k]);
+        if (ex === "" || seen["#" + ex] === true) { continue; }
+        seen["#" + ex] = true;
+        out.stops.push({ station: ex, team: -1, currently: qsTr("free"), lock: false });
+    }
+    var list = csEpArr(party);
+    var keys = {};
+    for (i = 0; i < list.length; i++) {
+        var p = csEpObj(list[i]);
+        var person = { id: csEpTrim(p.id), name: csEpTrim(p.name) };
+        if (person.name === "") { continue; }
+        var key = ExpeditionPlanner.suggestPersonKey(person);
+        if (keys[key] === true) { continue; }
+        keys[key] = true;
+        var hit = CsPeople.resolveParty([person], csEpArr(s.people));
+        var row = (hit.length > 0 && hit[0].known === true) ? hit[0] : null;
+        var team = csEpTeamOfPerson(teams, person);
+        out.people.push({ key: key, id: person.id, name: person.name,
+            skills: row === null ? "" : CsPeople.skillLabels(row).join(", "),
+            squeeze: (row === null || row.squeeze === null) ? "" : String(row.squeeze),
+            team: team,
+            currently: team < 0 ? qsTr("free") : ExpeditionPlanner.teamLabel(teams[team], team),
+            lock: team >= 0 });
+    }
+    return out;
+};
+
+/**
+ * The engine's input (CsTeamSplit.suggest) from the panel state and the
+ * popup's ticks. A locked item stays on the team it is on now; anything
+ * else is free. A tick state missing from `lockStates` means its default.
+ * \param state the panel state (teams, people, drawn, store)
+ * \param lockStates {stops: {station: bool}, people: {suggestPersonKey: bool}}
+ * \param teamCount wanted teams, clamped to current count..MAX_TEAMS
+ * \param extraStops free stations added in the popup
+ * \param party the Going people (default: readParty())
+ */
+ExpeditionPlanner.suggestInput = function(state, lockStates, teamCount, extraStops, party) {
+    var s = csEpObj(state);
+    var teams = csEpArr(s.teams);
+    var ls = csEpObj(lockStates);
+    var stopLocks = csEpObj(ls.stops);
+    var peopleLocks = csEpObj(ls.people);
+    var list = (party === undefined || party === null) ? ExpeditionPlanner.readParty() : party;
+    var rows = ExpeditionPlanner.suggestRows(s, list, extraStops);
+    var on = function(map, key, dflt) {
+        return Object.prototype.hasOwnProperty.call(map, key) ? map[key] === true : dflt;
+    };
+    var input = { teams: JSON.parse(JSON.stringify(teams)), freeStops: [], lockedStops: [],
+        freePeople: [], lockedPeople: [], directory: csEpArr(s.people) };
+    var i;
+    for (i = 0; i < rows.stops.length; i++) {
+        var sr = rows.stops[i];
+        if (sr.team >= 0 && on(stopLocks, sr.station, sr.lock)) {
+            input.lockedStops.push({ station: sr.station, team: sr.team });
+        } else {
+            input.freeStops.push(sr.station);
+        }
+    }
+    for (i = 0; i < rows.people.length; i++) {
+        var pr = rows.people[i];
+        if (pr.team >= 0 && on(peopleLocks, pr.key, pr.lock)) {
+            input.lockedPeople.push({ id: pr.id, name: pr.name, team: pr.team });
+        } else {
+            input.freePeople.push({ id: pr.id, name: pr.name });
+        }
+    }
+    // Members no longer going: not offered, but kept where they are.
+    for (i = 0; i < teams.length; i++) {
+        var members = csEpArr(csEpObj(teams[i]).members);
+        for (var m = 0; m < members.length; m++) {
+            var going = false;
+            for (var g = 0; g < list.length && !going; g++) {
+                if (csEpSamePerson(list[g], members[m])) { going = true; }
+            }
+            if (going || csEpTeamOfPerson(teams, members[m]) !== i) { continue; }
+            input.lockedPeople.push({ id: csEpTrim(members[m].id),
+                name: csEpTrim(members[m].name), team: i });
+        }
+    }
+    var current = Math.max(1, teams.length);
+    var n = (typeof teamCount === "number" && isFinite(teamCount)) ? Math.floor(teamCount) : current;
+    input.teamCount = Math.max(current, Math.min(ExpeditionPlanner.MAX_TEAMS, n));
+    var drawn = s.drawn;
+    input.survey = (drawn !== null && drawn !== undefined) ? drawn.survey : null;
+    input.resolved = (drawn !== null && drawn !== undefined) ? drawn.resolved : null;
+    input.unit = input.survey !== null ? ExpeditionPlanner.unitOf(input.survey) : "ft";
+    // The pace as Plan trip uses it: the field when there is one (blank =
+    // the default), else what stations.json holds.
+    var stored = (s.store !== null && s.store !== undefined && s.store.settings) ?
+        s.store.settings.pace : null;
+    var config = ExpeditionPlanner.paceBlock(stored, null);
+    if (stored !== null && typeof stored === "object" && stored.paceFtPerMin !== undefined) {
+        config.paceFtPerMin = stored.paceFtPerMin;
+    }
+    if (ExpeditionPlanner.child("ExpeditionPlannerPace") !== null) {
+        var typed = ExpeditionPlanner.paceTyped();
+        if (typed === null || !isNaN(typed)) {
+            config = ExpeditionPlanner.paceBlock(stored, typed);
+        }
+    }
+    input.config = config;
+    return input;
+};
+
+/**
+ * The proposal as text: whether every hard limit is met, then per team
+ * its name, members, stops in route order, "in X, work Y, out Z, total
+ * T" and its warnings (hard ones start "! "), then the notes.
+ */
+ExpeditionPlanner.suggestPreviewText = function(result) {
+    var r = csEpObj(result);
+    var teams = csEpArr(r.teams);
+    var lines = [];
+    lines.push(r.feasible === true ? qsTr("Every hard limit is met.") :
+        "! " + qsTr("Some hard limits are not met: see the lines marked !"));
+    for (var i = 0; i < teams.length; i++) {
+        var t = csEpObj(teams[i]);
+        var members = csEpArr(t.members);
+        var who = [];
+        for (var m = 0; m < members.length; m++) { who.push(csEpTrim(csEpObj(members[m]).name)); }
+        var stops = csEpArr(t.stops);
+        var min = csEpObj(t.minutes);
+        var num = function(v) { return (typeof v === "number" && isFinite(v)) ? v : 0; };
+        lines.push("");
+        lines.push("=== " + csEpTrim(t.name) + (t.added === true ? " " + qsTr("(new)") : "") + " ===");
+        lines.push(qsTr("Members: %1").arg(who.length > 0 ? who.join(", ") : qsTr("nobody")));
+        lines.push(qsTr("Stops: %1").arg(stops.length > 0 ? stops.join(", ") : qsTr("none")));
+        lines.push("in " + CsTripPlan.clock(num(min["in"])) + ", work " +
+            CsTripPlan.clock(num(min.work)) + ", out " + CsTripPlan.clock(num(min.out)) +
+            ", total " + CsTripPlan.clock(num(min.total)));
+        var warnings = csEpArr(t.warnings);
+        for (var w = 0; w < warnings.length; w++) {
+            var wr = csEpObj(warnings[w]);
+            lines.push((wr.hard === true ? "! " : "- ") + csEpTrim(wr.text));
+        }
+    }
+    var notes = csEpArr(r.notes);
+    if (notes.length > 0) {
+        lines.push("");
+        lines.push(qsTr("Notes:"));
+        for (var n = 0; n < notes.length; n++) { lines.push("- " + String(notes[n])); }
+    }
+    return lines.join("\n");
+};
+
+/** The preview text as HTML for the popup: escaped, hard lines in red. */
+ExpeditionPlanner.suggestPreviewHtml = function(result) {
+    var lines = ExpeditionPlanner.suggestPreviewText(result).split("\n");
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+        var esc = CsPanel.escapeHtml(lines[i]);
+        out.push(lines[i].indexOf("!") === 0 ?
+            "<span style=\"color:#c00\">" + esc + "</span>" : esc);
+    }
+    return out.join("<br>");
+};
+
+/** Undo suggestion is enabled exactly while a snapshot is kept. */
+ExpeditionPlanner.updateSuggestButtons = function() {
+    var b = ExpeditionPlanner.child("ExpeditionPlannerSuggestUndo");
+    if (b === null) {
+        return;
+    }
+    var snap = ExpeditionPlanner.state.suggestUndo;
+    try {
+        b.enabled = snap !== null && snap !== undefined;
+    } catch (e) {
+    }
+};
+
+/** Forget the applied suggestion (a change by hand, another drawing). */
+ExpeditionPlanner.clearSuggestUndo = function() {
+    var s = ExpeditionPlanner.state;
+    if (s.suggestUndo === null || s.suggestUndo === undefined) {
+        return;
+    }
+    s.suggestUndo = null;
+    ExpeditionPlanner.updateSuggestButtons();
+};
+
+/**
+ * Write a CsTeamSplit proposal into the teams: teams it adds are created
+ * from the last team's schedule (CsTeams.copyOf, a fresh id); each team's
+ * members and stops (route order) become the proposal's; names, goals,
+ * days and packing stay. Snapshots the teams first (state.suggestUndo),
+ * saves once, rebuilds the sections and enables Undo suggestion.
+ * \return {done, why, snapshot}
+ */
+ExpeditionPlanner.applySuggestion = function(result) {
+    var s = ExpeditionPlanner.state;
+    var r = csEpObj(result);
+    var proposed = csEpArr(r.teams);
+    if (proposed.length === 0) {
+        return { done: false, why: qsTr("There is no suggestion to apply."), snapshot: null };
+    }
+    ExpeditionPlanner.flushPacking();
+    var teams = s.teams;
+    // A proposal made for other teams (changed since) is refused whole.
+    for (var c = 0; c < proposed.length && c < teams.length; c++) {
+        var pid = csEpTrim(csEpObj(proposed[c]).id);
+        if (pid !== "" && pid !== teams[c].id) {
+            return { done: false, why: qsTr("The teams changed since this suggestion: " +
+                "press Suggest again."), snapshot: null };
+        }
+    }
+    var snapshot = JSON.parse(JSON.stringify(teams));
+    var used = {};
+    for (var u = 0; u < teams.length; u++) { used["#" + teams[u].id] = true; }
+    for (var i = 0; i < proposed.length && i < ExpeditionPlanner.MAX_TEAMS; i++) {
+        var pt = csEpObj(proposed[i]);
+        if (i >= teams.length) {
+            var name = csEpTrim(pt.name);
+            if (name === "") { name = "Team " + (i + 1); }
+            var nt = teams.length > 0 ? CsTeams.copyOf(teams[teams.length - 1], name) :
+                CsTeams.blank(name);
+            while (nt.id === "" || used["#" + nt.id] === true) { nt.id = CsUuid.v4(); }
+            used["#" + nt.id] = true;
+            teams.push(nt);
+        }
+        var members = [];
+        var pm = csEpArr(pt.members);
+        for (var m = 0; m < pm.length; m++) {
+            members.push({ id: csEpTrim(csEpObj(pm[m]).id), name: csEpTrim(csEpObj(pm[m]).name) });
+        }
+        var stops = [];
+        var ps = csEpArr(pt.stops);
+        for (var k = 0; k < ps.length; k++) { stops.push(csEpTrim(ps[k])); }
+        teams[i].members = members;
+        teams[i].stops = stops;
+        var id = teams[i].id;
+        teams[i] = CsStationStore.cleanTeam(teams[i], i + 1);
+        teams[i].id = id;
+    }
+    s.suggestUndo = snapshot;
+    s.plan = null;
+    var why = ExpeditionPlanner.saveTeams();
+    s.teamMessage = why !== "" ? why : qsTr("Suggestion applied. Undo suggestion " +
+        "puts the teams back as they were.");
+    ExpeditionPlanner.rebuildTeamSections();
+    ExpeditionPlanner.updateSuggestButtons();
+    return { done: true, why: why, snapshot: snapshot };
+};
+
+/**
+ * Put the teams back exactly as they were before the applied suggestion
+ * (ids included; teams it added go), save, rebuild and disable Undo.
+ * Without a snapshot it does nothing. \return {done, why}
+ */
+ExpeditionPlanner.undoSuggestion = function() {
+    var s = ExpeditionPlanner.state;
+    var snap = s.suggestUndo;
+    if (snap === null || snap === undefined) {
+        return { done: false, why: "" };
+    }
+    s.suggestUndo = null;
+    s.teams = JSON.parse(JSON.stringify(snap));
+    if (ExpeditionPlanner.teamIndex(s.activeTeamId) < 0 && s.teams.length > 0) {
+        s.activeTeamId = s.teams[s.teams.length - 1].id;
+    }
+    s.plan = null;
+    var why = ExpeditionPlanner.saveTeams();
+    s.teamMessage = why !== "" ? why : qsTr("Suggestion undone: the teams are back " +
+        "as they were.");
+    ExpeditionPlanner.rebuildTeamSections();
+    ExpeditionPlanner.updateSuggestButtons();
+    return { done: true, why: why };
+};
+
+/** The Undo suggestion button. */
+ExpeditionPlanner.undoSuggestionClicked = function() {
+    if (!ExpeditionPlanner.planGuard()) {
+        return;
+    }
+    ExpeditionPlanner.undoSuggestion();
+};
+
+/** Whether row `r` of a lock table is ticked; `dflt` when it cannot be read. */
+var csEpTicked = function(table, r, dflt) {
+    try {
+        var it = table.item(r, 0);
+        if (it === null || it === undefined) {
+            return dflt;
+        }
+        return it.checkState() == Qt.Checked;
+    } catch (e) {
+        return dflt;
+    }
+};
+
+/**
+ * The Suggest split popup, built but not run (suggestClicked runs it).
+ * Built from the arguments and the state only: never child()/ensureDock.
+ * \param party the Going people [{id, name}]
+ */
+ExpeditionPlanner.buildSuggestDialog = function(party) {
+    var s = ExpeditionPlanner.state;
+    var list = csEpArr(party);
+    var extra = [];
+    var rows = ExpeditionPlanner.suggestRows(s, list, extra);
+    var stopRows = rows.stops;
+    var personRows = rows.people;
+    var proposal = null;
+    // Filling is not editing: ticks and rows set by code fire itemChanged.
+    var filling = false;
+    var pre = "ExpeditionPlannerSuggest_";
+
+    var main = null;
+    try {
+        main = RMainWindowQt.getMainWindow();
+    } catch (eMain) {
+        main = null;
+    }
+    var dlg = (main === null || main === undefined) ? new QDialog() : new QDialog(main);
+    dlg.objectName = "ExpeditionPlannerSuggestDialog";
+    dlg.windowTitle = qsTr("Suggest split");
+    var v = new QVBoxLayout();
+    var intro = new QLabel("<span style=\"color:#777\">" + CsPanel.escapeHtml(
+        qsTr("Ticked (locked) stops and people stay on their team; the rest " +
+            "are shared out. Suggest shows a preview; nothing changes until " +
+            "Apply.")) + "</span>");
+    try {
+        intro.wordWrap = true;
+    } catch (eWrap) {
+    }
+    v.addWidget(intro, 0, 0);
+
+    var grid = CsPanel.formGrid(1);
+    grid.addWidget(new QLabel(qsTr("Teams")), 0, 0);
+    var count = new QSpinBox();
+    count.objectName = pre + "Count";
+    count.toolTip = qsTr("How many teams to split into. More than now adds " +
+        "teams that start with the last team's schedule.");
+    try {
+        count.setMinimum(Math.max(1, s.teams.length));
+        count.setMaximum(ExpeditionPlanner.MAX_TEAMS);
+        count.setValue(Math.max(1, s.teams.length));
+    } catch (eCount) {
+    }
+    grid.addWidget(count, 0, 1);
+    v.addLayout(grid, 0);
+
+    var setupTable = function(t) {
+        try {
+            t.selectionBehavior = QAbstractItemView.SelectRows;
+            t.selectionMode = QAbstractItemView.SingleSelection;
+            // Only the Lock tick changes (as the roster's Going tick).
+            t.editTriggers = QAbstractItemView.NoEditTriggers;
+        } catch (eSel) {
+        }
+    };
+
+    // Objectives.
+    v.addWidget(new QLabel("<b>" + CsPanel.escapeHtml(qsTr("Objectives")) + "</b>"), 0, 0);
+    var stopsT = ExpeditionPlanner.calloutTable(pre + "Stops",
+        [qsTr("Lock"), qsTr("Stop"), qsTr("Currently")], 90, 200);
+    stopsT.toolTip = qsTr("Tick Lock to keep a stop on its team. Unticked stops " +
+        "are shared out.");
+    setupTable(stopsT);
+    var fillStopRow = function(r) {
+        var row = stopRows[r];
+        stopsT.setItem(r, 0, ExpeditionPlanner.goingItem(row.lock));
+        stopsT.setItem(r, 1, ExpeditionPlanner.readOnlyItem(row.station));
+        stopsT.setItem(r, 2, ExpeditionPlanner.readOnlyItem(row.currently, row.team < 0));
+    };
+    filling = true;
+    try {
+        stopsT.setRowCount(stopRows.length);
+        for (var sr = 0; sr < stopRows.length; sr++) { fillStopRow(sr); }
+    } finally {
+        filling = false;
+    }
+    v.addWidget(stopsT, 0, 0);
+    var pickRow = new QHBoxLayout();
+    var picker = new QComboBox();
+    picker.objectName = pre + "StopPicker";
+    picker.toolTip = qsTr("Type or pick a station to add as a free stop.");
+    try {
+        picker.setEditable(true);
+    } catch (eEdit) {
+        try {
+            picker.editable = true;
+        } catch (eEdit2) {
+        }
+    }
+    try {
+        picker.insertPolicy = QComboBox.NoInsert;
+    } catch (eIns) {
+    }
+    ExpeditionPlanner.fillPickerWidget(picker, csEpArr(s.stations));
+    var addStop = new QPushButton(qsTr("Add stop"));
+    addStop.objectName = pre + "StopAdd";
+    addStop.toolTip = qsTr("Add the station in the box as a free stop.");
+    pickRow.addWidget(picker, 1, 0);
+    pickRow.addWidget(addStop, 0, 0);
+    v.addLayout(pickRow, 0);
+    var pickStatus = new QLabel("");
+    pickStatus.objectName = pre + "StopStatus";
+    v.addWidget(pickStatus, 0, 0);
+
+    // People.
+    v.addWidget(new QLabel("<b>" + CsPanel.escapeHtml(qsTr("People going")) + "</b>"), 0, 0);
+    var peopleT = ExpeditionPlanner.calloutTable(pre + "People",
+        [qsTr("Lock"), qsTr("Person"), qsTr("Skills"), qsTr("Squeeze (in)"),
+            qsTr("Currently")], 90, 220);
+    peopleT.toolTip = qsTr("Tick Lock to keep someone on their team. Unticked " +
+        "people are shared out.");
+    setupTable(peopleT);
+    filling = true;
+    try {
+        peopleT.setRowCount(personRows.length);
+        for (var pr = 0; pr < personRows.length; pr++) {
+            var row = personRows[pr];
+            peopleT.setItem(pr, 0, ExpeditionPlanner.goingItem(row.lock));
+            peopleT.setItem(pr, 1, ExpeditionPlanner.readOnlyItem(row.name));
+            peopleT.setItem(pr, 2, ExpeditionPlanner.readOnlyItem(row.skills));
+            peopleT.setItem(pr, 3, ExpeditionPlanner.readOnlyItem(row.squeeze));
+            peopleT.setItem(pr, 4, ExpeditionPlanner.readOnlyItem(row.currently, row.team < 0));
+        }
+    } finally {
+        filling = false;
+    }
+    v.addWidget(peopleT, 0, 0);
+    if (personRows.length === 0) {
+        v.addWidget(new QLabel("<span style=\"color:#777\">" + CsPanel.escapeHtml(
+            qsTr("Nobody is ticked Going: only stops will be shared out.")) +
+            "</span>"), 0, 0);
+    }
+
+    var runRow = new QHBoxLayout();
+    var freeAll = new QPushButton(qsTr("Free everything"));
+    freeAll.objectName = pre + "FreeAll";
+    freeAll.toolTip = qsTr("Untick every Lock, so everything is shared out.");
+    var run = new QPushButton(qsTr("Suggest"));
+    run.objectName = pre + "Run";
+    run.toolTip = qsTr("Work out a split and show it below. Changes nothing.");
+    runRow.addWidget(freeAll, 0, 0);
+    runRow.addStretch(1);
+    runRow.addWidget(run, 0, 0);
+    v.addLayout(runRow, 0);
+
+    var preview = new QPlainTextEdit();
+    preview.objectName = pre + "Preview";
+    preview.readOnly = true;
+    try {
+        preview.setMinimumHeight(180);
+    } catch (ePrevH) {
+    }
+    v.addWidget(preview, 1, 0);
+
+    var status = new QLabel("");
+    status.objectName = pre + "Status";
+    try {
+        status.wordWrap = true;
+    } catch (eWrap2) {
+    }
+    v.addWidget(status, 0, 0);
+
+    var endRow = new QHBoxLayout();
+    endRow.addStretch(1);
+    var apply = new QPushButton(qsTr("Apply"));
+    apply.objectName = pre + "Apply";
+    apply.toolTip = qsTr("Write the suggestion into the teams. Undo suggestion " +
+        "puts them back.");
+    apply.enabled = false;
+    var close = new QPushButton(qsTr("Close"));
+    close.objectName = pre + "Close";
+    endRow.addWidget(close, 0, 0);
+    endRow.addWidget(apply, 0, 0);
+    v.addLayout(endRow, 0);
+
+    // Anything changed after Suggest makes the preview stale: Apply waits
+    // for the next Suggest.
+    var stale = function() {
+        proposal = null;
+        try {
+            apply.enabled = false;
+        } catch (eStale) {
+        }
+    };
+    var locksNow = function() {
+        var out = { stops: {}, people: {} };
+        for (var a = 0; a < stopRows.length; a++) {
+            out.stops[stopRows[a].station] = csEpTicked(stopsT, a, stopRows[a].lock);
+        }
+        for (var b = 0; b < personRows.length; b++) {
+            out.people[personRows[b].key] = csEpTicked(peopleT, b, personRows[b].lock);
+        }
+        return out;
+    };
+    var onCount = function() {
+        if (filling) { return; }
+        stale();
+    };
+    try {
+        count["valueChanged(int)"].connect(onCount);
+    } catch (eVal) {
+        try {
+            count.valueChanged.connect(onCount);
+        } catch (eVal2) {
+        }
+    }
+    var onItem = function(item) {
+        if (filling) { return; }
+        stale();
+    };
+    var tables = [stopsT, peopleT];
+    for (var ti = 0; ti < tables.length; ti++) {
+        try {
+            tables[ti]["itemChanged(QTableWidgetItem*)"].connect(onItem);
+        } catch (eChanged) {
+            try {
+                tables[ti].itemChanged.connect(onItem);
+            } catch (eChanged2) {
+            }
+        }
+    }
+    addStop.clicked.connect(function() {
+        if (!ExpeditionPlanner.planGuard()) {
+            dlg.reject();
+            return;
+        }
+        var typed = ExpeditionPlanner.pickerText(picker).replace(/^\s+|\s+$/g, "");
+        if (typed === "") {
+            pickStatus.text = qsTr("Type or pick a station first.");
+            return;
+        }
+        var name = ExpeditionPlanner.matchStation(csEpArr(ExpeditionPlanner.state.stations), typed);
+        if (name === null) {
+            pickStatus.text = qsTr("%1 is not a station in this drawing").arg(typed);
+            return;
+        }
+        for (var q = 0; q < stopRows.length; q++) {
+            if (stopRows[q].station === name) {
+                pickStatus.text = qsTr("%1 is already listed.").arg(name);
+                return;
+            }
+        }
+        stopRows.push({ station: name, team: -1, currently: qsTr("free"), lock: false });
+        extra.push(name);
+        filling = true;
+        try {
+            var at = stopsT.rowCount;
+            stopsT.setRowCount(at + 1);
+            fillStopRow(at);
+        } finally {
+            filling = false;
+        }
+        pickStatus.text = "";
+        ExpeditionPlanner.setPickerText(picker, "");
+        stale();
+    });
+    freeAll.clicked.connect(function() {
+        filling = true;
+        try {
+            var all = [[stopsT, stopRows.length], [peopleT, personRows.length]];
+            for (var t = 0; t < all.length; t++) {
+                for (var r = 0; r < all[t][1]; r++) {
+                    try {
+                        var it = all[t][0].item(r, 0);
+                        if (it !== null && it !== undefined) { it.setCheckState(Qt.Unchecked); }
+                    } catch (eTick) {
+                    }
+                }
+            }
+        } finally {
+            filling = false;
+        }
+        stale();
+    });
+    run.clicked.connect(function() {
+        if (!ExpeditionPlanner.planGuard()) {
+            dlg.reject();
+            return;
+        }
+        var n = typeof count.value === "function" ? count.value() : count.value;
+        var result = null;
+        try {
+            result = CsTeamSplit.suggest(ExpeditionPlanner.suggestInput(
+                ExpeditionPlanner.state, locksNow(), Number(n), extra, list));
+        } catch (eRun) {
+            stale();
+            status.text = "<span style=\"color:#c00\">" + CsPanel.escapeHtml(
+                qsTr("Could not work out a split (%1) -- please report this.")
+                    .arg(String(eRun))) + "</span>";
+            return;
+        }
+        proposal = result;
+        status.text = "";
+        preview.setPlainText(ExpeditionPlanner.suggestPreviewText(result));
+        // Hard lines in red where the bridge offers appendHtml; the plain
+        // text above stays otherwise.
+        try {
+            if (typeof preview.appendHtml === "function") {
+                preview.clear();
+                preview.appendHtml(ExpeditionPlanner.suggestPreviewHtml(result));
+            }
+        } catch (eHtml) {
+            preview.setPlainText(ExpeditionPlanner.suggestPreviewText(result));
+        }
+        try {
+            apply.enabled = true;
+        } catch (eApply) {
+        }
+    });
+    apply.clicked.connect(function() {
+        if (proposal === null) {
+            return;
+        }
+        if (!ExpeditionPlanner.planGuard()) {
+            dlg.reject();
+            return;
+        }
+        var r = ExpeditionPlanner.applySuggestion(proposal);
+        if (r.done !== true) {
+            stale();
+            status.text = "<span style=\"color:#c00\">" + CsPanel.escapeHtml(r.why) + "</span>";
+            return;
+        }
+        dlg.accept();
+    });
+    close.clicked.connect(function() { dlg.reject(); });
+    dlg.setLayout(v);
+    try {
+        dlg.resize(560, 680);
+    } catch (eSize) {
+    }
+    return dlg;
+};
+
+/**
+ * A closed popup, out of use for good: hidden and every named widget in
+ * it renamed ExpeditionPlannerSuggestClosed<k>..., never deleted (the
+ * editable QComboBox segfaults when destroyed; see teardownTeamSections).
+ */
+ExpeditionPlanner.retireSuggestDialog = function(dlg) {
+    var s = ExpeditionPlanner.state;
+    try {
+        dlg.close();
+    } catch (eClose) {
+    }
+    try {
+        dlg.visible = false;
+    } catch (eHide) {
+    }
+    s.suggestClosed = (typeof s.suggestClosed === "number" ? s.suggestClosed : 0) + 1;
+    csEpRenameTree(dlg, "ExpeditionPlannerSuggest",
+        "ExpeditionPlannerSuggestClosed" + s.suggestClosed, 0);
+};
+
+/** Suggest split...: the popup, modal, built now (the dock exists). */
+ExpeditionPlanner.suggestClicked = function() {
+    if (!ExpeditionPlanner.planGuard()) {
+        return null;
+    }
+    ExpeditionPlanner.flushPacking();
+    var s = ExpeditionPlanner.state;
+    if (s.drawn === null || s.drawn === undefined) {
+        CsTell.warn(qsTr("Expedition Planner: this drawing holds no survey " +
+            "to split the stops on."));
+        return null;
+    }
+    var party = ExpeditionPlanner.readParty();
+    var dlg = null;
+    try {
+        dlg = ExpeditionPlanner.buildSuggestDialog(party);
+    } catch (eBuild) {
+        CsTell.warn("Expedition Planner: the Suggest split popup could not be " +
+            "built (" + eBuild + ") -- please report this.");
+        return null;
+    }
+    try {
+        dlg.exec();
+    } catch (eExec) {
+    }
+    ExpeditionPlanner.retireSuggestDialog(dlg);
+    return dlg;
 };
 
 // ---------------------------------------------------------------------

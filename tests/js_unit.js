@@ -35673,6 +35673,8 @@ if (typeof ExpeditionPlanner !== "undefined" &&
 // per-team planning, buildFiles, the dock-build guard, and real team
 // sections built on a never-shown QWidget).
 // ---------------------------------------------------------------------
+// The fake Qt below, kept for the Suggest split panel tests further down.
+var tmFakeQtShared = null;
 (function() {
     var EP = ExpeditionPlanner;
     var fns = ["teamSummary", "teamHeaderTitle", "buildFileList", "staleTeamFiles",
@@ -36098,6 +36100,12 @@ if (typeof ExpeditionPlanner !== "undefined" &&
         };
         P.setPlainText = function(t) { this.plain = String(t); this.textChanged.fire(); };
         P.toPlainText = function() { return this.plain; };
+        P.appendHtml = function(h) { this.html = (this.html || "") + String(h); };
+        // QDialog: exec returns at once (nothing modal in a test).
+        P.exec = function() { this.execs = (this.execs || 0) + 1; return 0; };
+        P.accept = function() { this.result = "accepted"; };
+        P.reject = function() { this.result = "rejected"; };
+        P.close = function() { this.closed = true; };
         P.click = function() {
             if (this.checkable === true) {
                 this.checked = !this.checked;
@@ -36121,7 +36129,11 @@ if (typeof ExpeditionPlanner !== "undefined" &&
         };
         Item.prototype.setFlags = noop;
         Item.prototype.flags = function() { return 0; };
-        Item.prototype.setCheckState = noop;
+        Item.prototype.setCheckState = function(v) {
+            this.cs = v;
+            if (this.owner) { this.owner.itemChanged.fire(this); }
+        };
+        Item.prototype.checkState = function() { return this.cs; };
         Item.prototype.setForeground = noop;
         Item.prototype.setToolTip = noop;
         var Timer = function() {
@@ -36134,7 +36146,7 @@ if (typeof ExpeditionPlanner !== "undefined" &&
             QLineEdit: make(false), QTableWidget: make(false), QTableWidgetItem: Item,
             QCheckBox: make(true), QComboBox: make(false), QSpinBox: make(false),
             QPlainTextEdit: make(false), QHBoxLayout: make(false), QVBoxLayout: make(false),
-            QGridLayout: make(false), QTimer: Timer,
+            QGridLayout: make(false), QTimer: Timer, QDialog: make(false),
             WidgetFactory: { createWidget: function() {
                 var row = new W();
                 row.setLayout(new W());
@@ -36172,6 +36184,7 @@ if (typeof ExpeditionPlanner !== "undefined" &&
             }
         };
     })();
+    tmFakeQtShared = tmFakeQt;
 
     // The dock-build rule: no builder reaches the dock (0.9.194.0 hang).
     (function() {
@@ -36792,6 +36805,356 @@ for (var ssf = 0; ssf < ssFeas.length; ssf++) {
     if (ssFeas[ssf].feasible !== !ssAllHard(ssFeas[ssf])) { ssFeasOk = false; }
 }
 ok(ssFeasOk, "ss engine: feasible is false exactly when a hard warning exists");
+
+// ---------------------------------------------------------------------
+// Suggest split -- the panel: lock defaults, the engine input, the
+// preview, Apply and Undo, and the popup on FAKE widgets only (a real
+// widget in a -no-gui run can crash at exit and pop a dialog on the
+// desktop). The sidecar and saveTeams are stubbed; people.json is never
+// read.
+// ---------------------------------------------------------------------
+(function() {
+    var EP = ExpeditionPlanner;
+    var fns = ["suggestPersonKey", "suggestRows", "suggestInput", "suggestPreviewText",
+        "suggestPreviewHtml", "applySuggestion", "undoSuggestion", "clearSuggestUndo",
+        "buildSuggestDialog", "suggestClicked", "undoSuggestionClicked"];
+    var absent = [];
+    for (var f = 0; f < fns.length; f++) {
+        if (typeof EP[fns[f]] !== "function") { absent.push(fns[f]); }
+    }
+    eqs(absent.join(","), "", "ss panel: the suggest functions exist");
+    if (absent.length > 0) { return; }
+    var realState = EP.state;
+    var realChild = EP.child;
+    var realSave = EP.saveTeams;
+    var realEnsure = EP.ensureDock;
+    var realGuard = EP.planGuard;
+    var saves = 0;
+    var party = [ssP("p-ana", "Ana Ruiz"), ssP("p-bo", "Bo Chen"), ssP("p-zed", "Zed Vance"),
+        ssP("", "Walk In")];
+    var teamsNow = function() {
+        return [ { id: "ss-t1", name: "Alpha", goal: "Push", dayOffset: 0,
+                members: [ssP("p-ana", "Ana Ruiz"), ssP("p-gone", "Gone Guy")], stops: ["E2"],
+                days: [ssDay(8)], packing: "rope" },
+            { id: "ss-t2", name: "Beta", goal: "", dayOffset: 1, members: [], stops: [],
+                days: [ssDay(6)], packing: "" } ];
+    };
+    var fresh = function() {
+        EP.state = { drawn: { survey: ssSv, resolved: ssRes }, docPath: "/fake/Cave/Cave.dxf",
+            store: { settings: { pace: { paceFtPerMin: 10 },
+                trip: { startDate: "2026-10-03", party: party, teams: [] } } },
+            loadError: "", stations: ["E1", "E2", "E3", "E4", "N1", "N2", "S0", "W1", "W2"],
+            plan: null, planShown: null, people: ssDir, peopleError: "", rosterRows: [],
+            filling: false, teams: teamsNow(), teamOpen: {}, activeTeamId: "",
+            teamMessage: "", removedCount: 0, packingPending: null, suggestUndo: null };
+        saves = 0;
+        return EP.state;
+    };
+    var byStation = function(rows, st) {
+        for (var i = 0; i < rows.length; i++) { if (rows[i].station === st) { return rows[i]; } }
+        return null;
+    };
+    var byName = function(rows, n) {
+        for (var i = 0; i < rows.length; i++) { if (rows[i].name === n) { return rows[i]; } }
+        return null;
+    };
+    var names = function(list) { return list.map(function(p) { return p.name; }).join(","); };
+    try {
+        EP.child = function() { return null; };
+        EP.saveTeams = function() { saves++; return ""; };
+        EP.planGuard = function() { return true; };
+        var s = fresh();
+
+        // Lock defaults: on when on a team now, off when free.
+        var rows = EP.suggestRows(s, party, ["N2"]);
+        var e2 = byStation(rows.stops, "E2");
+        var n2 = byStation(rows.stops, "N2");
+        ok(e2 !== null && e2.lock === true && e2.team === 0 && e2.currently === "Alpha",
+            "ss panel: an assigned stop is locked by default, Currently its team");
+        ok(n2 !== null && n2.lock === false && n2.team === -1 && n2.currently === "free",
+            "ss panel: an extra stop is free, lock off");
+        eqs(rows.stops.length, 2, "ss panel: the objectives are the teams' stops plus the extra ones");
+        var ana = byName(rows.people, "Ana Ruiz");
+        var bo = byName(rows.people, "Bo Chen");
+        var zed = byName(rows.people, "Zed Vance");
+        var walk = byName(rows.people, "Walk In");
+        ok(ana !== null && ana.lock === true && ana.team === 0 && ana.currently === "Alpha",
+            "ss panel: a person on a team is locked by default");
+        ok(bo !== null && bo.lock === false && bo.team === -1 && bo.currently === "free",
+            "ss panel: a free person is not locked");
+        eqs(rows.people.length, 4, "ss panel: the people are the Going party, no one else");
+        ok(byName(rows.people, "Gone Guy") === null && byName(rows.people, "Cy Diaz") === null,
+            "ss panel: neither a member no longer going nor a directory person not going is listed");
+        eqs(zed.skills, CsPeople.skillLabels({ skills: ["vertical"] }).join(", "),
+            "ss panel: the skills summary comes from CsPeople.skillLabels");
+        eqs(ana.squeeze, "12", "ss panel: the squeeze column is the directory limit");
+        ok(walk !== null && walk.skills === "" && walk.squeeze === "" && walk.lock === false,
+            "ss panel: someone not in the directory is still listed, no skills, no limit");
+        ok(EP.suggestPersonKey(ssP("p-ana", "x")) !== EP.suggestPersonKey(ssP("", "Walk In")) &&
+            EP.suggestPersonKey(ssP("", " walk  in ")) === EP.suggestPersonKey(ssP("", "Walk In")),
+            "ss panel: a person's key is the id, else the case-blind name");
+
+        // suggestInput: the engine input from state and the ticks.
+        var locks = { stops: {}, people: {} };
+        var r0;
+        for (r0 = 0; r0 < rows.stops.length; r0++) { locks.stops[rows.stops[r0].station] = rows.stops[r0].lock; }
+        for (r0 = 0; r0 < rows.people.length; r0++) { locks.people[rows.people[r0].key] = rows.people[r0].lock; }
+        var inp = EP.suggestInput(s, locks, 3, ["N2"], party);
+        eqs(JSON.stringify(inp.lockedStops), JSON.stringify([{ station: "E2", team: 0 }]),
+            "ss panel: a locked stop maps to its team's index");
+        eqs(inp.freeStops.join(","), "N2", "ss panel: the extra stop is free");
+        eqs(inp.teamCount, 3, "ss panel: the team count passes through");
+        eqs(names(inp.freePeople), "Bo Chen,Zed Vance,Walk In", "ss panel: free people are the unlocked party");
+        eqs(names(inp.lockedPeople.filter(function(p) { return p.team === 0; })), "Ana Ruiz,Gone Guy",
+            "ss panel: locked people map to their team; a member no longer going stays locked there");
+        ok(inp.directory === s.people && inp.survey === ssSv && inp.resolved === ssRes && inp.unit === "ft",
+            "ss panel: directory, survey, resolved and unit come from the panel's state");
+        eqs(inp.config.paceFtPerMin, 10, "ss panel: the config carries the stored pace");
+        eqs(JSON.stringify(inp.teams), JSON.stringify(s.teams), "ss panel: the current teams go in");
+        ok(inp.teams !== s.teams, "ss panel: the engine gets a copy of the teams");
+        var unlocked = EP.suggestInput(s, { stops: { E2: false }, people: {} }, 2, [], party);
+        ok(unlocked.lockedStops.length === 0 && unlocked.freeStops.join(",") === "E2",
+            "ss panel: an unticked stop is free");
+        ok(names(unlocked.lockedPeople) === "Ana Ruiz,Gone Guy",
+            "ss panel: a person with no tick state keeps the default (locked when assigned)");
+        var freed = EP.suggestInput(s, { stops: {}, people: (function() {
+            var o = {}; o[EP.suggestPersonKey(ssP("p-ana", "Ana Ruiz"))] = false; return o; })() }, 2, [], party);
+        ok(names(freed.freePeople).indexOf("Ana Ruiz") === 0 && names(freed.lockedPeople) === "Gone Guy",
+            "ss panel: an unticked person is free");
+        eqs(EP.suggestInput(s, locks, 1, [], party).teamCount + ":" + EP.suggestInput(s, locks, 12, [], party).teamCount,
+            "2:8", "ss panel: the team count is clamped to current..8");
+        var ran = CsTeamSplit.suggest(inp);
+        var placedWalk = false;
+        for (r0 = 0; r0 < ran.teams.length; r0++) {
+            if (names(ran.teams[r0].members).indexOf("Walk In") >= 0) { placedWalk = true; }
+        }
+        ok(placedWalk && ran.teams.length === 3, "ss panel: the engine takes the input; the unknown person is placed");
+
+        // The preview text.
+        var fake = { feasible: false, notes: ["Team 3 has nobody."], teams: [
+            { index: 0, id: "ss-t1", name: "Alpha", added: false, members: [ssP("p-ana", "Ana Ruiz")],
+                stops: ["E2", "E4"], minutes: { "in": 10, work: 20, out: 10, total: 40 },
+                needsVertical: true, tightestInches: null, warnings: [
+                    { kind: "vertical", hard: true, text: "Alpha: the route has a pitch." },
+                    { kind: "leader", hard: false, text: "Alpha: nobody on the team is a Trip leader." }] },
+            { index: 1, id: "", name: "Team 3", added: true, members: [], stops: [],
+                minutes: { "in": 0, work: 0, out: 0, total: 0 }, needsVertical: false,
+                tightestInches: null, warnings: [] }] };
+        var pv = EP.suggestPreviewText(fake);
+        var pl = pv.split("\n");
+        ok(pl[0].indexOf("!") === 0 && pl[0].indexOf("not met") > 0,
+            "ss panel: the preview's first line says a hard limit is not met");
+        ok(pl.indexOf("! Alpha: the route has a pitch.") > 0,
+            "ss panel: a hard warning is marked with a leading !");
+        ok(pl.indexOf("- Alpha: nobody on the team is a Trip leader.") > 0,
+            "ss panel: a preference is not marked !");
+        ok(pv.indexOf("Alpha") > 0 && pv.indexOf("Ana Ruiz") > 0 && pv.indexOf("E2, E4") > 0,
+            "ss panel: the preview names the team, its members and its stops in order");
+        ok(pv.indexOf("in 10 min, work 20 min, out 10 min, total 40 min") > 0,
+            "ss panel: the preview gives in, work, out and total");
+        ok(pv.indexOf("Team 3 (new)") > 0, "ss panel: a team the suggestion adds is marked new");
+        ok(pv.indexOf("Team 3 has nobody.") > pv.indexOf("Team 3 (new)"),
+            "ss panel: the notes come after the teams");
+        fake.feasible = true;
+        fake.teams[0].warnings = [];
+        eqs(EP.suggestPreviewText(fake).split("\n")[0], "Every hard limit is met.",
+            "ss panel: a feasible proposal says so first");
+        fake.feasible = false;
+        fake.teams[0].warnings = [{ kind: "squeeze", hard: true, text: "Alpha: <x> may not fit." }];
+        var ph = EP.suggestPreviewHtml(fake);
+        ok(ph.indexOf("color:#c00") > 0 && ph.indexOf("! Alpha: &lt;x&gt; may not fit.") > 0,
+            "ss panel: the preview's hard lines are red and escaped");
+
+        // Apply then Undo.
+        s = fresh();
+        var before = JSON.stringify(s.teams);
+        var bad = EP.applySuggestion(null);
+        ok(bad.done === false && saves === 0 && s.suggestUndo === null,
+            "ss panel: applying nothing changes and saves nothing");
+        var prop = CsTeamSplit.suggest(EP.suggestInput(s, locks, 3, ["N2", "E4"], party));
+        var ap = EP.applySuggestion(prop);
+        ok(ap.done === true && ap.why === "", "ss panel: Apply applies");
+        eqs(saves, 1, "ss panel: Apply saves once");
+        eqs(JSON.stringify(s.suggestUndo), before, "ss panel: Apply snapshots the teams before");
+        ok(ap.snapshot === s.suggestUndo, "ss panel: Apply returns the snapshot");
+        eqs(s.teams.length, 3, "ss panel: Apply creates the added team");
+        ok(s.teams[2].id !== "" && s.teams[2].id !== "ss-t1" && s.teams[2].id !== "ss-t2" &&
+            s.teams[2].name === prop.teams[2].name,
+            "ss panel: the added team has a fresh id and the proposed name");
+        eqs(s.teams[2].days.length + ":" + s.teams[2].days[0].workHours + ":" + s.teams[2].dayOffset,
+            "1:6:1", "ss panel: the added team copies the last team's schedule");
+        var same = true;
+        for (r0 = 0; r0 < 3; r0++) {
+            if (s.teams[r0].stops.join(",") !== prop.teams[r0].stops.join(",") ||
+                    names(s.teams[r0].members) !== names(prop.teams[r0].members)) { same = false; }
+        }
+        ok(same, "ss panel: each team's members and stops (route order) are the proposal's");
+        ok(s.teams[0].id === "ss-t1" && s.teams[1].id === "ss-t2" && s.teams[0].goal === "Push" &&
+            s.teams[0].packing === "rope", "ss panel: existing teams keep their id, goal and packing");
+        ok(names(s.teams[0].members).indexOf("Gone Guy") >= 0,
+            "ss panel: a member no longer going is kept on their team");
+        var un = EP.undoSuggestion();
+        ok(un.done === true, "ss panel: Undo undoes");
+        eqs(JSON.stringify(s.teams), before, "ss panel: Undo restores the exact teams, ids included");
+        eqs(s.teams.length, 2, "ss panel: Undo removes the team the suggestion added");
+        eqs(saves, 2, "ss panel: Undo saves");
+        ok(s.suggestUndo === null, "ss panel: Undo drops the snapshot");
+        var un2 = EP.undoSuggestion();
+        ok(un2.done === false && saves === 2 && JSON.stringify(s.teams) === before,
+            "ss panel: a second Undo is a no-op");
+        // A drawing change drops the snapshot (showCalloutSettings, before the dock check).
+        EP.applySuggestion(prop);
+        EP.showCalloutSettings();
+        ok(EP.state.suggestUndo === null, "ss panel: a drawing change drops the Undo snapshot");
+    } finally {
+        EP.child = realChild;
+        EP.saveTeams = realSave;
+        EP.planGuard = realGuard;
+        EP.state = realState;
+    }
+
+    // On fake widgets: the Teams buttons, a manual edit clearing Undo, the popup.
+    var FQ = tmFakeQtShared;
+    if (FQ === null || !FQ.install()) {
+        ok(true, "ss panel: (fake Qt could not be installed; widget tests skipped)");
+        return;
+    }
+    var hits = 0;
+    var root = null;
+    var w = function(name) {
+        var x = root.findChild(name);
+        return (x === null || x === undefined) ? null : x;
+    };
+    try {
+        EP.saveTeams = function() { saves++; return ""; };
+        EP.planGuard = function() { return true; };
+        root = new QWidget();
+        var rootLay = new QVBoxLayout();
+        root.setLayout(rootLay);
+        EP.ensureDock = function() { hits++; return root; };
+        var st = fresh();
+        hits = 0;
+        EP.buildTeamsSection(rootLay);
+        eqs(hits, 0, "ss panel: the Teams section with Suggest reaches no dock while built");
+        ok(w("ExpeditionPlannerSuggest") !== null && w("ExpeditionPlannerSuggestUndo") !== null,
+            "ss panel: Suggest split and Undo suggestion sit in the Teams section");
+        eqs(w("ExpeditionPlannerSuggest").text + "|" + w("ExpeditionPlannerSuggestUndo").text,
+            "Suggest split...|Undo suggestion", "ss panel: the buttons' labels");
+        eqs(w("ExpeditionPlannerSuggestUndo").enabled, false, "ss panel: Undo suggestion starts disabled");
+        EP.rebuildTeamSections();
+        var prop2 = CsTeamSplit.suggest(EP.suggestInput(st, { stops: {}, people: {} }, 2, ["N2"], party));
+        EP.applySuggestion(prop2);
+        eqs(w("ExpeditionPlannerSuggestUndo").enabled, true, "ss panel: Apply enables Undo suggestion");
+        eqs(w("ExpeditionPlannerTeam1_Stops").rowCount, prop2.teams[0].stops.length,
+            "ss panel: Apply rebuilds the team sections");
+        w("ExpeditionPlannerTeam1_Goal").text = "Changed";
+        w("ExpeditionPlannerTeam1_Goal").editingFinished.fire();
+        ok(st.suggestUndo === null && w("ExpeditionPlannerSuggestUndo").enabled === false,
+            "ss panel: a manual team edit after Apply clears and disables Undo");
+        ok(EP.undoSuggestion().done === false && st.teams[0].goal === "Changed",
+            "ss panel: Undo after a manual edit changes nothing");
+        EP.applySuggestion(prop2);
+        w("ExpeditionPlannerTeam1_Packing").setPlainText("new list");
+        ok(st.suggestUndo === null && w("ExpeditionPlannerSuggestUndo").enabled === false,
+            "ss panel: a packing edit after Apply clears Undo too");
+        st.packingPending = null;
+        var pre = JSON.stringify(st.teams);
+        EP.applySuggestion(prop2);
+        w("ExpeditionPlannerSuggestUndo").click();
+        ok(JSON.stringify(st.teams) === pre && w("ExpeditionPlannerSuggestUndo").enabled === false,
+            "ss panel: the Undo suggestion button restores and disables itself");
+
+        // The popup, built by hand: no dock lookups, every widget named.
+        st = fresh();
+        hits = 0;
+        var dlg = EP.buildSuggestDialog(party);
+        eqs(hits, 0, "ss panel: building the popup reaches no dock (no child()/ensureDock)");
+        var dw = function(name) {
+            var x = dlg.findChild(name);
+            return (x === null || x === undefined) ? null : x;
+        };
+        eqs(dlg.objectName, "ExpeditionPlannerSuggestDialog", "ss panel: the popup's objectName");
+        var fields = ["Count", "Stops", "StopPicker", "StopAdd", "People", "FreeAll", "Run",
+            "Preview", "Apply", "Close"];
+        var missing = [];
+        for (var fi = 0; fi < fields.length; fi++) {
+            if (dw("ExpeditionPlannerSuggest_" + fields[fi]) === null) { missing.push(fields[fi]); }
+        }
+        eqs(missing.join(","), "", "ss panel: every popup widget has its objectName");
+        var cnt = dw("ExpeditionPlannerSuggest_Count");
+        eqs(cnt.min + ":" + cnt.max + ":" + cnt.value, "2:8:2", "ss panel: team count min current, max 8");
+        eqs(dw("ExpeditionPlannerSuggest_Apply").enabled, false, "ss panel: Apply is disabled before a proposal");
+        var stopsT = dw("ExpeditionPlannerSuggest_Stops");
+        var peopleT = dw("ExpeditionPlannerSuggest_People");
+        eqs(stopsT.rowCount + ":" + peopleT.rowCount, "1:4", "ss panel: the tables are filled");
+        ok(stopsT.item(0, 0).checkState() === Qt.Checked && stopsT.item(0, 1).text() === "E2" &&
+            stopsT.item(0, 2).text() === "Alpha", "ss panel: the objective row: locked, E2, Alpha");
+        ok(peopleT.item(0, 0).checkState() === Qt.Checked && peopleT.item(1, 0).checkState() === Qt.Unchecked &&
+            peopleT.item(0, 1).text() === "Ana Ruiz" && peopleT.item(0, 4).text() === "Alpha" &&
+            peopleT.item(1, 4).text() === "free" && peopleT.item(0, 3).text() === "12",
+            "ss panel: the people rows: lock ticks by assignment, Currently, Squeeze");
+        ok(dw("ExpeditionPlannerSuggest_StopPicker").items.join(",") === st.stations.join(","),
+            "ss panel: the stop picker offers the drawing's stations");
+        dw("ExpeditionPlannerSuggest_StopPicker").setEditText("zz9");
+        dw("ExpeditionPlannerSuggest_StopAdd").click();
+        eqs(stopsT.rowCount, 1, "ss panel: an unknown station is not added");
+        dw("ExpeditionPlannerSuggest_StopPicker").setEditText("n2");
+        dw("ExpeditionPlannerSuggest_StopAdd").click();
+        ok(stopsT.rowCount === 2 && stopsT.item(1, 1).text() === "N2" &&
+            stopsT.item(1, 0).checkState() === Qt.Unchecked && stopsT.item(1, 2).text() === "free",
+            "ss panel: Add puts an extra stop in, free and unlocked");
+        dw("ExpeditionPlannerSuggest_StopPicker").setEditText("E2");
+        dw("ExpeditionPlannerSuggest_StopAdd").click();
+        eqs(stopsT.rowCount, 2, "ss panel: a stop already listed is not added twice");
+        dw("ExpeditionPlannerSuggest_Run").click();
+        ok(String(dw("ExpeditionPlannerSuggest_Preview").toPlainText()).indexOf("Alpha") >= 0,
+            "ss panel: Suggest fills the preview");
+        eqs(dw("ExpeditionPlannerSuggest_Apply").enabled, true, "ss panel: a proposal enables Apply");
+        cnt.setValue(3);
+        eqs(dw("ExpeditionPlannerSuggest_Apply").enabled, false, "ss panel: changing the count makes the proposal stale");
+        dw("ExpeditionPlannerSuggest_Run").click();
+        dw("ExpeditionPlannerSuggest_FreeAll").click();
+        ok(stopsT.item(0, 0).checkState() === Qt.Unchecked && peopleT.item(0, 0).checkState() === Qt.Unchecked &&
+            dw("ExpeditionPlannerSuggest_Apply").enabled === false,
+            "ss panel: Free everything unticks every lock and makes the proposal stale");
+        dw("ExpeditionPlannerSuggest_Run").click();
+        eqs(st.teams.length, 2, "ss panel: Suggest alone changes no team");
+        dw("ExpeditionPlannerSuggest_Apply").click();
+        ok(st.teams.length === 3 && st.suggestUndo !== null && dlg.result === "accepted",
+            "ss panel: Apply writes the teams and closes the popup");
+        var ids = st.teams.map(function(t) { return t.id; });
+        ok(ids[2] !== ids[0] && ids[2] !== ids[1] && ids[2] !== "", "ss panel: the popup's added team has a unique id");
+
+        // The click handler builds the popup (no dock lookup while building), runs it, retires it.
+        st = fresh();
+        var realBuild = EP.buildSuggestDialog;
+        var during = -1;
+        var built = null;
+        EP.buildSuggestDialog = function(p) {
+            var h0 = hits;
+            built = realBuild(p);
+            during = hits - h0;
+            return built;
+        };
+        try {
+            EP.suggestClicked();
+        } finally {
+            EP.buildSuggestDialog = realBuild;
+        }
+        ok(built !== null && built.execs === 1, "ss panel: the click builds the popup and runs it");
+        eqs(during, 0, "ss panel: the click handler builds the popup without calling ensureDock");
+        ok(String(built.objectName).indexOf("ExpeditionPlannerSuggestDialog") < 0 &&
+            built.visible === false && built.findChild("ExpeditionPlannerSuggest_Apply") === undefined,
+            "ss panel: a closed popup is hidden and renamed, never found again");
+    } finally {
+        EP.ensureDock = realEnsure;
+        EP.saveTeams = realSave;
+        EP.planGuard = realGuard;
+        EP.state = realState;
+        csEpPackingTimer = null;
+        FQ.restore();
+    }
+})();
 
 // ---------------------------------------------------------------------
 // Report.
