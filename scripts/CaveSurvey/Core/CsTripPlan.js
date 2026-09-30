@@ -472,6 +472,57 @@ CsTripPlan.tightWarnings = function(survey, edges, unit, cfg) {
 };
 
 /**
+ * The narrowest passage on a plan's route, and where.
+ *
+ * Same width rule as tightWarnings: a leg's width is its shot's left +
+ * right when both are numbers, else unknown. The legs read are the ones
+ * the plan walks: the way in to every stop and the way back. The width
+ * is converted from the plan's unit (the survey's, as build was given
+ * it; the survey's distanceUnit when the plan has none) to INCHES.
+ *
+ * \return {inches, near} (near = the station the leg arrives at, as in
+ *   tightWarnings), or null when no width is known anywhere on the route
+ */
+CsTripPlan.routeTightestAt = function(survey, plan) {
+    if (survey === undefined || survey === null || plan === undefined || plan === null ||
+            Object.prototype.toString.call(survey.shots) !== "[object Array]") {
+        return null;
+    }
+    var unit = plan.unit === "m" || plan.unit === "ft" ? plan.unit :
+        (survey.distanceUnit === "m" ? "m" : "ft");
+    var num = function(v) { return typeof v === "number" && isFinite(v) ? v : null; };
+    var best = null;
+    var walk = function(steps) {
+        var list = Object.prototype.toString.call(steps) === "[object Array]" ? steps : [];
+        for (var s = 0; s < list.length; s++) {
+            var edges = (list[s] && list[s].edges) || [];
+            for (var e = 0; e < edges.length; e++) {
+                var sh = survey.shots[edges[e].shot];
+                if (sh === undefined || sh === null) { continue; }
+                var l = num(sh.left), r = num(sh.right);
+                if (l === null || r === null) { continue; }
+                var width = l + r;
+                if (best === null || width < best.width) {
+                    best = { width: width, near: edges[e].to };
+                }
+            }
+        }
+    };
+    var stops = Object.prototype.toString.call(plan.stops) === "[object Array]" ? plan.stops : [];
+    for (var i = 0; i < stops.length; i++) { walk(stops[i] && stops[i].steps); }
+    walk(plan.back && plan.back.steps);
+    if (best === null) { return null; }
+    return { inches: csTpFeet(best.width, unit) * 12, near: best.near };
+};
+
+/** The narrowest passage width on a plan's route in INCHES, or null when
+ *  no width is known there (see routeTightestAt). */
+CsTripPlan.routeTightness = function(survey, plan) {
+    var at = CsTripPlan.routeTightestAt(survey, plan);
+    return at === null ? null : at.inches;
+};
+
+/**
  * Assemble a plan.
  *
  * \param opts {start, targets: [station], unit, config, packing, notes}
