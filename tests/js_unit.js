@@ -166,6 +166,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsTripPlan.js",
     "scripts/CaveSurvey/Core/CsCalloutCard.js",
     "scripts/CaveSurvey/Core/CsTeams.js",
+    "scripts/CaveSurvey/Core/CsSqueeze.js",
     "scripts/CaveSurvey/Core/CsTeamSplit.js",
     "scripts/CaveSurvey/Core/CsWeather.js",
     "scripts/CaveSurvey/Core/CsCalloutLocal.js",
@@ -37384,6 +37385,188 @@ ok(ssFeasOk, "ss engine: feasible is false exactly when a hard warning exists");
         "ss zero: a real width beside unmeasured zeros is the tightest (1.5 ft = 18 in)");
     ok(CsTripPlan.routeTightestAt(sv, planOf([ { shot: 0, to: "A" } ])) === null,
         "ss zero: routeTightestAt is null for zero-only widths");
+})();
+
+// ---------------------------------------------------------------------
+// Squeeze view -- the engine (CsSqueeze) and the squeeze blocks on the
+// topside sheet, the team file and the single-team card.
+// ---------------------------------------------------------------------
+
+(function() {
+    var sv = ssSurvey();
+    var res = CsNetwork.resolve(sv, {});
+    var opts = { start: "S0", unit: "ft", config: { paceFtPerMin: 10 } };
+    var dir = [
+        { id: "p-ana", name: "Ana Ruiz", squeeze: 12, skills: [] },
+        { id: "p-bo", name: "Bo Chen", squeeze: null, skills: [] },
+        { id: "p-cy", name: "Cy Diaz", squeeze: 8, skills: [] },
+        { id: "p-ten", name: "Tia Ten", squeeze: 10, skills: [] },
+        { id: "p-odd", name: "Oda Odd", squeeze: 12.34, skills: [] }
+    ];
+    var threw = function(fn) {
+        try { fn(); return false; } catch (e) { return true; }
+    };
+
+    // forStop: every branch of the star.
+    var n2 = CsSqueeze.forStop(sv, res, "N2", opts);
+    ok(n2.station === "N2" && n2.reachable === true, "sq engine: forStop N2 is reachable");
+    near(n2.inches, 10, 1e-6, "sq engine: forStop N2 is the 10 in leg");
+    eqs(n2.near, "N2", "sq engine: forStop names the station near the tightest passage");
+    near(CsSqueeze.forStop(sv, res, "N1", opts).inches, 48, 1e-6,
+        "sq engine: forStop N1 only reads the legs it walks (48 in)");
+    var e4 = CsSqueeze.forStop(sv, res, "E4", opts);
+    ok(e4.reachable === true && e4.inches === null && e4.near === null,
+        "sq engine: forStop on the unmeasured corridor is reachable with no width");
+    var w2 = CsSqueeze.forStop(sv, res, "W2", opts);
+    ok(w2.reachable === true && w2.inches === null, "sq engine: forStop down the pitch has no width");
+    var x2 = CsSqueeze.forStop(sv, res, "X2", opts);
+    ok(x2.station === "X2" && x2.reachable === false && x2.inches === null && x2.near === null,
+        "sq engine: forStop on the island is unreachable");
+    ok(CsSqueeze.forStop(sv, res, "ZZ", opts).reachable === false,
+        "sq engine: a station not in the survey is unreachable");
+    var s0 = CsSqueeze.forStop(sv, res, "S0", opts);
+    ok(s0.reachable === true && s0.inches === null, "sq engine: the start itself is reachable, no width");
+    ok(CsSqueeze.forStop(sv, res, " N2 ", opts).station === "N2", "sq engine: forStop trims the station");
+    near(CsSqueeze.forStop(sv, res, "N2", { start: "S0" }).inches, 10, 1e-6,
+        "sq engine: forStop takes the unit from the survey when none is given");
+    ok(!threw(function() {
+        CsSqueeze.forStop(null, null, "N2", {});
+        CsSqueeze.forStop(sv, res, null, null);
+        CsSqueeze.forStop(sv, res, "N2", { start: "NOWHERE" });
+    }), "sq engine: forStop never throws");
+    ok(CsSqueeze.forStop(null, null, "N2", {}).reachable === false,
+        "sq engine: forStop with no survey is unreachable");
+    ok(CsSqueeze.forStop(sv, res, "N2", { start: "NOWHERE" }).reachable === false,
+        "sq engine: forStop from a start off the line is unreachable");
+
+    // forTeam: the tightest over the whole route wins.
+    var tAll = CsSqueeze.forTeam(sv, res, ["E4", "N1", "N2"], opts);
+    ok(tAll.station === "team" && tAll.reachable === true, "sq engine: forTeam shape");
+    near(tAll.inches, 10, 1e-6, "sq engine: forTeam, the tightest stop's route wins");
+    eqs(tAll.near, "N2", "sq engine: forTeam names where");
+    near(CsSqueeze.forTeam(sv, res, ["E4", "N1"], opts).inches, 48, 1e-6,
+        "sq engine: forTeam without the narrow leg");
+    ok(CsSqueeze.forTeam(sv, res, ["E4", "W2"], opts).inches === null,
+        "sq engine: forTeam with no known width is null");
+    var tNone = CsSqueeze.forTeam(sv, res, [], opts);
+    ok(tNone.station === "team" && tNone.reachable === false && tNone.inches === null &&
+        tNone.near === null, "sq engine: forTeam with no stops");
+    ok(CsSqueeze.forTeam(sv, res, ["X2"], opts).reachable === false,
+        "sq engine: forTeam with only an unreachable stop");
+    ok(!threw(function() {
+        CsSqueeze.forTeam(null, null, null, null);
+        CsSqueeze.forTeam(sv, res, "N2", opts);
+    }), "sq engine: forTeam never throws");
+
+    // fit: every branch.
+    eqs(CsSqueeze.fit(12, 10), "no", "sq engine: fit 12 in limit through 10 in is no");
+    eqs(CsSqueeze.fit(10, 10), "fits", "sq engine: fit equal width 10 vs 10 fits");
+    eqs(CsSqueeze.fit(8, 10), "fits", "sq engine: fit 8 in limit through 10 in fits");
+    eqs(CsSqueeze.fit(0, 10), "unknown", "sq engine: fit limit 0 is unknown");
+    eqs(CsSqueeze.fit(null, 10), "unknown", "sq engine: fit limit null is unknown");
+    eqs(CsSqueeze.fit(undefined, 10), "unknown", "sq engine: fit limit missing is unknown");
+    eqs(CsSqueeze.fit(-3, 10), "unknown", "sq engine: fit negative limit is unknown");
+    eqs(CsSqueeze.fit(NaN, 10), "unknown", "sq engine: fit NaN limit is unknown");
+    eqs(CsSqueeze.fit(12, null), "unknown", "sq engine: fit unknown width is unknown");
+    eqs(CsSqueeze.fit(12, 0), "unknown", "sq engine: fit width 0 is unmeasured, unknown");
+
+    // matrix.
+    var people = [
+        { id: "p-ana", name: "Ana" },            // id match (name differs)
+        { id: "", name: "  cy diaz " },          // name match, trimmed, case-blind
+        { id: "nobody", name: "Nobody Known" },  // not in the directory
+        { id: "p-cy", name: "Ana Ruiz" },        // id wins over the name
+        { id: "p-ten", name: "Tia Ten" }         // exactly 10 in
+    ];
+    var m = CsSqueeze.matrix(sv, res, ["N2", "E4", "X2", "N1"], people, dir, opts);
+    eqs(m.stops.length, 4, "sq engine: matrix has a row per stop");
+    eqs(m.people.length, 5, "sq engine: matrix has a column per person");
+    eqs(m.stops[0].station + "," + m.stops[2].station, "N2,X2", "sq engine: matrix stops in order");
+    near(m.stops[0].inches, 10, 1e-6, "sq engine: matrix stop carries its tightest width");
+    ok(m.stops[2].reachable === false, "sq engine: matrix stop carries reachability");
+    eqs(m.people[0].limit, 12, "sq engine: matrix limit by id");
+    eqs(m.people[1].limit, 8, "sq engine: matrix limit by trimmed case-blind name");
+    ok(m.people[2].limit === null, "sq engine: matrix unknown person has no limit");
+    eqs(m.people[3].limit, 8, "sq engine: matrix id wins over the name");
+    eqs(m.people[0].id, "p-ana", "sq engine: matrix person carries the id");
+    eqs(m.cells.length, 4, "sq engine: matrix cells per stop");
+    eqs(m.cells[0].join(","), "no,fits,unknown,fits,fits", "sq engine: matrix N2 row");
+    eqs(m.cells[1].join(","), "unknown,unknown,unknown,unknown,unknown",
+        "sq engine: matrix unmeasured row is unknown");
+    eqs(m.cells[2].join(","), "unreachable,unreachable,unreachable,unreachable,unreachable",
+        "sq engine: matrix unreachable row");
+    eqs(m.cells[3].join(","), "fits,fits,unknown,fits,fits", "sq engine: matrix N1 row");
+    var dup = CsSqueeze.matrix(sv, res, ["N2", " N2", ""], [], dir, opts);
+    eqs(dup.stops.length, 1, "sq engine: matrix drops blank and repeated stops");
+    eqs(JSON.stringify(dup.cells), "[[]]", "sq engine: matrix with nobody has empty rows");
+    var empty = CsSqueeze.matrix(sv, res, [], [], [], opts);
+    eqs(JSON.stringify(empty), "{\"stops\":[],\"people\":[],\"cells\":[]}",
+        "sq engine: matrix of nothing is empty arrays");
+    ok(!threw(function() {
+        CsSqueeze.matrix(null, null, null, null, null, null);
+        CsSqueeze.matrix(sv, res, "N2", "Ana", "dir", opts);
+        CsSqueeze.matrix(sv, res, [null, 3, "N2"], [null, 7, { name: "" }], [null], opts);
+    }), "sq engine: matrix never throws");
+    eqs(JSON.stringify(CsSqueeze.matrix(null, null, null, null, null, null)),
+        "{\"stops\":[],\"people\":[],\"cells\":[]}", "sq engine: matrix of junk is empty arrays");
+
+    // teamIssues and teamNotes.
+    var team = { name: "Alpha", stops: ["N2", "E4"], members: [
+        { id: "p-ana", name: "Ana Ruiz" }, { id: "p-cy", name: "Cy Diaz" },
+        { id: "", name: "Bo Chen" }, { id: "p-ten", name: "Tia Ten" },
+        { id: "zz", name: "Stranger" } ] };
+    var route = CsSqueeze.forTeam(sv, res, team.stops, opts);
+    var iss = CsSqueeze.teamIssues(team, route, dir);
+    eqs(iss.length, 1, "sq engine: teamIssues only the member who will not fit");
+    eqs(iss[0].text, "Ana Ruiz (limit 12 in) may not fit the tightest passage on the route " +
+        "(10 in near N2).", "sq engine: teamIssues text");
+    ok(iss[0].person === "Ana Ruiz" && iss[0].limit === 12 && iss[0].near === "N2",
+        "sq engine: teamIssues carries person, limit and near");
+    near(iss[0].inches, 10, 1e-6, "sq engine: teamIssues carries the width");
+    var odd = CsSqueeze.teamIssues({ members: [{ id: "p-odd", name: "Oda Odd" }] },
+        { station: "team", reachable: true, inches: 9.66666, near: "A6" }, dir);
+    eqs(odd.length === 1 ? odd[0].text : "", "Oda Odd (limit 12.3 in) may not fit the tightest " +
+        "passage on the route (9.7 in near A6).", "sq engine: teamIssues rounds to 1 decimal");
+    eqs(CsSqueeze.teamIssues(team, CsSqueeze.forTeam(sv, res, ["E4"], opts), dir).length, 0,
+        "sq engine: teamIssues none on an unmeasured route");
+    eqs(CsSqueeze.teamIssues({ members: [] }, route, dir).length, 0,
+        "sq engine: teamIssues none with nobody");
+    ok(!threw(function() {
+        CsSqueeze.teamIssues(null, null, null);
+        CsSqueeze.teamIssues({ members: "x" }, {}, "d");
+        CsSqueeze.teamIssues({ members: [null, 4] }, route, dir);
+    }), "sq engine: teamIssues never throws");
+    eqs(CsSqueeze.teamIssues(null, null, null).length, 0, "sq engine: teamIssues of nothing");
+    eqs(CsSqueeze.teamNotes({ stops: ["E4"] }, CsSqueeze.forTeam(sv, res, ["E4"], opts)),
+        "passage widths on the route are unknown, squeeze limits not checked.",
+        "sq engine: teamNotes when no width is known");
+    eqs(CsSqueeze.teamNotes(team, route), "", "sq engine: teamNotes empty when a width is known");
+    eqs(CsSqueeze.teamNotes({ stops: [] }, CsSqueeze.forTeam(sv, res, [], opts)), "",
+        "sq engine: teamNotes empty with no stops");
+    eqs(CsSqueeze.teamNotes({ stops: ["X2"] }, CsSqueeze.forTeam(sv, res, ["X2"], opts)), "",
+        "sq engine: teamNotes empty when no stop is reachable");
+    ok(!threw(function() { CsSqueeze.teamNotes(null, null); }), "sq engine: teamNotes never throws");
+
+    // ONE sentence and ONE fit rule, shared with the Suggest engine.
+    var split = CsTeamSplit.suggest({ teamCount: 1,
+        teams: [{ id: "t", name: "Team 1", stops: [], members: [], days: [] }],
+        lockedStops: [{ station: "N2", team: 0 }],
+        lockedPeople: [{ id: "p-ana", name: "Ana Ruiz", team: 0 }],
+        directory: dir, survey: sv, resolved: res, unit: "ft", config: opts.config, start: "S0" });
+    var splitSq = "";
+    for (var w = 0; w < split.teams[0].warnings.length; w++) {
+        if (split.teams[0].warnings[w].kind === "squeeze") { splitSq = split.teams[0].warnings[w].text; }
+    }
+    var mine = CsSqueeze.teamIssues({ members: [{ id: "p-ana", name: "Ana Ruiz" }] },
+        CsSqueeze.forTeam(sv, res, ["N2"], opts), dir);
+    eqs(splitSq, "Team 1: " + (mine.length > 0 ? mine[0].text : "?"),
+        "sq engine: the Suggest warning is the same sentence with the team prefix");
+    eqs(CsSqueeze.sentence("Ana Ruiz", 12, 10, "N2"), mine.length > 0 ? mine[0].text : "?",
+        "sq engine: sentence is the one teamIssues prints");
+    var tsSrc = readTextFile(repoRoot + "/scripts/CaveSurvey/Core/CsTeamSplit.js");
+    ok(tsSrc.indexOf("may not fit") < 0 && tsSrc.indexOf("limits not checked") < 0 &&
+        tsSrc.indexOf("CsSqueeze.sentence") >= 0 && tsSrc.indexOf("CsSqueeze.fit") >= 0,
+        "sq engine: CsTeamSplit keeps no copy of the sentence or the fit rule");
 })();
 
 // ---------------------------------------------------------------------

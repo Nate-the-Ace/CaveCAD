@@ -16,6 +16,8 @@ include(includeBasePath + "/CsStationTable.js");
 include(includeBasePath + "/CsPeople.js");
 include(includeBasePath + "/CsTripPlan.js");
 include(includeBasePath + "/CsTeams.js");
+// The squeeze sentence, fit rule, limit lookup and unknown-width note.
+include(includeBasePath + "/CsSqueeze.js");
 
 var CsTeamSplit = {};
 
@@ -46,11 +48,6 @@ var csTsKey = function(p) {
     return id !== "" ? "id:" + id : "n:" + csTsTrim(p.name).replace(/\s+/g, " ").toLowerCase();
 };
 
-/** "12" or "9.6": inches as a caver reads them. */
-var csTsIn = function(v) {
-    return String(Math.round(v * 10) / 10);
-};
-
 /** A valid team index for a lock, else -1. */
 var csTsIndex = function(v, count) {
     return (typeof v === "number" && isFinite(v) && Math.floor(v) === v && v >= 0 &&
@@ -69,8 +66,7 @@ var csTsFacts = function(person, directory) {
     return { vertical: has("vertical"),
         firstAid: has("first_aid") || has("cpr") || has("wfr"),
         leader: has("leader"),
-        squeeze: (typeof row.squeeze === "number" && isFinite(row.squeeze) &&
-            row.squeeze > 0) ? row.squeeze : null };
+        squeeze: CsSqueeze.limitOf(person, directory) };
 };
 
 /** "Team N" for position n (1-based), moving on while the name is taken. */
@@ -386,8 +382,7 @@ CsTeamSplit.suggest = function(input) {
         return a.order - b.order;
     });
     var fits = function(p, t) {
-        var w = teams[t].tightestInches;
-        return p.facts.squeeze === null || w === null || w >= p.facts.squeeze;
+        return CsSqueeze.fit(p.facts.squeeze, teams[t].tightestInches) !== "no";
     };
     var hasOn = function(t, fact) {
         for (var q = 0; q < teams[t].members.length; q++) {
@@ -459,11 +454,9 @@ CsTeamSplit.suggest = function(input) {
         }
         for (k = 0; k < tm.members.length; k++) {
             var m = tm.members[k];
-            if (m.facts.squeeze !== null && tm.tightestInches !== null &&
-                    tm.tightestInches < m.facts.squeeze) {
-                warn("squeeze", true, m.name + " (limit " + csTsIn(m.facts.squeeze) +
-                    " in) may not fit the tightest passage on the route (" +
-                    csTsIn(tm.tightestInches) + " in near " + tm.tightNear + ").");
+            if (CsSqueeze.fit(m.facts.squeeze, tm.tightestInches) === "no") {
+                warn("squeeze", true, CsSqueeze.sentence(m.name, m.facts.squeeze,
+                    tm.tightestInches, tm.tightNear));
             }
         }
         if (!hasOn(i, "firstAid")) {
@@ -494,11 +487,9 @@ CsTeamSplit.suggest = function(input) {
                     " of work but the team's days schedule " + CsTripPlan.clock(have) + ".");
             }
         }
-        if (tm.stops.length > 0 && tm.plan !== null && tm.plan.stops.length > 0 &&
-                tm.tightestInches === null) {
-            notes.push(tm.name + ": passage widths on the route are unknown, squeeze " +
-                "limits not checked.");
-        }
+        var sqNote = CsSqueeze.teamNotes({ stops: tm.stops }, { reachable: tm.plan !== null &&
+            tm.plan.stops.length > 0, inches: tm.tightestInches });
+        if (sqNote !== "") { notes.push(tm.name + ": " + sqNote); }
         if (tm.members.length === 0) { notes.push(tm.name + " has nobody."); }
         var members = [];
         for (k = 0; k < tm.members.length; k++) {
