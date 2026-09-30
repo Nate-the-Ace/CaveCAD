@@ -4148,6 +4148,13 @@ ExpeditionPlanner.fillFitTable = function(table, fr) {
             table.setItem(r, c + 2, csEpFitItem(row.cells[c], row.cellKinds[c]));
         }
     }
+    // Size Stop and Tightest passage to their text so "45.6 in near B16"
+    // is not cut to "45.6 in near ..." (the person columns stay narrow).
+    try {
+        table.resizeColumnToContents(0);
+        table.resizeColumnToContents(1);
+    } catch (eSize) {
+    }
 };
 
 /**
