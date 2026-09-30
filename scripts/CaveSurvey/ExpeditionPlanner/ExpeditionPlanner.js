@@ -141,9 +141,10 @@ ExpeditionPlanner.calloutField = function(grid, row, label, required, name, tip)
 };
 
 /**
- * A table with fixed headers. Tables that connect itemChanged (the
- * roster, a team's days) do it behind the state.filling guard, because
- * filling a cell by code fires it exactly as typing does.
+ * A table with fixed headers. Tables that connect itemChanged (a team's
+ * days) do it behind the state.filling guard, because filling a cell by
+ * code fires it exactly as typing does. Tick columns are cell checkboxes
+ * (cellCheck), never checkable items.
  */
 ExpeditionPlanner.calloutTable = function(name, headers, minH, maxH) {
     var t = new QTableWidget(0, headers.length);
@@ -276,27 +277,16 @@ ExpeditionPlanner.buildRosterSection = function(layout) {
     try {
         roster.selectionBehavior = QAbstractItemView.SelectRows;
         roster.selectionMode = QAbstractItemView.SingleSelection;
-        // Read-only: only the Going tick changes here. A checkable item
-        // toggles whatever the edit triggers say.
+        // Read-only: only the Going tick box (a cell QCheckBox, see
+        // cellCheck) changes here.
         roster.editTriggers = QAbstractItemView.NoEditTriggers;
     } catch (eSel) {
     }
     layout.addWidget(roster, 0, 0);
-    // FILLING IS NOT EDITING: setItem and setCheckState fire itemChanged
-    // exactly as a click does, so onRosterItemChanged returns while
-    // state.filling is set (the Station Table rule).
-    try {
-        roster["itemChanged(QTableWidgetItem*)"].connect(function(item) {
-            ExpeditionPlanner.onRosterItemChanged(item);
-        });
-    } catch (eChanged) {
-        try {
-            roster.itemChanged.connect(function(item) {
-                ExpeditionPlanner.onRosterItemChanged(item);
-            });
-        } catch (eChanged2) {
-        }
-    }
+    // Going ticks are cell checkboxes whose toggled goes to
+    // onRosterGoingToggled (connected per box in fillRoster). FILLING IS
+    // NOT EDITING: it returns while state.filling is set (the Station
+    // Table rule).
     try {
         roster["cellDoubleClicked(int, int)"].connect(function(row, column) {
             ExpeditionPlanner.editPerson(row);
@@ -1108,18 +1098,99 @@ ExpeditionPlanner.peopleSay = function(text) {
     label.text = parts.join("<br>");
 };
 
-/** A Going cell: checkable, never typed in. */
-ExpeditionPlanner.goingItem = function(checked) {
+/**
+ * A tick box in a table cell (the roster's Going, the Suggest popup's
+ * Lock): a real QCheckBox placed with setCellWidget. NOT a checkable
+ * QTableWidgetItem: in this app's dark theme a checkable item draws its
+ * indicator only in the table's very first cell (measured live
+ * 2026-09-29, even in a bare QTableWidget), so every other row showed no
+ * box at all. The cell keeps an empty, read-only, non-checkable item so
+ * rows still select. `checked` is set BEFORE `toggled` is connected, so
+ * building never fires the handler; the handler gets (on, row) and must
+ * itself return while its fill guard is up (a refill or Free everything
+ * sets boxes by code, which fires toggled as a click does). Old cell
+ * widgets go when the table's rows do: never deleteLater here.
+ * \return the QCheckBox
+ */
+ExpeditionPlanner.cellCheck = function(table, row, col, checked, onToggle, objectName) {
     var it = new QTableWidgetItem("");
     try {
-        it.setFlags((it.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable);
+        it.setFlags(it.flags() & ~Qt.ItemIsEditable & ~Qt.ItemIsUserCheckable);
     } catch (eFlags) {
     }
-    try {
-        it.setCheckState(checked ? Qt.Checked : Qt.Unchecked);
-    } catch (eCheck) {
+    table.setItem(row, col, it);
+    var cb = new QCheckBox();
+    if (objectName !== undefined && objectName !== null) {
+        cb.objectName = String(objectName);
     }
-    return it;
+    cb.checked = checked === true;
+    if (typeof onToggle === "function") {
+        var fn = function() {
+            onToggle(ExpeditionPlanner.boxChecked(cb), row);
+        };
+        try {
+            cb["toggled(bool)"].connect(fn);
+        } catch (eTog) {
+            try {
+                cb.toggled.connect(fn);
+            } catch (eTog2) {
+                try {
+                    cb.clicked.connect(fn);
+                } catch (eClick) {
+                }
+            }
+        }
+    }
+    table.setCellWidget(row, col, cb);
+    return cb;
+};
+
+/** A checkbox's state; `checked` is a property here, a method elsewhere. */
+ExpeditionPlanner.boxChecked = function(box) {
+    try {
+        if (isNull(box)) {
+            return false;
+        }
+        var v = box.checked;
+        if (typeof v === "function") {
+            v = box.checked();
+        } else if (v === undefined && typeof box.isChecked === "function") {
+            v = box.isChecked();
+        }
+        return v === true;
+    } catch (e) {
+        return false;
+    }
+};
+
+/** Set a checkbox by code (fires toggled when it changes, as a click does). */
+ExpeditionPlanner.setBoxChecked = function(box, on) {
+    try {
+        if (isNull(box)) {
+            return;
+        }
+        if (typeof box.setChecked === "function") {
+            box.setChecked(on === true);
+        } else {
+            box.checked = on === true;
+        }
+    } catch (e) {
+    }
+};
+
+/** The cell tick box at (row, col), or null. */
+ExpeditionPlanner.cellBox = function(table, row, col) {
+    try {
+        var w = table.cellWidget(row, col);
+        return isNull(w) ? null : w;
+    } catch (e) {
+        return null;
+    }
+};
+
+/** Whether the cell tick box at (row, col) is ticked; no box is false. */
+ExpeditionPlanner.cellChecked = function(table, row, col) {
+    return ExpeditionPlanner.boxChecked(ExpeditionPlanner.cellBox(table, row, col));
 };
 
 /** A read-only cell, grey when `grey`, with an optional tooltip. */
@@ -1166,8 +1237,15 @@ ExpeditionPlanner.fillRoster = function(party) {
             extras.push({ id: resolved[r].id, name: resolved[r].name });
         }
     }
+    var onGoing = function(on, r) {
+        ExpeditionPlanner.onRosterGoingToggled(r);
+    };
+    var goingBox = function(r, on) {
+        ExpeditionPlanner.cellCheck(t, r, 0, on, onGoing, "ExpeditionPlannerGoing_" + r);
+    };
     s.filling = true;
     try {
+        ExpeditionPlanner.retireCellBoxes(t, 0, "ExpeditionPlannerGoing_");
         t.setRowCount(0);
         s.rosterRows = [];
         var row;
@@ -1175,7 +1253,7 @@ ExpeditionPlanner.fillRoster = function(party) {
             var p = s.people[i];
             row = t.rowCount;
             t.setRowCount(row + 1);
-            t.setItem(row, 0, ExpeditionPlanner.goingItem(going["#" + p.id] === true));
+            goingBox(row, going["#" + p.id] === true);
             t.setItem(row, 1, ExpeditionPlanner.readOnlyItem(p.name));
             t.setItem(row, 2, ExpeditionPlanner.readOnlyItem(p.role));
             t.setItem(row, 3, ExpeditionPlanner.readOnlyItem(
@@ -1189,7 +1267,7 @@ ExpeditionPlanner.fillRoster = function(party) {
         for (var x = 0; x < extras.length; x++) {
             row = t.rowCount;
             t.setRowCount(row + 1);
-            t.setItem(row, 0, ExpeditionPlanner.goingItem(true));
+            goingBox(row, true);
             t.setItem(row, 1, ExpeditionPlanner.readOnlyItem(extras[x].name, true,
                 qsTr("On this trip's party, but not in the people directory " +
                     "on this computer. Add person to enter their details; " +
@@ -1206,14 +1284,37 @@ ExpeditionPlanner.fillRoster = function(party) {
     }
 };
 
+/**
+ * Before a table's rows are cleared: hide its column-`col` tick boxes
+ * and rename them off `prefix`, so findChild never hands back one Qt has
+ * not deleted yet. Never deleteLater: clearing the rows retires them.
+ */
+ExpeditionPlanner.retireCellBoxes = function(table, col, prefix) {
+    var s = ExpeditionPlanner.state;
+    var n = 0;
+    try {
+        n = table.rowCount;
+    } catch (eCount) {
+        n = 0;
+    }
+    for (var r = 0; typeof n === "number" && r < n; r++) {
+        var box = ExpeditionPlanner.cellBox(table, r, col);
+        if (box === null) {
+            continue;
+        }
+        s.removedCount = (typeof s.removedCount === "number" ? s.removedCount : 0) + 1;
+        try {
+            box.visible = false;
+        } catch (eHide) {
+        }
+        csEpRenameTree(box, prefix, "ExpeditionPlannerRemoved" + s.removedCount + "_" +
+            prefix.replace(/^ExpeditionPlanner/, ""), 0);
+    }
+};
+
 /** Whether a roster row's Going box is ticked. */
 ExpeditionPlanner.rowGoing = function(t, r) {
-    try {
-        var it = t.item(r, 0);
-        return !isNull(it) && it.checkState() == Qt.Checked;
-    } catch (e) {
-        return false;
-    }
+    return ExpeditionPlanner.cellChecked(t, r, 0);
 };
 
 /**
@@ -1278,17 +1379,10 @@ ExpeditionPlanner.saveParty = function(party) {
     return "";
 };
 
-/** A Going tick changed: the party is saved at once (not on fills). */
-ExpeditionPlanner.onRosterItemChanged = function(item) {
+/** A Going box on roster row `row` toggled: the party is saved at once (not on fills). */
+ExpeditionPlanner.onRosterGoingToggled = function(row) {
     var s = ExpeditionPlanner.state;
     if (s.filling) {
-        return;
-    }
-    try {
-        if (isNull(item) || item.column() !== 0) {
-            return;
-        }
-    } catch (eCol) {
         return;
     }
     ExpeditionPlanner.peopleSay(ExpeditionPlanner.saveParty(
@@ -3252,15 +3346,10 @@ ExpeditionPlanner.undoSuggestionClicked = function() {
 
 /** Whether row `r` of a lock table is ticked; `dflt` when it cannot be read. */
 var csEpTicked = function(table, r, dflt) {
-    try {
-        var it = table.item(r, 0);
-        if (it === null || it === undefined) {
-            return dflt;
-        }
-        return it.checkState() == Qt.Checked;
-    } catch (e) {
+    if (ExpeditionPlanner.cellBox(table, r, 0) === null) {
         return dflt;
     }
+    return ExpeditionPlanner.cellChecked(table, r, 0);
 };
 
 /**
@@ -3276,9 +3365,16 @@ ExpeditionPlanner.buildSuggestDialog = function(party) {
     var stopRows = rows.stops;
     var personRows = rows.people;
     var proposal = null;
-    // Filling is not editing: ticks and rows set by code fire itemChanged.
+    // Filling is not editing: Lock boxes set by code fire toggled.
     var filling = false;
     var pre = "ExpeditionPlannerSuggest_";
+    // Anything changed after Suggest makes the preview stale (set below,
+    // once Apply exists); a Lock box toggled by hand calls it.
+    var stale = function() {};
+    var onLock = function(on, r) {
+        if (filling) { return; }
+        stale();
+    };
 
     var main = null;
     try {
@@ -3334,7 +3430,7 @@ ExpeditionPlanner.buildSuggestDialog = function(party) {
     setupTable(stopsT);
     var fillStopRow = function(r) {
         var row = stopRows[r];
-        stopsT.setItem(r, 0, ExpeditionPlanner.goingItem(row.lock));
+        ExpeditionPlanner.cellCheck(stopsT, r, 0, row.lock, onLock, pre + "StopLock_" + r);
         stopsT.setItem(r, 1, ExpeditionPlanner.readOnlyItem(row.station));
         stopsT.setItem(r, 2, ExpeditionPlanner.readOnlyItem(row.currently, row.team < 0));
     };
@@ -3386,7 +3482,7 @@ ExpeditionPlanner.buildSuggestDialog = function(party) {
         peopleT.setRowCount(personRows.length);
         for (var pr = 0; pr < personRows.length; pr++) {
             var row = personRows[pr];
-            peopleT.setItem(pr, 0, ExpeditionPlanner.goingItem(row.lock));
+            ExpeditionPlanner.cellCheck(peopleT, pr, 0, row.lock, onLock, pre + "PersonLock_" + pr);
             peopleT.setItem(pr, 1, ExpeditionPlanner.readOnlyItem(row.name));
             peopleT.setItem(pr, 2, ExpeditionPlanner.readOnlyItem(row.skills));
             peopleT.setItem(pr, 3, ExpeditionPlanner.readOnlyItem(row.squeeze));
@@ -3446,7 +3542,7 @@ ExpeditionPlanner.buildSuggestDialog = function(party) {
 
     // Anything changed after Suggest makes the preview stale: Apply waits
     // for the next Suggest.
-    var stale = function() {
+    stale = function() {
         proposal = null;
         try {
             apply.enabled = false;
@@ -3473,21 +3569,6 @@ ExpeditionPlanner.buildSuggestDialog = function(party) {
         try {
             count.valueChanged.connect(onCount);
         } catch (eVal2) {
-        }
-    }
-    var onItem = function(item) {
-        if (filling) { return; }
-        stale();
-    };
-    var tables = [stopsT, peopleT];
-    for (var ti = 0; ti < tables.length; ti++) {
-        try {
-            tables[ti]["itemChanged(QTableWidgetItem*)"].connect(onItem);
-        } catch (eChanged) {
-            try {
-                tables[ti].itemChanged.connect(onItem);
-            } catch (eChanged2) {
-            }
         }
     }
     addStop.clicked.connect(function() {
@@ -3531,11 +3612,8 @@ ExpeditionPlanner.buildSuggestDialog = function(party) {
             var all = [[stopsT, stopRows.length], [peopleT, personRows.length]];
             for (var t = 0; t < all.length; t++) {
                 for (var r = 0; r < all[t][1]; r++) {
-                    try {
-                        var it = all[t][0].item(r, 0);
-                        if (it !== null && it !== undefined) { it.setCheckState(Qt.Unchecked); }
-                    } catch (eTick) {
-                    }
+                    ExpeditionPlanner.setBoxChecked(
+                        ExpeditionPlanner.cellBox(all[t][0], r, 0), false);
                 }
             }
         } finally {

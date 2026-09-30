@@ -36045,10 +36045,11 @@ var tmFakeQtShared = null;
         P.addLayout = function(l) { this.kids.push(l); };
         P.setLayout = function(l) { this.lay = l; this.kids.push(l); };
         P.layout = function() { return this.lay; };
-        P.children = function() { return this.kids.slice(0); };
+        P.children = function() { return this.kids.concat(this.cellKids()); };
         P.findChild = function(name) {
-            for (var i = 0; i < this.kids.length; i++) {
-                var k = this.kids[i];
+            var all = this.kids.concat(this.cellKids());
+            for (var i = 0; i < all.length; i++) {
+                var k = all[i];
                 if (k && k.objectName === name) { return k; }
                 var d = (k && typeof k.findChild === "function") ? k.findChild(name) : undefined;
                 if (d !== undefined && d !== null) { return d; }
@@ -36063,6 +36064,26 @@ var tmFakeQtShared = null;
         P.setRowCount = function(n) {
             this.rowCount = n;
             if (this.cells.length > n) { this.cells.length = n; }
+            // A real table drops the cell widgets of removed rows.
+            if (this.cw && this.cw.length > n) { this.cw.length = n; }
+        };
+        P.setCellWidget = function(r, c, w) {
+            if (!this.cw) { this.cw = []; }
+            if (!this.cw[r]) { this.cw[r] = []; }
+            this.cw[r][c] = w;
+        };
+        P.cellWidget = function(r, c) {
+            return (this.cw && this.cw[r] && this.cw[r][c]) ? this.cw[r][c] : null;
+        };
+        // Cell widgets are children too (of the viewport, in Qt).
+        P.cellKids = function() {
+            var out = [];
+            for (var r = 0; this.cw && r < this.cw.length; r++) {
+                for (var c = 0; this.cw[r] && c < this.cw[r].length; c++) {
+                    if (this.cw[r][c]) { out.push(this.cw[r][c]); }
+                }
+            }
+            return out;
         };
         P.setItem = function(r, c, it) {
             if (!this.cells[r]) { this.cells[r] = []; }
@@ -36076,6 +36097,7 @@ var tmFakeQtShared = null;
         };
         P.removeRow = function(r) {
             this.cells.splice(r, 1);
+            if (this.cw) { this.cw.splice(r, 1); }
             this.rowCount = Math.max(0, this.rowCount - 1);
         };
         P.selectionModel = function() {
@@ -36121,6 +36143,35 @@ var tmFakeQtShared = null;
             C.prototype = P;
             return C;
         };
+        // QCheckBox: `checked` is a property, and like the real one any
+        // change of it -- a click, setChecked, or `checked = x` by code --
+        // fires toggled(bool). An unchanged value fires nothing.
+        var Box = function(a, b) {
+            W.call(this, a, b);
+            this.checkable = true;
+            var on = false;
+            var self = this;
+            this.toggled = this["toggled(bool)"];
+            Object.defineProperty(this, "checked", {
+                configurable: true, enumerable: true,
+                get: function() { return on; },
+                set: function(v) {
+                    var n = v === true;
+                    if (n !== on) {
+                        on = n;
+                        self["toggled(bool)"].fire(on);
+                    }
+                }
+            });
+        };
+        Box.prototype = Object.create(P);
+        Box.prototype.constructor = Box;
+        Box.prototype.setChecked = function(v) { this.checked = v === true; };
+        Box.prototype.isChecked = function() { return this.checked; };
+        Box.prototype.click = function() {
+            this.checked = !this.checked;
+            this.clicked.fire(this.checked);
+        };
         var Item = function(t) { this.t = String(t === undefined ? "" : t); this.owner = null; };
         Item.prototype.text = function() { return this.t; };
         Item.prototype.setText = function(t) {
@@ -36144,7 +36195,7 @@ var tmFakeQtShared = null;
         Timer.prototype.start = function() { this.starts++; };
         var fakes = { QWidget: make(false), QLabel: make(false), QPushButton: make(false),
             QLineEdit: make(false), QTableWidget: make(false), QTableWidgetItem: Item,
-            QCheckBox: make(true), QComboBox: make(false), QSpinBox: make(false),
+            QCheckBox: Box, QComboBox: make(false), QSpinBox: make(false),
             QPlainTextEdit: make(false), QHBoxLayout: make(false), QVBoxLayout: make(false),
             QGridLayout: make(false), QTimer: Timer, QDialog: make(false),
             WidgetFactory: { createWidget: function() {
@@ -36456,6 +36507,139 @@ var tmFakeQtShared = null;
             CsStationSidecar.sidecarPath = realPath2;
             CsStationSidecar.readSidecar = realRead2;
             CsStationSidecar.writeSidecar = realWrite2;
+            csEpPackingTimer = null;
+            tmFakeQt.restore();
+        }
+    })();
+
+    // The roster's Going column is a QCheckBox per cell (setCellWidget): a
+    // checkable QTableWidgetItem draws its box only in the first cell in
+    // the dark theme (measured live 2026-09-29).
+    (function() {
+        if (!tmFakeQt.install()) {
+            ok(true, "tm going: (fake Qt could not be installed; Going box tests skipped)");
+            return;
+        }
+        var realEnsure = EP.ensureDock;
+        var realState3 = EP.state;
+        var realGuard3 = EP.planGuard;
+        var realPath3 = CsStationSidecar.sidecarPath;
+        var realRead3 = CsStationSidecar.readSidecar;
+        var realWrite3 = CsStationSidecar.writeSidecar;
+        var disk3 = { text: "", writes: 0 };
+        var sidePath = "/fake/Cave/stations.json";
+        var root = null;
+        var w = function(name) {
+            var x = root.findChild(name);
+            return (x === null || x === undefined) ? null : x;
+        };
+        var person = function(id, name) {
+            return { id: id, name: name, role: "", squeeze: null, medical: "", emergency: "",
+                skills: [], skillsNote: "" };
+        };
+        var savedParty = function() {
+            return CsStationStore.parse(disk3.text).store.settings.trip.party
+                .map(function(p) { return p.name; }).join(",");
+        };
+        try {
+            root = new QWidget();
+            var rootLay = new QVBoxLayout();
+            root.setLayout(rootLay);
+            CsStationSidecar.sidecarPath = function() { return sidePath; };
+            CsStationSidecar.readSidecar = function() { return CsStationStore.parse(disk3.text); };
+            CsStationSidecar.writeSidecar = function(path, st) {
+                disk3.writes++;
+                disk3.text = CsStationStore.serialize(st);
+                return true;
+            };
+            EP.ensureDock = function() { return root; };
+            EP.planGuard = function() { return true; };
+            csEpPackingTimer = null;
+            var zed = { id: "p-zed", name: "Zed" };
+            disk3.text = JSON.stringify({ version: CsStationStore.VERSION, entries: [],
+                settings: { trip: { startDate: "2026-10-03", party: [ana, zed],
+                    teams: [mk("t1", "Alpha", [ana], ["B20"], [day("08:00", 5, "out")])] } } });
+            var parsed = CsStationStore.parse(disk3.text).store;
+            EP.state = { drawn: null, docPath: "/fake/Cave/Cave.dxf", store: parsed, loadError: "",
+                stations: ["A1", "B20"], plan: null, planShown: null,
+                people: [person("p-ana", "Ana Ruiz"), person("p-bo", "Bo"), person("p-cy", "Cy")],
+                peopleError: "", rosterRows: [], filling: false, teams: [], teamOpen: { t1: true },
+                activeTeamId: "", teamMessage: "", removedCount: 0, packingPending: null };
+            EP.buildRosterSection(rootLay);
+            EP.buildTeamsSection(rootLay);
+            EP.loadTeams(parsed.settings.trip, parsed.settings);
+            disk3.writes = 0;
+            EP.fillRoster(parsed.settings.trip.party);
+            EP.rebuildTeamSections();
+            var roster = w("ExpeditionPlannerCalloutRoster");
+            eqs(disk3.writes + ":" + EP.state.filling, "0:false",
+                "tm going: filling the roster writes nothing and drops the guard");
+            eqs(roster.rowCount, 4, "tm going: the directory's three people, then the unknown party member");
+            var named = [];
+            var same = true;
+            for (var r = 0; r < 4; r++) {
+                var box = w("ExpeditionPlannerGoing_" + r);
+                if (box !== null) { named.push(r); }
+                if (box === null || roster.cellWidget(r, 0) !== box) { same = false; }
+            }
+            ok(named.length === 4 && same, "tm going: every row, not just the first, has a Going box named ExpeditionPlannerGoing_<row>");
+            ok(roster.item(0, 0) !== null && roster.item(3, 0) !== null && roster.item(2, 0).text() === "",
+                "tm going: the Going cell keeps an empty item under its box");
+            eqs([0, 1, 2, 3].map(function(q) { return EP.cellChecked(roster, q, 0) ? "x" : "-"; }).join(""), "x--x",
+                "tm going: the reader returns each box's state (Ana and unknown Zed going)");
+            ok(EP.cellChecked(roster, 0, 1) === false && EP.cellChecked(roster, 9, 0) === false,
+                "tm going: a cell with no box reads unticked");
+            eqs(roster.item(3, 1).text(), "Zed", "tm going: the unknown party member keeps a row");
+            eqs(w("ExpeditionPlannerTeam1_Member_1").text + "|" + w("ExpeditionPlannerTeam1_Member_2").text + "|" +
+                (w("ExpeditionPlannerTeam1_Member_3") === null),
+                "Ana Ruiz|Zed|true", "tm going: the team offers the Going people as members");
+            // Ticking Bo saves the party and rebuilds the member boxes.
+            w("ExpeditionPlannerGoing_1").click();
+            eqs(disk3.writes + ":" + savedParty(), "1:Ana Ruiz,Bo,Zed",
+                "tm going: ticking Going saves the party to stations.json at once");
+            eqs(EP.state.store.settings.trip.party.length, 3, "tm going: the in-memory party follows");
+            eqs(w("ExpeditionPlannerTeam1_Member_1").text + "|" + w("ExpeditionPlannerTeam1_Member_2").text + "|" +
+                w("ExpeditionPlannerTeam1_Member_3").text + "|" + w("ExpeditionPlannerTeam1_Member_1").checked,
+                "Ana Ruiz|Bo|Zed|true", "tm going: the team's member boxes are rebuilt with the new Going person");
+            // Unticking the unknown member takes them off the trip.
+            w("ExpeditionPlannerGoing_3").click();
+            eqs(disk3.writes + ":" + savedParty(), "2:Ana Ruiz,Bo",
+                "tm going: unticking an unknown member takes them off the saved party");
+            // The fill guard: a box set by code while filling writes nothing.
+            EP.state.filling = true;
+            EP.setBoxChecked(w("ExpeditionPlannerGoing_2"), true);
+            EP.state.filling = false;
+            eqs(disk3.writes, 2, "tm going: a Going box set under the fill guard writes nothing");
+            EP.setBoxChecked(w("ExpeditionPlannerGoing_2"), false);
+            // A save that cannot happen says why and writes nothing.
+            sidePath = "";
+            var wr = disk3.writes;
+            w("ExpeditionPlannerGoing_2").click();
+            ok(disk3.writes === wr && String(w("ExpeditionPlannerPeopleStatus").text).indexOf("save the drawing first") >= 0,
+                "tm going: a refused save writes nothing and says why");
+            w("ExpeditionPlannerGoing_2").setChecked(false);
+            sidePath = "/fake/Cave/stations.json";
+            // A refill: only the new boxes are findable.
+            var oldBox = w("ExpeditionPlannerGoing_0");
+            wr = disk3.writes;
+            EP.fillRoster([bo]);
+            var newBox = w("ExpeditionPlannerGoing_0");
+            ok(newBox !== null && newBox !== oldBox && oldBox.visible === false &&
+                String(oldBox.objectName).indexOf("ExpeditionPlannerRemoved") === 0,
+                "tm going: a refill retires the old boxes (hidden, renamed) and makes new ones");
+            eqs(roster.cellKids().length + ":" + roster.rowCount + ":" + (w("ExpeditionPlannerGoing_3") === null),
+                "3:3:true", "tm going: after a refill the table holds only the new rows' boxes");
+            eqs([0, 1, 2].map(function(q) { return EP.cellChecked(roster, q, 0) ? "x" : "-"; }).join("") +
+                ":" + disk3.writes, "-x-:" + wr, "tm going: the refilled boxes show the new party, and the refill wrote nothing");
+            eqs(EP.readParty().map(function(p) { return p.name; }).join(","), "Bo",
+                "tm going: readParty reads the boxes");
+        } finally {
+            EP.ensureDock = realEnsure;
+            EP.state = realState3;
+            EP.planGuard = realGuard3;
+            CsStationSidecar.sidecarPath = realPath3;
+            CsStationSidecar.readSidecar = realRead3;
+            CsStationSidecar.writeSidecar = realWrite3;
             csEpPackingTimer = null;
             tmFakeQt.restore();
         }
@@ -37087,9 +37271,10 @@ ok(ssFeasOk, "ss engine: feasible is false exactly when a hard warning exists");
         var stopsT = dw("ExpeditionPlannerSuggest_Stops");
         var peopleT = dw("ExpeditionPlannerSuggest_People");
         eqs(stopsT.rowCount + ":" + peopleT.rowCount, "1:4", "ss panel: the tables are filled");
-        ok(stopsT.item(0, 0).checkState() === Qt.Checked && stopsT.item(0, 1).text() === "E2" &&
+        var lk = function(t, r) { return EP.cellChecked(t, r, 0); };
+        ok(lk(stopsT, 0) === true && stopsT.item(0, 1).text() === "E2" &&
             stopsT.item(0, 2).text() === "Alpha", "ss panel: the objective row: locked, E2, Alpha");
-        ok(peopleT.item(0, 0).checkState() === Qt.Checked && peopleT.item(1, 0).checkState() === Qt.Unchecked &&
+        ok(lk(peopleT, 0) === true && lk(peopleT, 1) === false &&
             peopleT.item(0, 1).text() === "Ana Ruiz" && peopleT.item(0, 4).text() === "Alpha" &&
             peopleT.item(1, 4).text() === "free" && peopleT.item(0, 3).text() === "12",
             "ss panel: the people rows: lock ticks by assignment, Currently, Squeeze");
@@ -37101,7 +37286,8 @@ ok(ssFeasOk, "ss engine: feasible is false exactly when a hard warning exists");
         dw("ExpeditionPlannerSuggest_StopPicker").setEditText("n2");
         dw("ExpeditionPlannerSuggest_StopAdd").click();
         ok(stopsT.rowCount === 2 && stopsT.item(1, 1).text() === "N2" &&
-            stopsT.item(1, 0).checkState() === Qt.Unchecked && stopsT.item(1, 2).text() === "free",
+            lk(stopsT, 1) === false && stopsT.item(1, 2).text() === "free" &&
+            dw("ExpeditionPlannerSuggest_StopLock_1") === stopsT.cellWidget(1, 0),
             "ss panel: Add puts an extra stop in, free and unlocked");
         dw("ExpeditionPlannerSuggest_StopPicker").setEditText("E2");
         dw("ExpeditionPlannerSuggest_StopAdd").click();
@@ -37110,11 +37296,38 @@ ok(ssFeasOk, "ss engine: feasible is false exactly when a hard warning exists");
         ok(String(dw("ExpeditionPlannerSuggest_Preview").toPlainText()).indexOf("Alpha") >= 0,
             "ss panel: Suggest fills the preview");
         eqs(dw("ExpeditionPlannerSuggest_Apply").enabled, true, "ss panel: a proposal enables Apply");
+        // Lock boxes are cell checkboxes, one per row, each named.
+        var lockNames = [];
+        for (var ln = 0; ln < stopsT.rowCount; ln++) {
+            if (dw("ExpeditionPlannerSuggest_StopLock_" + ln) === stopsT.cellWidget(ln, 0)) { lockNames.push("s" + ln); }
+        }
+        for (ln = 0; ln < peopleT.rowCount; ln++) {
+            if (dw("ExpeditionPlannerSuggest_PersonLock_" + ln) === peopleT.cellWidget(ln, 0)) { lockNames.push("p" + ln); }
+        }
+        eqs(lockNames.join(","), "s0,s1,p0,p1,p2,p3",
+            "ss panel: every Objectives and People row has its own named Lock box");
+        dw("ExpeditionPlannerSuggest_PersonLock_1").click();
+        eqs(dw("ExpeditionPlannerSuggest_Apply").enabled, false, "ss panel: ticking a Lock by hand makes the proposal stale");
+        var realInput = EP.suggestInput;
+        var seenLocks = null;
+        EP.suggestInput = function(a1, a2, a3, a4, a5) { seenLocks = a2; return realInput(a1, a2, a3, a4, a5); };
+        try {
+            dw("ExpeditionPlannerSuggest_Run").click();
+        } finally {
+            EP.suggestInput = realInput;
+        }
+        var pKeys = EP.suggestRows(st, party, []).people;
+        ok(seenLocks !== null && seenLocks.stops.E2 === true && seenLocks.stops.N2 === false &&
+            seenLocks.people[pKeys[0].key] === true && seenLocks.people[pKeys[1].key] === true &&
+            seenLocks.people[pKeys[2].key] === false,
+            "ss panel: Suggest reads the Lock boxes into suggestInput's locks");
+        dw("ExpeditionPlannerSuggest_PersonLock_1").click();
         cnt.setValue(3);
         eqs(dw("ExpeditionPlannerSuggest_Apply").enabled, false, "ss panel: changing the count makes the proposal stale");
         dw("ExpeditionPlannerSuggest_Run").click();
         dw("ExpeditionPlannerSuggest_FreeAll").click();
-        ok(stopsT.item(0, 0).checkState() === Qt.Unchecked && peopleT.item(0, 0).checkState() === Qt.Unchecked &&
+        ok(lk(stopsT, 0) === false && lk(stopsT, 1) === false && lk(peopleT, 0) === false &&
+            lk(peopleT, 1) === false && lk(peopleT, 2) === false && lk(peopleT, 3) === false &&
             dw("ExpeditionPlannerSuggest_Apply").enabled === false,
             "ss panel: Free everything unticks every lock and makes the proposal stale");
         dw("ExpeditionPlannerSuggest_Run").click();
