@@ -19,8 +19,15 @@ inside the one cave drawing:
   `CsSheetFile` edit-refusal, no clip-by-cutting geometry.
 
 Product ambition: this is the future of CaveCAD sheet creation and map
-publishing, not a side feature. It must also survive save/reload and be
-openable in plain QCAD/AutoCAD as far as the DXF format allows.
+publishing, not a side feature. It must survive save/reload reliably.
+
+**Scope decisions (Nathan, 2026-10-05):** (1) NO AutoCAD/other-CAD
+interoperability requirement: the file format may be CaveCAD-private where
+that is simpler and safer; standard DXF group codes are used only where
+they are free. (2) NO retroactive support: no migration of `sheets/`
+tiles, no legacy Sheet Setup path kept alive for old caves; the viewport
+workflow replaces file-per-sheet outright and CaveCAD has one user, so old
+sheet files are simply regenerated. Both simplify V1 and V4 below.
 
 ## What the engine already has (verified in `cavecad-src`, 2026-10-05)
 
@@ -76,20 +83,23 @@ look at it, then print it. Answers:
 Exit criterion: a go/no-go on rendering performance and the list of engine
 patches V1+ must carry.
 
-### V1 — Persistence (DXF + fallback)
+### V1 — Persistence (DXF, CaveCAD-private where simpler)
+- Layout metadata is NOT required to be AutoCAD LAYOUT objects. Plan:
+  paper-space blocks written as ordinary BLOCK definitions with their
+  entities inside; layout properties (name, tab order, paper size/unit,
+  orientation, margins, active) serialized through the existing XRecord
+  mechanism (the document-variable dictionary) and rebuilt into `RLayout`
+  + `RBlock::layoutId` on import. No handle choreography with BLOCK_RECORD.
 - dxflib: parse/write `VIEWPORT` (10/20/30 centre, 40/41 size, 68 status,
   69 id, 12/22 view centre, 17/27/37 view target, 45 view height →
   `scale = height/viewHeight`, 51 twist, 331 frozen layer handles, 90 flags).
 - Importer: map to `RViewportEntity` in the entity's paper-space block;
   frozen-layer handle → layer id; keep overall (id 1) viewport semantic.
-- Importer/exporter: LAYOUT objects (name, tab order, plot paper size,
-  margins, plot origin) ↔ `RLayout`; one paper-space block per layout
-  (`*Paper_Space`, `*Paper_Space0`, `*Paper_Space1`, …).
+- Importer/exporter: stop writing the fake Layout1/Layout2 skeleton;
+  one paper-space block per layout (`*Paper_Space`, `*Paper_Space1`, …).
 - Round-trip tests in `tests/`: save → reload → compare layouts, viewports,
   frozen layers, paper-space entities.
-- **Fallback if dxflib proves too brittle:** persist the layout set as a
-  document blob (as the Layer Manager does) and keep DXF viewport output
-  best-effort. Decide after V0/V1 first week. Watch the long-line trap in
+- Watch the long-line trap in
   [[cavecad-dxf-long-line]] — a bad line silently drops the OBJECTS section.
 - Datum: a viewport's `viewCenter` is an absolute model coordinate. Never
   default anything to 0 (see [[cave-survey-elevation-datum-trap]]).
@@ -147,13 +157,13 @@ generator that *writes layouts*:
 - Hand edits to a layout survive regeneration: derived entities carry a tag;
   everything else in paper space is the caver's and is left alone (the
   opposite of the current "sheets are demolition-dated" rule).
-- Migration: legacy `sheets/` files and their records are read once to seed
-  layouts, then retired. Remove `CsSheetFile` after the migration window.
+- No migration: the old tiling code path, `CsSheetFile` and the `sheets/`
+  folder are deleted once the generators work.
 
 ### V5 — Polish / interop
 Annotation scale for text/symbols per viewport, layer states per viewport,
 viewport clip to polygon, sheet index table, title-block field attributes,
-open-in-AutoCAD fidelity pass, handbook pages and translations
+handbook pages and translations
 ([[cavecad-i18n]]), live-restart and dock traps re-tested.
 
 ## V0 results (2026-10-05) — GO
@@ -211,13 +221,10 @@ the real layout list.
 - **Branch hygiene:** `viewport` must not be released until V3 passes; rebase
   onto `cavecad` / `legacy-map` periodically so it can merge cleanly.
 
-## Decisions wanted from Nathan
+## Decisions (settled)
 
-1. DXF target: AutoCAD-compatible LAYOUT/VIEWPORT (more work, real
-   interop) vs. best-effort only with the blob as source of truth?
-2. Migration: convert existing `sheets/` tiles automatically, or start
-   clean and keep legacy Sheet Setup for old caves for one release?
-3. Paper canvas in the Model tab area (tabs at bottom like AutoCAD) vs. a
-   separate "Sheets" dock listing layouts?
-4. Is a paper-space-only user (no viewport entry, tiles auto-managed) the
-   default, with MSPACE editing as the advanced path?
+1. DXF target: CaveCAD-private is fine; no AutoCAD interop (Nathan).
+2. Migration: none; old tiles are regenerated, legacy path deleted (Nathan).
+3. Tab strip under the drawing (AutoCAD style) — default, revisit only if
+   it fights the dock layout.
+4. Auto-managed tiles by default; entering a viewport is the advanced path.
