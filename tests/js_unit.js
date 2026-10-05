@@ -4564,6 +4564,143 @@ eqs(CsFormatTherion.topLevelSurveys(
         CsFormatTherion.logicalLines(thNest)), 1,
     "and counts a nested file as one");
 
+// ---- input: a split project is read as ONE stream -----------------------
+// The included text stands where the line stood, so nesting, units and
+// the "only top-level survey" decision come out exactly as Therion's.
+(function() {
+    var main =
+        "survey cave\n" +
+        "  input \"passages/a.th\"\n" +
+        "  input passages/b\n" +
+        "  input sketch.th2\n" +
+        "endsurvey\n";
+    var files = {
+        "/proj/passages/a.th":
+            "survey a\n  centreline\n    data normal from to length compass clino\n" +
+            "    1 2 10 0 0\n    2 3 10 90 0\n  endcentreline\nendsurvey\n",
+        // no extension in the input line: .th is tried
+        "/proj/passages/b.th":
+            "survey b\n  centreline\n    data normal from to length compass clino\n" +
+            "    1 2 10 180 0\n  endcentreline\nendsurvey\n"
+    };
+    var asked = [];
+    var reader = function(p) {
+        asked.push(p);
+        return files.hasOwnProperty(p) ? files[p] : null;
+    };
+    var got = CsFormatTherion.parse(main,
+        { path: "/proj/main.th", readFile: reader });
+    eqs(got.shots.length, 3, "input: every included file's shots arrive");
+    eqs(got.shots[0].from, "a.1",
+        "input: the main file's one survey is the cave, so an included " +
+        "survey keeps only its own prefix");
+    eqs(got.shots[2].from, "b.1", "input: a name with no extension finds the .th");
+    ok(asked.indexOf("/proj/sketch.th2") < 0,
+        "input: a .th2 is a sketch page, offered separately, never read here");
+    ok(CsModel.parseFindings(got).length === 0,
+        "input: a followed input is not a warning -- nothing is missing");
+
+    // without a file system the old warning stands
+    var bare = CsFormatTherion.parse(main);
+    eqs(bare.shots.length, 0, "input: parse(content) alone cannot follow one");
+    ok(CsModel.parseFindings(bare).length === 1 &&
+        CsModel.parseFindings(bare)[0].code === "therion-input",
+        "input: and says so, as before");
+
+    // a file that cannot be read is named, not skipped in silence
+    var gone = CsFormatTherion.parse("survey c\n  input missing.th\nendsurvey\n",
+        { path: "/proj/main.th", readFile: function() { return null; } });
+    var f0 = CsModel.parseFindings(gone);
+    ok(f0.length === 1 && f0[0].code === "therion-input-missing" &&
+        f0[0].message.indexOf("missing.th") >= 0,
+        "input: a file that will not read is named in a warning");
+
+    // a file that includes itself is read once
+    var loops = { "/p/x.th": "survey x\n  input x.th\n  centreline\n" +
+        "    data normal from to length compass clino\n    1 2 5 0 0\n" +
+        "  endcentreline\nendsurvey\n" };
+    var looped = CsFormatTherion.parse("input x.th\n", { path: "/p/main.th",
+        readFile: function(q) { return loops.hasOwnProperty(q) ? loops[q] : null; } });
+    eqs(looped.shots.length, 1, "input: a self-including file is read once");
+    ok(CsModel.parseFindings(looped)[0].code === "therion-input-loop",
+        "input: and the loop is reported");
+
+    eqs(CsFormatTherion.dirOf("/a/b/c.th"), "/a/b", "dirOf: the folder");
+    eqs(CsFormatTherion.dirOf("c.th"), ".", "dirOf: no folder is the current one");
+    ok(CsFormatTherion.isAbsolute("/a") && CsFormatTherion.isAbsolute("C:\\a") &&
+        !CsFormatTherion.isAbsolute("a/b"), "isAbsolute: posix and drive paths");
+})();
+
+// ---- equate: stations that are the same place ---------------------------
+(function() {
+    var leg = function(a, b, brg) {
+        return "      " + a + " " + b + " 10 " + brg + " 0\n";
+    };
+    var head = "    centreline\n      data normal from to length compass clino\n";
+    var body = function(name, legs) {
+        return "  survey " + name + "\n" + head + legs +
+            "    endcentreline\n  endsurvey\n";
+    };
+    var two = "survey cave\n" +
+        body("a", leg(1, 2, 0) + leg(2, 3, 90)) +
+        body("b", leg(1, 2, 180) + leg(2, 3, 270)) +
+        "  equate 3@a 3@b\n" +
+        "endsurvey\n";
+    var m = CsFormatTherion.parse(two);
+    eqs(m.shots.length, 4, "equate: no shot is lost");
+    eqs(m.shots[1].to, "a.3", "equate: the first listed station is the name");
+    eqs(m.shots[3].to, "a.3", "equate: the other survey's station takes it, " +
+        "so the two surveys now meet at one point");
+    eqs(m.shots[2].from, "b.1", "equate: the rest of that survey is untouched");
+    ok(CsModel.parseFindings(m).length === 0,
+        "equate: an applied equate is not a warning any more");
+
+    // transitive: x=y and y=z are one class
+    var chain = "survey cave\n" +
+        body("a", leg(1, 2, 0)) + body("b", leg(1, 2, 0)) + body("c", leg(1, 2, 0)) +
+        "  equate 2@a 1@b\n  equate 1@b 1@c\n" +
+        "endsurvey\n";
+    var c = CsFormatTherion.parse(chain);
+    eqs(c.shots[1].from, "a.2", "equate: a chain of equates is one class");
+    eqs(c.shots[2].from, "a.2", "equate: all the way down it");
+
+    // the full path form, innermost first, from the root
+    var abs = "survey cave\n" + body("a", leg(1, 2, 0)) + body("b", leg(1, 2, 0)) +
+        "  equate 2@a.cave 1@b.cave\nendsurvey\n";
+    var ab = CsFormatTherion.parse(abs);
+    eqs(ab.shots[1].from, "a.2", "equate: station@survey.parent resolves from the root");
+
+    // an equate inside a survey names its own stations bare
+    var inner = "survey cave\n  survey a\n" + head + leg(1, 2, 0) + leg(2, 3, 0) +
+        "    endcentreline\n    equate 1 3\n  endsurvey\nendsurvey\n";
+    var inn = CsFormatTherion.parse(inner);
+    eqs(inn.shots[1].to, "a.1", "equate: bare names mean the survey it sits in -- " +
+        "and a ring closing on its own start is a loop");
+
+    // a name no shot uses is reported, not guessed at
+    var ghost = "survey cave\n" + body("a", leg(1, 2, 0)) +
+        "  equate 2@a 9@zzz\nendsurvey\n";
+    var gh = CsFormatTherion.parse(ghost);
+    var gf = CsModel.parseFindings(gh);
+    ok(gf.length === 1 && gf[0].code === "therion-equate-unknown",
+        "equate: a station nothing uses is named in a warning");
+
+    // LRUD follows the rename (station names are letters: a numeric
+    // station column in a dimensions row is read as a stray data line)
+    var lrud = "survey cave\n" +
+        "  survey a\n" + head + leg("A", "B", 0) +
+        "      data dimensions station left right up down\n      B 1 2 3 4\n" +
+        "    endcentreline\n  endsurvey\n" +
+        "  survey b\n" + head + leg("C", "D", 0) +
+        "    endcentreline\n  endsurvey\n" +
+        "  equate C@b B@a\nendsurvey\n";
+    var lr = CsFormatTherion.parse(lrud);
+    eqs(lr.shots[0].to, "b.C", "equate: the first listed station that a shot uses is the name");
+    eqs(lr.shots[1].from, "b.C", "equate: and the other survey leaves from it");
+    near(lr.shots[0].left, 1, 1e-9,
+        "equate: LRUD recorded under the old name lands on the shot into the joined station");
+})();
+
 // Two dates, two trips.
 var thTrips =
     "survey t\n" +
@@ -5931,6 +6068,36 @@ if (teamBoundaryRt.trips.length === 2) {
     ok(CsBind.marginFor([]) === 0, "margin: empty index -> 0");
     ok(CsBind.marginFor([{ name: "A1", x: 0, y: 0 }]) === 0,
         "margin: one station -> 0");
+
+    // ---- the far tier: a symbol in the middle of a wide room ----------
+    // Found on Truitt Cave: its floor-slope symbols sit 20-37 ft from
+    // the nearest station against a 15.6 ft margin, so they bound to
+    // nothing and never followed a revision. The nearest few stations
+    // are the honest answer for an item with none closer.
+    var farIdx = [{ name: "A", x: 0, y: 0 }, { name: "B", x: 10, y: 0 },
+        { name: "C", x: 20, y: 0 }, { name: "D", x: 30, y: 0 },
+        { name: "E", x: 200, y: 0 }];
+    var roomBox = { minX: 13, maxX: 15, minY: 30, maxY: 32 };
+    var nearest = CsBind.nearestStations(roomBox, farIdx, 3, 60);
+    eqs(nearest.join(","), "B,C,A",
+        "far: the three NEAREST stations, nearest first");
+    ok(CsBind.nearestStations(roomBox, farIdx, 3, 10).length === 0,
+        "far: nothing within the limit -> nothing claimed");
+    eqs(CsBind.nearestStations(roomBox, farIdx, 1, 60).length, 1,
+        "far: only as many as asked for");
+    ok(CsBind.nearestStations(null, farIdx, 3, 60).length === 0 &&
+        CsBind.nearestStations(roomBox, null, 3, 60).length === 0 &&
+        CsBind.nearestStations(roomBox, farIdx, 3, 0).length === 0,
+        "far: a null box, index or limit answers nothing");
+    ok(CsBind.FAR_FACTOR > 1 && CsBind.FAR_COUNT >= 1,
+        "far: the reach is wider than the proximity margin");
+    var dupIdx = [{ name: "A", x: 0, y: 0 }, { name: "A", x: 1, y: 0 },
+        { name: "B", x: 5, y: 0 }];
+    eqs(CsBind.nearestStations({ minX: 0, maxX: 0, minY: 0, maxY: 0 },
+        dupIdx, 3, 60).join(","), "A,B",
+        "far: a station appears once, however many marks carry its name");
+    eqs(CsBind.countBySource([{ source: "far" }, { source: "snap" }]).far, 1,
+        "far: the adopt preview counts them apart");
 })();
 
 // ---------------------------------------------------------------------
@@ -25877,7 +26044,7 @@ eqs(CsSymbolStore.blockNameFor("Rimstone dam"), "SYM_RIMSTONE_DAM",
     "blockNameFor: spaces become underscores, letters upper-case");
 eqs(CsSymbolStore.blockNameFor("bear  claw--marks"), "SYM_BEAR_CLAW_MARKS",
     "blockNameFor: every run of punctuation collapses to one underscore");
-eqs(CsSymbolStore.blockNameFor("  gypsum flower  "), "SYM_GYPSUM_FLOWER",
+eqs(CsSymbolStore.blockNameFor("  glow worm  "), "SYM_GLOW_WORM",
     "blockNameFor: leading and trailing junk is trimmed, not encoded");
 eqs(CsSymbolStore.blockNameFor("mud (2)"), "SYM_MUD_2",
     "blockNameFor: digits survive");
@@ -25922,7 +26089,7 @@ eqs(CsSymbolStore.blockNameFor(null), null,
             // every field: the shipped row must win outright.
             { block: "SYM_PIT", nss: "Not a pit", uis: "", layer: "GUANO",
                 category: "Wrong", custom: true },
-            { block: "SYM_GYPSUM_FLOWER", nss: "Gypsum flower",
+            { block: "SYM_GLOW_WORM", nss: "Glow worm",
                 uis: "Gypsum", layer: "FORMATIONS-DRIP",
                 category: "Formations", custom: true },
             { block: "SYM_BEAR_WALLOW", nss: "Bear wallow", uis: "",
@@ -25939,7 +26106,7 @@ eqs(CsSymbolStore.blockNameFor(null), null,
         var pit = null, flower = null, wallow = null;
         for (var i = 0; i < merged.entries.length; i++) {
             if (merged.entries[i].block === "SYM_PIT") { pit = merged.entries[i]; }
-            if (merged.entries[i].block === "SYM_GYPSUM_FLOWER") {
+            if (merged.entries[i].block === "SYM_GLOW_WORM") {
                 flower = merged.entries[i];
             }
             if (merged.entries[i].block === "SYM_BEAR_WALLOW") {
@@ -27983,6 +28150,43 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     ok(border.margin > 0 && border.margin < border.height / 2,
         "CsSheetSetup: and keeps a margin the furniture can live in");
 
+    // -- the paper is told what the sheet is ------------------------
+    var pg = CsSheetSetup.pageSettings(border, archD, false, 304.8);
+    near(pg.paperWidthMM, 24 * 25.4, 1e-6,
+        "pageSettings: paper width is stored unoriented (the short side)");
+    near(pg.paperHeightMM, 36 * 25.4, 1e-6,
+        "pageSettings: and height is the long side");
+    eqs(pg.orientation, "Landscape",
+        "pageSettings: a wide sheet prints landscape");
+    near(pg.scaleRatio, 50 * 304.8 / 25.4, 1e-6,
+        "pageSettings: 1\" = 50 ft in feet is 600 drawing mm per paper mm");
+    eqs(pg.scale.indexOf("1:"), 0,
+        "pageSettings: QCAD's scale string is paper:drawing, 1:N");
+    near(pg.offsetX, border.minX, 1e-9,
+        "pageSettings: the paper's corner sits on the border's");
+    var pgTurned = CsSheetSetup.pageSettings(sideways, archD, true, 304.8);
+    eqs(pgTurned.orientation, "Portrait",
+        "pageSettings: a turned sheet prints portrait");
+    near(pgTurned.paperWidthMM, 24 * 25.4, 1e-6,
+        "pageSettings: turned or not, the stored size is the same paper");
+    var pgMetres = CsSheetSetup.pageSettings(border, archD, false, 1000);
+    near(pgMetres.scaleRatio, 1800 * 1000 / (36 * 25.4), 1e-6,
+        "pageSettings: the scale follows the drawing unit, not the nominal");
+    eqs(CsSheetSetup.pdfPathFor("/c/sheets/Truitt Plan Sheet.dxf"),
+        "/c/sheets/Truitt Plan Sheet.pdf",
+        "pdfPathFor: same folder, same name, .pdf");
+    var mb = CsSheetSetup.mediaBoxInches("<< /MediaBox [0 0 2592 1728] >>");
+    near(mb.w, 36, 1e-9, "mediaBox: 2592 pt is 36 in");
+    near(mb.h, 24, 1e-9, "mediaBox: 1728 pt is 24 in");
+    ok(CsSheetSetup.mediaBoxInches("no page here") === null,
+        "mediaBox: no box, no answer");
+    ok(CsSheetSetup.pageMatches(mb, archD),
+        "pageMatches: the right paper matches");
+    ok(CsSheetSetup.pageMatches({ w: 24, h: 36 }, archD),
+        "pageMatches: either way up");
+    ok(!CsSheetSetup.pageMatches({ w: 11.69, h: 8.27 }, archD),
+        "pageMatches: A4 is not ARCH D");
+
 
     // -- magnetic north, beside the true one ------------------------
     // The suite rotates every azimuth by the declination as it draws,
@@ -29895,10 +30099,13 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         "callout",
         "CsSketch.resolvePoint: an altitude is a callout, so the note " +
         "stays text-editable and keeps its leader");
-    eqs(CsSketch.resolvePoint({ type: "continuation" }).action.layer,
-        CsLayers.NOTES_DIG,
-        "CsSketch.resolvePoint: a continuation is a lead, and lands on " +
-        "the nearest thing this suite has until leads get a tool");
+    eqs(CsSketch.resolvePoint({ type: "continuation" }).action.block,
+        "SYM_CONTINUATION",
+        "CsSketch.resolvePoint: a continuation is a lead, and lands as " +
+        "the Continuation symbol on NOTES-DIG");
+    eqs(CsSymbols.byBlock("SYM_CONTINUATION").layer, CsLayers.NOTES_DIG,
+        "CsSketch.resolvePoint: and that symbol's home is the layer the " +
+        "continuation used to land on bare");
     eqs(CsSketch.resolvePoint({ type: "dimensions" }).action.kind, "skip",
         "CsSketch.resolvePoint: xtherion's editor scaffolding is not cave");
 

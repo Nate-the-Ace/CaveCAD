@@ -1153,7 +1153,14 @@ class TestSyncTemplateLayersTool(unittest.TestCase):
                 # truecolour (group 420) at all, so such a test first
                 # needs a decision about which representation is
                 # canonical.
-                "NOTES-HAZARD", "NOTES-DIG", "NOTES-EQUIPMENT",
+                #
+                # NOTES-HAZARD and NOTES-DIG are NOT stripped any more:
+                # shipped symbol blocks (SYM_DANGER, SYM_DIG,
+                # SYM_CONTINUATION) draw on them, so a stripped record is
+                # re-created by the DXF reader the moment an entity names
+                # the layer -- with the default white style, which the
+                # sync then reports as a restyle rather than an add.
+                "NOTES-EQUIPMENT",
                 "NOTES-NAME", "NOTES-ELEVATION",
                 "NOTES-ELEVATION-LINE")
 
