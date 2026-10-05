@@ -90,6 +90,28 @@ function main() {
     di.undo();
     check(Layouts.list(doc).length === n, "one undo removes a created layout entirely (layout + block)");
 
+    // ---- viewport helpers: lock, paper->model, lookup ------------------------
+    var info = Layouts.get(doc, "A1");
+    var vps = Layouts.viewports(doc, info);
+    check(vps.length === 1, "Layouts.viewports finds the viewport");
+    var v = vps[0];
+    check(!Layouts.isLocked(v), "a new viewport is unlocked");
+    Layouts.setLocked(di, v, true);
+    var v2 = Layouts.viewports(doc, info)[0];
+    check(Layouts.isLocked(v2), "setLocked locks it");
+    var scaleBefore = v2.getScale();
+    v2.setProperty(RViewportEntity.PropertyScale, 0.5);
+    check(near(v2.getScale(), scaleBefore), "a locked viewport refuses a scale change");
+    di.undo();
+    check(!Layouts.isLocked(Layouts.viewports(doc, info)[0]), "locking is one undo step");
+    var c = v.getCenter();
+    var p = Layouts.paperToModel(v, c.x, c.y);
+    check(near(p.x, 1000, 1e-6) && near(p.y, 2000, 1e-6), "paper centre maps to the view centre (1000, 2000)");
+    var q = Layouts.paperToModel(v, c.x + 0.01, c.y);
+    check(near(q.x, 1000 + 0.01 / v.getScale(), 1e-6), "one hundredth of paper = " + (0.01 / v.getScale()).toFixed(3) + " model units at this scale");
+    check(!isNull(Layouts.viewportAt(doc, info, c.x, c.y)), "viewportAt finds it at its centre");
+    check(isNull(Layouts.viewportAt(doc, info, c.x + 100, c.y)), "viewportAt finds nothing far outside");
+
     if (fails === 0) print("### LAYOUTS API OK");
     QCoreApplication.exit(fails === 0 ? 0 : 1);
 }

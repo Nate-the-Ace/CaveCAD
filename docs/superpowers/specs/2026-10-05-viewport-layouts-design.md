@@ -208,6 +208,40 @@ dxflib already writes a FAKE skeleton for every file: BLOCK_RECORDs
 objects Layout1/Layout2/Model with hard-wired handles; V1 replaces it with
 the real layout list.
 
+## Editing through viewports ("click through") — design (Nathan, 2026-10-05)
+
+Requirement: viewports can be clicked through to edit things in model space
+and to reposition the contents when the viewport is not locked.
+
+**Implementation: the model view, composed to look identical.** Double-click
+a viewport (the stock `DefaultAction.entityDoubleClicked` TODO, now filled in)
+and the document switches to MODEL space while the view is zoomed so the model
+appears exactly as the sheet shows it: same scale, same place on screen, no
+jump (the visible paper area mapped back through the viewport). The viewport's
+frame stays fixed on screen and a dimmed surround marks it. Every tool, snap,
+selection, grip and preview then works on the real model with no engine
+surgery, which a true paper-space pass-through would need in every tool's
+mouse, snap and preview path (the stock core only carries commented remnants
+of that design: `RInputEvent` input transform, `RDocumentInterface::
+setCurrentViewport`).
+
+- **Reposition:** panning / zooming slides the model under the fixed frame;
+  "Back to layout" (button, any tab, or a double-click on empty ground outside
+  the frame) writes the new view centre and scale into the viewport in ONE
+  undoable step.
+- **Locked viewports** (status bit, DXF flag 0x4000, property "Locked"): the
+  edit mode still lets you edit the model, but the viewport keeps its scale
+  and contents; grips and the property editor refuse to change them.
+- **Twisted viewports:** the view cannot rotate, so the model is shown
+  untwisted and nothing is written back.
+- Generated (auto) sheets lock their viewports; editing the model through one
+  does not change the layout (so it stays auto).
+
+Why the composed view rather than paper-space pass-through: robustness first.
+The tools the caver already trusts run unchanged. The cost is that paper
+furniture is not drawn while editing (the layout is one click away).
+
+
 ## Risks and open traps
 
 - **DXF fidelity** (V1) is the largest unknown; the fallback is a blob.
