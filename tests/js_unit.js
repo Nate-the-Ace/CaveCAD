@@ -269,6 +269,9 @@ var CORE_FILES = [
     // bar divides, and what a title block can be told without asking.
     "scripts/CaveSurvey/Core/CsSheetSetup.js",
     "scripts/CaveSurvey/Core/CsSheetTile.js",
+    // Sheets as layouts: plan() is the pure half (the Layouts API it
+    // draws through is the engine's and is not loaded here).
+    "scripts/CaveSurvey/Core/CsLayoutGen.js",
     // Pure: exaggeration, colour bands, arrow geometry and the caption
     // that has to state the exaggeration.
     "scripts/CaveSurvey/Core/CsClosure.js",

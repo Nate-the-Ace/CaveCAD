@@ -286,6 +286,15 @@ include(includeBasePath + "/CsSheetTile.js");
 // the Sheet Setup preview, as an embedded QCAD view a caver can drag
 // the furniture around in. GUI context only, like CsScanView above.
 include(includeBasePath + "/CsSheetView.js");
+// After CsSheetSetup, CsSheetTile, CsLayers, CsTags and CsDraw: Sheet Setup's
+// output as LAYOUTS (viewport branch). Needs the engine's own Layouts API
+// (scripts/Layouts/Layouts.js, loaded first); plan() is pure and also loads
+// under node, where include of an engine script does not exist.
+if (typeof Layouts === "undefined" && typeof include === "function" && typeof QFileInfo !== "undefined") {
+    include("scripts/Layouts/Layouts.js");
+    include("scripts/Layouts/LayoutPlot.js");
+}
+include(includeBasePath + "/CsLayoutGen.js");
 // After CsAdjust (whose per-station shifts it draws) and CsNetwork
 // (whose loops it labels): turning a closure percentage into arrows.
 include(includeBasePath + "/CsClosure.js");
