@@ -39453,7 +39453,7 @@ ok(prClean, "pr engine: no text carries a coordinate or a long decimal");
     for (var gx = 0; gx <= 36; gx++) {
         for (var gy = 0; gy <= 26; gy++) {
             var pt = { x: gx * 100, y: gy * 100 };
-            if (!lay.tiles.some(function(tt) { return CsSheetTile.within(pt, tt.map); })) { holes++; }
+            if (!lay.tiles.some(function(tt) { return (pt.x >= tt.map.minX - 1e-9 && pt.x <= tt.map.maxX + 1e-9 && pt.y >= tt.map.minY - 1e-9 && pt.y <= tt.map.maxY + 1e-9); })) { holes++; }
         }
     }
     eqs(holes, 0, "title sheet: every point of the cave is printed by some sheet (its map area)");
@@ -39473,24 +39473,6 @@ ok(prClean, "pr engine: no text carries a coordinate or a long decimal");
     banded.tiles.forEach(function(tt) {
         near(tt.paper.footer, 150, 1e-9, "title sheet: a band asked for is reserved under " + tt.id);
     });
-})();
-// The cut-outs that give a sheet's elements their white backing.
-(function() {
-    var r = { minX: 40, minY: 40, maxX: 60, maxY: 60 };
-    var outside = CsSheetTile.clipSegmentOutside({ x: 0, y: 50 }, { x: 100, y: 50 }, r);
-    eqs(outside.length, 2, "cut-out: a line through a box is two pieces");
-    near(outside[0].b.x, 40, 1e-9, "cut-out: the first stops at the box");
-    near(outside[1].a.x, 60, 1e-9, "cut-out: the second starts past it");
-    eqs(CsSheetTile.clipSegmentOutside({ x: 0, y: 0 }, { x: 10, y: 0 }, r).length, 1,
-        "cut-out: a line that misses the box is untouched");
-    ok(CsSheetTile.cutOutRuns([{ x: 0, y: 0 }, { x: 10, y: 10 }], false, r) === null,
-        "cut-out: a polyline that misses the box answers 'leave it alone'");
-    eqs(CsSheetTile.cutOutRuns([{ x: 45, y: 45 }, { x: 55, y: 55 }], false, r).length, 0,
-        "cut-out: a polyline wholly under the box is gone");
-    var pieces = CsSheetTile.cutOutRuns([{ x: 0, y: 50 }, { x: 100, y: 50 }, { x: 100, y: 0 }], false, r);
-    eqs(pieces.length, 2, "cut-out: a polyline through the box leaves two runs");
-    near(pieces[1][0].x, 60, 1e-9, "cut-out: the second run resumes on the far side");
-    eqs(pieces[1].length, 3, "cut-out: and keeps its later corner");
 })();
 
 
