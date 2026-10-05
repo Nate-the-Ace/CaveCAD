@@ -294,14 +294,14 @@ if (typeof Layouts === "undefined" && typeof include === "function" && typeof QF
     include("scripts/Layouts/Layouts.js");
     include("scripts/Layouts/LayoutPlot.js");
 }
+include(includeBasePath + "/CsScaleBar.js");
 include(includeBasePath + "/CsLayoutGen.js");
 // After CsAdjust (whose per-station shifts it draws) and CsNetwork
 // (whose loops it labels): turning a closure percentage into arrows.
 include(includeBasePath + "/CsClosure.js");
-// After CsSheetSetup (whose sheets/ folder name it recognises a sheet
-// by): the mark that says a drawing is a SHEET, and the refusal every
-// editing tool owes it.
-include(includeBasePath + "/CsSheetFile.js");
+// After CsLayoutGen (and the engine's Layouts): the refusal every editing
+// tool owes a SHEET (a layout showing instead of the cave).
+include(includeBasePath + "/CsModelSpace.js");
 
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
 // CsContrib calls ensureTrips, offset, groupRuns and tripLabel.

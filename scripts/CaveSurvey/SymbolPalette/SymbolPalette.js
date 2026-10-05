@@ -1789,8 +1789,8 @@ SymbolPalette.prototype.beginEvent = function() {
     // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
-    // Core/CsSheetFile.js.
-    if (CsSheetFile.blocks(EAction.getDocument(), "Symbol Palette")) {
+    // Core/CsModelSpace.js.
+    if (CsModelSpace.blocks(EAction.getDocument(), "Symbol Palette")) {
         this.terminate();
         return;
     }

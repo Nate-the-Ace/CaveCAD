@@ -1211,11 +1211,11 @@ AreaFill.buildBody = function(parent) {
 AreaFill.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
 
-    // A SHEET IS NOT A DRAWING TO WORK IN -- see CsSheetFile's own
+    // A SHEET IS NOT A DRAWING TO WORK IN -- see CsModelSpace's own
     // header; a sheet is rebuilt from the cave's record on every Build
     // Sheet, and a fill drawn on one would go with it, silently, weeks
     // later.
-    if (CsSheetFile.blocks(EAction.getDocument(), "Area Fill")) {
+    if (CsModelSpace.blocks(EAction.getDocument(), "Area Fill")) {
         this.terminate();
         return;
     }

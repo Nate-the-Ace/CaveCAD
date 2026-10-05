@@ -247,6 +247,8 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
     // file made to be handed to people. The engine's viewport honours this
     // property by not drawing images, whatever layer they sit on.
     viewport.setCustomProperty("CaveCAD", "NoRaster", "1");
+    // the id its scale bar is linked by
+    var viewportGuid = CsScaleBar.ensureGuid(viewport);
     // LOCKED: an automatic sheet's scale and contents are the generator's.
     // Unlocking, like any hand edit, is what turns the sheet manual.
     viewport.setStatus(viewport.getStatus() | Layouts.LOCK_BIT);
@@ -345,23 +347,12 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
     if (wants.bar === true) {
         var bar = CsSheetSetup.barFor(job.scale);
         var bOff = off("bar");
-        var barX = leftX + fur.pieces.bar.x + bOff.x;
-        var barY = footY + fur.pieces.bar.y + CsSheetSetup.BAR_LIFT + bOff.y;
-        // one block is perBlockFeet of cave = perBlockFeet / scale inches of paper
-        var blockW = bar.perBlockFeet / job.scale;
-        var barH = CsSheetSetup.BAR.height;
-        for (var bk = 0; bk <= bar.blocks; bk++) {
-            var bx = barX + blockW * bk;
-            line(bx, barY, bx, barY + barH, CsLayers.SCALE_BAR);
-            text(bx, barY - CsSheetSetup.BAR.tick * 2, CsSheetSetup.TEXT.small,
-                String(bar.perBlock * bk), CsLayers.SCALE_BAR);
-        }
-        line(barX, barY, barX + blockW * bar.blocks, barY, CsLayers.SCALE_BAR);
-        line(barX, barY + barH, barX + blockW * bar.blocks, barY + barH, CsLayers.SCALE_BAR);
-        text(barX, barY + barH + CsSheetSetup.TEXT.body, CsSheetSetup.TEXT.body,
-            CsSheetSetup.scaleText(job.scale), CsLayers.SCALE_BAR);
-        text(barX + blockW * bar.blocks + 0.1, barY - CsSheetSetup.BAR.tick * 2,
-            CsSheetSetup.TEXT.small, bar.unit, CsLayers.SCALE_BAR);
+        // LINKED to the viewport above: the bar follows its scale from now on
+        // (CsScaleBar, kept current by SheetScaleBarListener)
+        CsScaleBar.build(doc, di, op, { blockId: blockId,
+            xIn: leftX + fur.pieces.bar.x + bOff.x,
+            yIn: footY + fur.pieces.bar.y + CsSheetSetup.BAR_LIFT + bOff.y,
+            fpi: job.scale, guid: viewportGuid, tag: "SCALE-BAR" });
         drew.push("a scale bar in " + bar.perBlock + " " + bar.unit.toLowerCase() + " steps");
     }
 
@@ -439,6 +430,16 @@ CsLayoutGen.signatureRows = function(doc, info) {
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
         if (isNull(e) || e.isUndone()) {
+            continue;
+        }
+        if (CsScaleBar.isPiece(e)) {
+            // A linked scale bar follows its viewport by itself, so its SCALE is
+            // not a hand edit -- but WHERE it sits is: only the baseline's start counts.
+            if (CsTags.get(e, CsScaleBar.PART) === "base" && e.getType() === RS.EntityLine) {
+                var sp = e.getStartPoint(), ep = e.getEndPoint();
+                var lp = sp.x <= ep.x ? sp : ep;
+                rows.push(["BAR", CsLayoutGen.round(lp.x), CsLayoutGen.round(lp.y)].join("|"));
+            }
             continue;
         }
         // NAMES, never ids: ids are not the same in a reloaded drawing

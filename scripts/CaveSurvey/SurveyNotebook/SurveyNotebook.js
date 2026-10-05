@@ -997,7 +997,7 @@ SurveyNotebook.previewPlan = function(w) {
     // right when they pressed Draw and would be a warning per
     // keystroke here.
     try {
-        if (CsSheetFile.isSheet(doc)) {
+        if (CsModelSpace.onSheet(doc)) {
             return null;
         }
     } catch (eSheet) {
@@ -1095,8 +1095,8 @@ SurveyNotebook.drawSurveyInner = function(w, forceFull) {
     // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
-    // Core/CsSheetFile.js.
-    if (CsSheetFile.blocks(doc, "Survey Notebook")) {
+    // Core/CsModelSpace.js.
+    if (CsModelSpace.blocks(doc, "Survey Notebook")) {
         return;
     }
     var di = getDocumentInterface();

@@ -436,7 +436,7 @@ function resetDrawingRun() {
     }
     // A SHEET IS NOT A DRAWING TO WORK IN -- it is rebuilt from the
     // cave's record every time Build Sheet is pressed.
-    if (CsSheetFile.blocks(doc, "Reset Drawing")) {
+    if (CsModelSpace.blocks(doc, "Reset Drawing")) {
         return;
     }
     var di = getDocumentInterface();

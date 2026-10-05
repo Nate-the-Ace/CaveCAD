@@ -156,6 +156,18 @@ CaveSurvey.init = function(basePath, splash) {
         // degrade to the manual sync path
     }
 
+    // Keep a sheet's scale bar on its viewport's scale -- the same
+    // arrangement as the listeners above. Without it a bar still draws
+    // correctly; it just needs CsScaleBar.syncAll after a scale change.
+    try {
+        include(includeBasePath + "/SheetSetup/SheetScaleBarListener.js");
+        if (typeof SheetScaleBarListener !== "undefined") {
+            SheetScaleBarListener.install();
+        }
+    } catch (eScaleBar) {
+        // degrade: the bar keeps the scale it was drawn at
+    }
+
     // Keep the 3D view following the drawing while the caver edits.
     // UNLIKE the three listeners above this one writes nothing -- it
     // reads the survey and pushes a mesh into a window -- so it carries

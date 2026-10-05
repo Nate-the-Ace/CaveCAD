@@ -644,24 +644,6 @@ fi
 
 echo
 echo "=============================================================="
-echo " 37/55 Sheet Setup builds a printable sheet (inside CaveCAD's own script engine)"
-echo "=============================================================="
-if [ -e "$QCAD" ]; then
-    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
-                 -autostart tests/sheet_setup_run.js "$PWD" 2>/dev/null)
-    echo "$output"
-    case "$output" in
-        *"### SHEET SETUP OK"*) ;;
-        *) echo "Sheet Setup run did not pass."; status=1 ;;
-    esac
-else
-    echo "SKIP: CaveCAD not found -- the plot-scale arithmetic is" \
-         "unit-tested in js_unit.js; this stage proves the drawn sheet" \
-         "and needs a real document."
-fi
-
-echo
-echo "=============================================================="
 echo " 38/55 Loop Errors draws the closure where it happened (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
@@ -1077,6 +1059,22 @@ if [ -e "$QCAD" ]; then
     case "$output" in
         *"### SHEET SETUP LAYOUTS OK"*) ;;
         *) echo "Sheet setup layouts run did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found at $QCAD"
+fi
+
+echo
+echo "=============================================================="
+echo " 63/63 A sheet's scale bar follows its viewport (listener logic, undo, reload)"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/scale_bar_run.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### SCALE BAR OK"*) ;;
+        *) echo "Scale bar run did not pass."; status=1 ;;
     esac
 else
     echo "SKIP: CaveCAD not found at $QCAD"

@@ -298,7 +298,7 @@ WallEdging.prototype.beginEvent = function() {
         this.terminate();
         return;
     }
-    if (CsSheetFile.blocks(doc, "Wall Edging")) {
+    if (CsModelSpace.blocks(doc, "Wall Edging")) {
         this.terminate();
         return;
     }

@@ -343,28 +343,24 @@ second run replaces the first rather than stacking a copy on top.
 
 Passes when the output contains `### BUILD LEGEND OK`.
 
-## `sheet_setup_run.js` -- Sheet Setup builds a printable sheet
+## `layout_gen_run.js` / `sheet_setup_layouts_run.js` -- Sheet Setup makes LAYOUTS
 
-`tests/js_unit.js` pins the arithmetic: what fits on what paper, how a
-scale bar divides into round steps, and what a title block can be told
-without asking. This stage proves the parts that only exist against a
-document.
+Sheets are layouts of the cave's own drawing (viewport branch): one
+viewport showing the part of the cave the sheet is responsible for,
+plus the furniture (border, title block, scale bar, north arrow, match
+lines) in paper space. `layout_gen_run.js` proves the generator: a
+viewport at the right scale and view centre with the other views'
+layers frozen, nothing written into model space, auto sheets rewritten
+in place without piling up copies, edited and manual sheets left alone,
+undo restoring "auto" by itself, Revert, tiling into numbered sheets
+whose viewports show exactly the tile's map, and all of it surviving a
+save and reload. `sheet_setup_layouts_run.js` proves the panel logic
+against layouts: measuring is MODEL space even while a sheet is
+showing, and what a sheet says is read back from the sheet without
+doubling its captions.
 
-The sheet has to land AROUND the cave at the right size, and a second
-run has to measure the CAVE again rather than the first run's border --
-otherwise the sheet grows every time it is run.
-
-Text has to be drawn at the plot scale: a 0.14 inch title block line is
-7 ft tall at 1" = 50 ft. Get that wrong and the map plots with text
-either invisible or a foot high, which no test over numbers alone can
-watch happening to real entities.
-
-And two promises: a value a human typed is never replaced by a computed
-one on a re-run, and the LOCATION line is left holding nothing but its
-own label. That last one is the suite's first rule checked in the
-drawing rather than in the function that answers it.
-
-Passes when the output contains `### SHEET SETUP OK`.
+Pass when the outputs contain `### LAYOUT GEN OK` and
+`### SHEET SETUP LAYOUTS OK`.
 
 ## `loop_errors_run.js` -- Loop Errors draws the closure where it happened
 

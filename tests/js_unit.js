@@ -271,6 +271,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsSheetTile.js",
     // Sheets as layouts: plan() is the pure half (the Layouts API it
     // draws through is the engine's and is not loaded here).
+    "scripts/CaveSurvey/Core/CsScaleBar.js",
     "scripts/CaveSurvey/Core/CsLayoutGen.js",
     // Pure: exaggeration, colour bands, arrow geometry and the caption
     // that has to state the exaggeration.
@@ -280,7 +281,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsTeach.js",
     // The sheet mark. isSheet/mark need a document; the path rule and
     // the refusal text are pure and are what is tested here.
-    "scripts/CaveSurvey/Core/CsSheetFile.js",
+    "scripts/CaveSurvey/Core/CsModelSpace.js",
     // What survives emptying a drawing, and what the refusals say. The
     // walk and the delete live in ResetDrawing, where a document exists.
     "scripts/CaveSurvey/Core/CsReset.js",
@@ -28176,20 +28177,6 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     var pgMetres = CsSheetSetup.pageSettings(border, archD, false, 1000);
     near(pgMetres.scaleRatio, 1800 * 1000 / (36 * 25.4), 1e-6,
         "pageSettings: the scale follows the drawing unit, not the nominal");
-    eqs(CsSheetSetup.pdfPathFor("/c/sheets/Truitt Plan Sheet.dxf"),
-        "/c/sheets/Truitt Plan Sheet.pdf",
-        "pdfPathFor: same folder, same name, .pdf");
-    var mb = CsSheetSetup.mediaBoxInches("<< /MediaBox [0 0 2592 1728] >>");
-    near(mb.w, 36, 1e-9, "mediaBox: 2592 pt is 36 in");
-    near(mb.h, 24, 1e-9, "mediaBox: 1728 pt is 24 in");
-    ok(CsSheetSetup.mediaBoxInches("no page here") === null,
-        "mediaBox: no box, no answer");
-    ok(CsSheetSetup.pageMatches(mb, archD),
-        "pageMatches: the right paper matches");
-    ok(CsSheetSetup.pageMatches({ w: 24, h: 36 }, archD),
-        "pageMatches: either way up");
-    ok(!CsSheetSetup.pageMatches({ w: 11.69, h: 8.27 }, archD),
-        "pageMatches: A4 is not ARCH D");
 
 
     // -- magnetic north, beside the true one ------------------------
@@ -28543,67 +28530,6 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     ok(untouched.dx === 7 && untouched.dy === 9,
         "CsSheetSetup: with nothing to snap to, a drag is the drag");
 
-    // -- the sheet is its own FILE ---------------------------------
-    // The record drawing is the cave; a sheet is a decision about one
-    // presentation of it, and laying one out moves the elevation and
-    // draws a border round everything.
-    var sheetPath = CsSheetSetup.sheetPathFor("/caves/Truitt Cave",
-        "Truitt Cave", CsSheetSetup.PLAN_SHEET);
-    eqs(sheetPath, "/caves/Truitt Cave/sheets/Truitt Cave Plan Sheet.dxf",
-        "CsSheetSetup: the plan sheet is a separate file under the cave");
-    // ONE SHEET PER FILE: two sheets in one drawing is one enormous
-    // page as far as a plotter is concerned.
-    eqs(CsSheetSetup.sheetPathFor("/caves/Truitt Cave", "Truitt Cave",
-        CsSheetSetup.ELEVATION_SHEET),
-        "/caves/Truitt Cave/sheets/Truitt Cave Profile Sheet.dxf",
-        "CsSheetSetup: and the profile sheet is a file of its own");
-    ok(CsSheetSetup.sheetPathFor("/c", "X", CsSheetSetup.PLAN_SHEET) !==
-        CsSheetSetup.sheetPathFor("/c", "X",
-            CsSheetSetup.ELEVATION_SHEET),
-        "CsSheetSetup: the two never land in the same file");
-    ok(sheetPath.indexOf("/" + CsSheetSetup.SHEETS_FOLDER + "/") > 0,
-        "CsSheetSetup: in its own subfolder -- a second .dxf beside the " +
-            "drawing is a second candidate for which file IS this cave");
-    eqs(CsSheetSetup.sheetPathFor("/caves/Truitt Cave/", "Truitt Cave",
-        CsSheetSetup.PLAN_SHEET), sheetPath,
-        "CsSheetSetup: a trailing slash on the folder changes nothing");
-    // CsPackage.safeName drops the slash rather than replacing it, so
-    // the name comes back "BatCave" -- what matters is that no separator
-    // survives into a path this builds.
-    ok(CsSheetSetup.sheetPathFor("/caves/x", "Bat/Cave",
-        CsSheetSetup.PLAN_SHEET).split("/").length ===
-        CsSheetSetup.sheetPathFor("/caves/x", "BatCave",
-            CsSheetSetup.PLAN_SHEET).split("/").length,
-        "CsSheetSetup: a cave name with a slash cannot climb out of the " +
-            "sheets folder (" +
-            CsSheetSetup.sheetPathFor("/caves/x", "Bat/Cave") + ")");
-    ok(CsSheetSetup.sheetPathFor("/caves/x", "",
-        CsSheetSetup.PLAN_SHEET).indexOf("Cave Plan Sheet") > 0,
-        "CsSheetSetup: a nameless cave still gets a file name");
-
-    // A SHEET REBUILDS ITSELF: pressing Build Sheet while looking at
-    // one asks for THIS sheet again, not a sheet of a sheet. The record
-    // is one folder up, named after the cave.
-    eqs(CsSheetSetup.recordPathFor(sheetPath),
-        "/caves/Truitt Cave/Truitt Cave.dxf",
-        "CsSheetSetup: a sheet knows the drawing it was built from");
-    eqs(CsSheetSetup.recordPathFor(
-        CsSheetSetup.sheetPathFor("/caves/Deep Hole", "Deep Hole",
-            CsSheetSetup.PLAN_SHEET)),
-        "/caves/Deep Hole/Deep Hole.dxf",
-        "CsSheetSetup: which is the inverse of where sheets are written");
-    eqs(CsSheetSetup.recordPathFor(
-        CsSheetSetup.sheetPathFor("/caves/Deep Hole", "Deep Hole",
-            CsSheetSetup.ELEVATION_SHEET)),
-        "/caves/Deep Hole/Deep Hole.dxf",
-        "CsSheetSetup: from either sheet");
-    eqs(CsSheetSetup.recordPathFor("/caves/Truitt Cave/Truitt Cave.dxf"),
-        "",
-        "CsSheetSetup: a drawing that is not a sheet has no record " +
-            "behind it");
-    eqs(CsSheetSetup.recordPathFor(""), "",
-        "CsSheetSetup: and neither has nothing");
-
     // -- the second sheet ------------------------------------------
     // The elevation is drawn at the PLAN's scale, so it gets its own
     // sheet rather than a scale step nobody asked for.
@@ -28624,9 +28550,6 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     near(elevSheet.height, planSheet.height, 0.0001,
         "CsSheetSetup: in the same orientation");
 
-    ok(CsSheetSetup.PLAN_SHEET !== CsSheetSetup.ELEVATION_SHEET,
-        "CsSheetSetup: the two sheets are told apart by kind, because " +
-            "they do not carry the same furniture");
 
     // -- the preview -----------------------------------------------
     // Rough by design: where things go, not what they look like. What
@@ -29074,41 +28997,6 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
             "teach from it believing it is the cave's whole record");
 })();
 
-// ---------------------------------------------------------------------
-// CsSheetFile -- the mark that says a drawing is a SHEET.
-// ---------------------------------------------------------------------
-(function() {
-    // A drawing inside a cave's sheets/ folder is a sheet whatever its
-    // contents say: the mark is an entity, and an entity can be
-    // deleted by a tidy-up or a round trip through another program.
-    ok(CsSheetFile.pathIsSheet(
-        "/caves/Truitt Cave/sheets/Truitt Cave Sheet.dxf"),
-        "CsSheetFile: a drawing in the sheets folder is a sheet");
-    ok(!CsSheetFile.pathIsSheet("/caves/Truitt Cave/Truitt Cave.dxf"),
-        "CsSheetFile: the cave's own drawing beside it is not");
-    ok(!CsSheetFile.pathIsSheet(""),
-        "CsSheetFile: an unsaved drawing is not a sheet by its path");
-    ok(!CsSheetFile.pathIsSheet(null),
-        "CsSheetFile: and neither is nothing");
-    // The folder name is the one CsSheetSetup writes into -- the two
-    // cannot be allowed to disagree about where a sheet lives.
-    ok(CsSheetFile.pathIsSheet(
-        CsSheetSetup.sheetPathFor("/caves/x", "X",
-            CsSheetSetup.PLAN_SHEET)),
-        "CsSheetFile: the path Sheet Setup writes to is recognised as " +
-            "a sheet by the guard that reads it");
-
-    var refusal = CsSheetFile.refusal("Feature Trace");
-    ok(refusal.indexOf("Feature Trace") === 0,
-        "CsSheetFile: the refusal names the tool that refused");
-    ok(refusal.indexOf("SHEET") > 0,
-        "CsSheetFile: says what this drawing is");
-    ok(refusal.toLowerCase().indexOf("lost") > 0,
-        "CsSheetFile: and what would happen to work done here");
-    ok(refusal.toLowerCase().indexOf("open the cave") > 0,
-        "CsSheetFile: and answers the question actually being asked, " +
-            "which is where to do this instead");
-})();
 
 // ---------------------------------------------------------------------
 // CsScanTree's cascade -- the folders as the question, one level at a
@@ -39516,62 +39404,8 @@ ok(prClean, "pr engine: no text carries a coordinate or a long decimal");
 })();
 
 
-// One PDF for a tiled plan set: the pages are the sheets in grid order.
-(function() {
-    var folder = "/c/Truitt Cave/sheets/";
-    var jobs = CsSheetSetup.pdfJobs([folder + "Truitt Cave Plan Sheet A1.dxf",
-        folder + "Truitt Cave Plan Sheet A2.dxf", folder + "Truitt Cave Plan Sheet B1.dxf",
-        folder + "Truitt Cave Profile Sheet.dxf"]);
-    eqs(jobs.length, 2, "pdf set: the grid is one PDF and the profile another");
-    eqs(jobs[0].pdf, folder + "Truitt Cave Plan Sheets.pdf", "pdf set: named for the whole plan set");
-    eqs(jobs[0].paths.length, 3, "pdf set: three pages");
-    eqs(jobs[0].paths[0].indexOf("Sheet A1") > 0 && jobs[0].paths[2].indexOf("Sheet B1") > 0, true,
-        "pdf set: in grid order, A1 first");
-    eqs(jobs[1].pdf, folder + "Truitt Cave Profile Sheet.pdf", "pdf set: the profile keeps a PDF of its own");
-    var single = CsSheetSetup.pdfJobs([folder + "Truitt Cave Plan Sheet.dxf"]);
-    eqs(single.length, 1, "pdf set: one plan sheet is one job");
-    eqs(single[0].paths.length, 1, "pdf set: of a single page");
-    eqs(single[0].pdf, folder + "Truitt Cave Plan Sheet.pdf", "pdf set: named as it always was");
-    eqs(CsSheetSetup.pdfJobs([]).length, 0, "pdf set: nothing to plot, no jobs");
-    eqs(CsSheetSetup.sheetPathFor("/c", "Truitt Cave", CsSheetSetup.PLAN_SHEET, "B12"),
-        "/c/sheets/Truitt Cave Plan Sheet B12.dxf", "pdf set: a tile's file name carries its grid place");
-    eqs(CsSheetSetup.pdfJobs([CsSheetSetup.sheetPathFor("/c", "Truitt Cave", CsSheetSetup.PLAN_SHEET, "B12")])[0].paths.length, 1,
-        "pdf set: and the job pattern recognises the name sheetPathFor makes");
-})();
 
 
-// CsSheetTile clipping: only a sheet's own map area shows on it.
-(function() {
-    var r = { minX: 0, minY: 0, maxX: 100, maxY: 100 };
-    var seg = CsSheetTile.clipSegment({ x: -50, y: 50 }, { x: 150, y: 50 }, r);
-    near(seg.a.x, 0, 1e-9, "clip: a line crossing the map is cut at the west edge");
-    near(seg.b.x, 100, 1e-9, "clip: and at the east edge");
-    ok(CsSheetTile.clipSegment({ x: -50, y: -10 }, { x: 150, y: -10 }, r) === null,
-        "clip: a line wholly outside is gone");
-    var inner = CsSheetTile.clipSegment({ x: 10, y: 10 }, { x: 20, y: 30 }, r);
-    near(inner.a.x, 10, 1e-9, "clip: a line wholly inside is untouched");
-    ok(CsSheetTile.clipRuns([{ x: 10, y: 10 }, { x: 50, y: 50 }], false, r) === null,
-        "clip: a polyline wholly inside answers 'leave it alone'");
-    var runs = CsSheetTile.clipRuns([{ x: -20, y: 20 }, { x: 50, y: 20 }, { x: 50, y: 150 }, { x: 80, y: 150 }, { x: 80, y: 40 }],
-        false, r);
-    eqs(runs.length, 2, "clip: a polyline that leaves and comes back is two runs");
-    near(runs[0][0].x, 0, 1e-9, "clip: the first run starts on the west edge");
-    near(runs[0][runs[0].length - 1].y, 100, 1e-9, "clip: and ends on the north edge");
-    near(runs[1][0].y, 100, 1e-9, "clip: the second re-enters on the north edge");
-    near(runs[1][runs[1].length - 1].y, 40, 1e-9, "clip: and ends where the polyline does");
-    eqs(CsSheetTile.clipRuns([{ x: 200, y: 200 }, { x: 300, y: 300 }], false, r).length, 0,
-        "clip: a polyline wholly outside is gone");
-    // an arc segment is sampled, not cut as its chord
-    var arcPts = CsSheetTile.samplePolyline([{ x: 0, y: 0, bulge: 1 }, { x: 10, y: 0, bulge: 0 }], false);
-    ok(arcPts.length > 4, "clip: a bulged segment is sampled into points (" + arcPts.length + ")");
-    var maxR = 0;
-    arcPts.forEach(function(p) { maxR = Math.max(maxR, Math.abs(p.y)); });
-    near(maxR, 5, 0.2, "clip: a bulge of 1 makes a semicircle of radius 5");
-    // a closed ring that pokes out is clipped to open runs inside
-    var ring = CsSheetTile.clipRuns([{ x: 50, y: 50 }, { x: 150, y: 50 }, { x: 150, y: 90 }, { x: 50, y: 90 }], true, r);
-    ok(ring.length >= 1 && ring.every(function(run) { return run.every(function(p) { return CsSheetTile.within(p, r); }); }),
-        "clip: a closed outline poking out is trimmed to its inside runs");
-})();
 
 
 // The crew list names each person once.

@@ -2054,64 +2054,15 @@ class TestNamespacesAreDeclared(unittest.TestCase):
         self.assertEqual([], offenders, "\n".join(offenders))
 
 
-class TestSheetIsReopenedNotJustActivated(unittest.TestCase):
-    """A rebuilt sheet has to be RE-READ, not merely brought to the front.
-
-    QCAD's openFiles walks the open tabs first and, finding one whose
-    file name matches, activates it and returns without re-reading the
-    file (library.js, the foundExisting branch). Sheet Setup rebuilds a
-    sheet from the record every time it is pressed, so the second build
-    showed the FIRST build's drawing: new file on disk, old tab on
-    screen, nothing saying so. Reported live 2026-09-14 as "Build Sheet
-    failed to open the built sheet".
-
-    The fix is to close every sheet this run wrote before opening the
-    plan, through openFiles' own third argument. Structural because the
-    failure needs an MDI area with a tab already in it -- there is no
-    such thing in a headless run.
-    """
-
-    def test_build_closes_the_old_tab_then_opens_on_a_later_pass(self):
-        path = os.path.join(ADDON, "SheetSetup", "SheetSetup.js")
-        with open(path) as handle:
-            source = handle.read()
-        self.assertIn(
-            "closeActiveSubWindow()", source,
-            "SheetSetup no longer closes an already-open sheet before "
-            "opening the rebuilt one -- openFiles would then activate "
-            "the stale tab and the rebuild would be invisible")
-        self.assertIn(
-            "SheetSetup.openPending", source,
-            "SheetSetup no longer defers the open past the queued "
-            "close; an open issued in the same pass finds the doomed "
-            "tab, activates it, and is then closed with it -- leaving "
-            "no sheet on screen at all")
-        closes = source.find("closeActiveSubWindow()")
-        defers = source.find("timer.start(0)", closes)
-        self.assertNotEqual(
-            defers, -1,
-            "the open after a close is not on a timer, so it races the "
-            "close it is waiting for")
-
-    def test_the_sheet_that_is_shown_is_the_plan(self):
-        """written[0] is the plan sheet; a profile sheet is opened from
-        the folder by anyone who wants it."""
-        path = os.path.join(ADDON, "SheetSetup", "SheetSetup.js")
-        with open(path) as handle:
-            source = handle.read()
-        self.assertIn("SheetSetup.pendingSheet = written[0]", source)
-
-
-class TestSheetFileGuard(unittest.TestCase):
+class TestSheetGuard(unittest.TestCase):
     """A sheet is not a drawing to work in.
 
-    Sheet Setup rebuilds a sheet from the cave's record every time it is
-    pressed, so anything drawn INTO a sheet is lost the next time
-    anybody builds one -- silently, weeks later, with no way back. Worse,
-    the loss is not obvious: a sheet still looks like the cave, has the
-    whole survey in it, and is an excellent thing to draw on.
+    A sheet is a layout: a piece of paper showing the cave. Every tool in
+    this suite writes into the CURRENT block, which with a sheet showing is
+    the paper -- so a traced passage or a regenerated profile would land in
+    paper space and look as if nothing had happened.
 
-    So every tool that WRITES checks CsSheetFile.blocks first. The list
+    So every tool that WRITES checks CsModelSpace.blocks first. The list
     is written out rather than derived, on the same principle as the
     MENU table: a tool that starts writing has to be added here
     deliberately, and a tool that stops writing has to be taken out.
@@ -2137,7 +2088,8 @@ class TestSheetFileGuard(unittest.TestCase):
         "CaveShelf": "opens drawings, does not edit them",
         "CaveTemplate": "makes a NEW drawing from the template",
         "TeachingCave": "copies files between folders",
-        "SheetSetup": "refuses a sheet in readState, with its own words",
+        "SheetSetup": "makes and rewrites LAYOUTS only (paper space); "
+                      "never touches model space",
         "Cave3D": "opens a window onto the survey; draws no entity",
         "Handbook": "reads its own HTML pages; never the drawing",
         "StartHere": "ticks a checklist in the settings; draws nothing",
@@ -2153,7 +2105,7 @@ class TestSheetFileGuard(unittest.TestCase):
 
     def guarded(self, folder):
         with open(os.path.join(ADDON, folder, folder + ".js")) as handle:
-            return "CsSheetFile.blocks" in handle.read()
+            return "CsModelSpace.blocks" in handle.read()
 
     def test_every_editing_tool_refuses_a_sheet(self):
         missing = [name for name in self.MUST_GUARD
@@ -2161,7 +2113,7 @@ class TestSheetFileGuard(unittest.TestCase):
         self.assertEqual(
             missing, [],
             "these tools write to the drawing but do not refuse a "
-            "sheet: %s -- add CsSheetFile.blocks(doc, \"<Tool>\") to "
+            "sheet: %s -- add CsModelSpace.blocks(doc, \"<Tool>\") to "
             "each" % missing)
 
     def test_the_two_lists_cover_every_tool(self):
@@ -2177,26 +2129,18 @@ class TestSheetFileGuard(unittest.TestCase):
             "read-only one: %s -- decide which, and say why in "
             "READ_ONLY if it reads" % undecided)
 
-    def test_sheet_setup_refuses_to_build_a_sheet_of_a_sheet(self):
-        with open(os.path.join(ADDON, "SheetSetup",
-                               "SheetSetup.js")) as handle:
+    def test_no_sheet_files_are_left(self):
+        """Sheets are layouts now; the file-per-sheet machinery is gone."""
+        for rel in ("Core/CsSheetFile.js",):
+            self.assertFalse(
+                os.path.exists(os.path.join(ADDON, rel)),
+                "%s belongs to the retired file-per-sheet design" % rel)
+        with open(os.path.join(ADDON, "SheetSetup", "SheetSetup.js")) as handle:
             source = handle.read()
-        self.assertIn(
-            "CsSheetFile.isSheet", source,
-            "Sheet Setup has to refuse a sheet too -- a sheet of a "
-            "sheet is a record two steps from the survey it shows")
-
-    def test_a_sheet_is_known_two_ways(self):
-        """The mark is an entity and an entity can be deleted, so the
-        file's own path counts too.
-        """
-        with open(os.path.join(ADDON, "Core", "CsSheetFile.js")) as handle:
-            source = handle.read()
-        self.assertIn("pathIsSheet", source,
-                      "a drawing inside a cave's sheets/ folder is a "
-                      "sheet whatever its contents say")
-        self.assertIn("CsTags.get(e, CsSheetFile.TAG)", source,
-                      "and a marked drawing is a sheet wherever it sits")
+        for dead in ("intoCopy", "sheets/", "SHEETS_FOLDER"):
+            self.assertNotIn(
+                dead, source,
+                "Sheet Setup still mentions %r from the retired design" % dead)
 
 
 class TestPanelsRunInTheApplicationEngine(unittest.TestCase):

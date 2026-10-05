@@ -154,7 +154,7 @@ function entranceLocationRun() {
     }
     // A SHEET IS NOT A DRAWING TO WORK IN: it is rebuilt from the
     // cave's record every time Build Sheet is pressed.
-    if (CsSheetFile.blocks(doc, "Entrance Location")) {
+    if (CsModelSpace.blocks(doc, "Entrance Location")) {
         return "done";
     }
     var di = getDocumentInterface();

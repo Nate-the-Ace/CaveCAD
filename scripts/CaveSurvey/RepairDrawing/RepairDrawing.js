@@ -32,8 +32,8 @@ function repairDrawingRun() {
     // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
-    // Core/CsSheetFile.js.
-    if (CsSheetFile.blocks(doc, "Repair Drawing")) {
+    // Core/CsModelSpace.js.
+    if (CsModelSpace.blocks(doc, "Repair Drawing")) {
         return;
     }
     if (isNull(doc)) {

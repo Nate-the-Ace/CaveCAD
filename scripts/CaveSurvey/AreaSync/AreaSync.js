@@ -323,11 +323,11 @@ AreaSync.prototype.beginEvent = function() {
         return;
     }
 
-    // A SHEET IS NOT A DRAWING TO WORK IN -- see CsSheetFile's own
+    // A SHEET IS NOT A DRAWING TO WORK IN -- see CsModelSpace's own
     // header; a sheet is rebuilt from the cave's record on every Build
     // Sheet, and anything this tool wrote would go with it, silently,
     // weeks later.
-    if (CsSheetFile.blocks(doc, "Sync Areas")) {
+    if (CsModelSpace.blocks(doc, "Sync Areas")) {
         this.terminate();
         return;
     }

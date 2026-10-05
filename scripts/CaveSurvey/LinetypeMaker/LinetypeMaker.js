@@ -820,8 +820,8 @@ LinetypeMaker.applyToDrawing = function() {
         return;
     }
     // A sheet is rebuilt from the cave's record; anything added to one
-    // is lost on the next build. See Core/CsSheetFile.js.
-    if (CsSheetFile.blocks(doc, "Linetype Maker")) {
+    // is lost on the next build. See Core/CsModelSpace.js.
+    if (CsModelSpace.blocks(doc, "Linetype Maker")) {
         return;
     }
     var err = CsLinetypeStore.applyToDocument(doc, di, LinetypeMaker.w.model);
@@ -875,7 +875,7 @@ LinetypeMaker.drawWith = function(model) {
         CsTell.warn(qsTr("Open a drawing first."));
         return;
     }
-    if (CsSheetFile.blocks(doc, "Linetype Maker")) {
+    if (CsModelSpace.blocks(doc, "Linetype Maker")) {
         return;
     }
     var err = CsLinetypeStore.applyToDocument(doc, di, model);
