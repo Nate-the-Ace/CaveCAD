@@ -332,7 +332,7 @@
         {
           "image": "sheet-setup-panel.png",
           "depicts": "scripts/CaveSurvey/SheetSetup/SheetSetup.js",
-          "hash": "c2d6a9cee89eb49a5d1b0722ecb48ea866532efcd2f92d5e2869da4af4aaf496"
+          "hash": "fb9ec0d4f13e3bda03c74dbb67d69a5c7a718754b1ccc79b13b45efda83e9ec9"
         }
       ]
     },
@@ -536,6 +536,13 @@
       "title": "Put a sheet together at a scale that fits",
       "class": "task",
       "file": "build-a-sheet.html",
+      "shots": []
+    },
+    {
+      "id": "layouts-and-viewports",
+      "title": "Sheets, layouts and viewports",
+      "class": "task",
+      "file": "layouts-and-viewports.html",
       "shots": []
     },
     {
