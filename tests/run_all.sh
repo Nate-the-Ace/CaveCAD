@@ -1003,6 +1003,38 @@ else
 fi
 
 echo
+echo "=============================================================="
+echo " 58/58 Layout PDF plot (one file, mixed paper sizes)"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/layout_plot_run.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### LAYOUT PLOT OK"*) ;;
+        *) echo "Layout plot run did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found at $QCAD"
+fi
+
+echo
+echo "=============================================================="
+echo " 59/59 Layout tabs load"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/layout_tabs_run.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### LAYOUT TABS LOAD OK"*) ;;
+        *) echo "Layout tabs load run did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found at $QCAD"
+fi
+
+echo
 if [ "$status" -eq 0 ]; then
     if [ "$engine" -eq 0 ]; then
         echo "STRUCTURAL TESTS PASSED -- the 43 engine suites were SKIPPED"
