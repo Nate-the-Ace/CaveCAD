@@ -65,6 +65,15 @@ SheetScaleBarListener.onTransaction = function(document, transaction) {
                 !e2.isOverall() && !e2.isUndone()) {
             viewports.push(e2);
         }
+        else if (!isNull(e2) && typeof e2.getType === "function" && e2.getType() === RS.EntityBlockRef &&
+                !e2.isUndone() && CsNorth.onArrowLayer(document, e2)) {
+            // a north arrow placed (or moved) on a layout: its viewport tells it which way north is
+            var p = e2.getPosition();
+            var owner = CsNorth.viewportFor(document, e2.getBlockId(), p.x, p.y);
+            if (!isNull(owner)) {
+                viewports.push(owner);
+            }
+        }
     }
     if (viewports.length === 0) {
         return;   // the common case
@@ -101,6 +110,7 @@ SheetScaleBarListener.onTransaction = function(document, transaction) {
         for (var v = 0; v < viewports.length; v++) {
             try {
                 CsScaleBar.sync(current, di, viewports[v], group, quiet);
+                CsNorth.sync(current, di, viewports[v], group, quiet);
             } catch (eOne) {
                 // one broken bar must not stop the others, nor surface as a dialog mid-drag
             }

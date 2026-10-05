@@ -363,29 +363,32 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
         var nx = leftX + np.x + np.pinX + nOff.x;
         var ny = footY + np.y + np.pinY + nOff.y;
         var nh = arrow.height;
-        line(nx, ny, nx, ny + nh, CsLayers.NORTH_ARROW);
-        line(nx, ny + nh, nx - arrow.headHalf, ny + nh - arrow.headLength, CsLayers.NORTH_ARROW);
-        line(nx, ny + nh, nx + arrow.headHalf, ny + nh - arrow.headLength, CsLayers.NORTH_ARROW);
-        text(nx - 0.09, ny + nh + 0.28, CsSheetSetup.TEXT.heading, "N", CsLayers.NORTH_ARROW);
+        // every piece names its viewport and its pivot: CsNorth turns them with it
+        var pivot = { x: P(nx), y: P(ny) };
+        var mk = function(entity, part) { return CsNorth.mark(entity, viewportGuid, pivot, part); };
+        mk(line(nx, ny, nx, ny + nh, CsLayers.NORTH_ARROW), "shape");
+        mk(line(nx, ny + nh, nx - arrow.headHalf, ny + nh - arrow.headLength, CsLayers.NORTH_ARROW), "shape");
+        mk(line(nx, ny + nh, nx + arrow.headHalf, ny + nh - arrow.headLength, CsLayers.NORTH_ARROW), "shape");
+        mk(text(nx - 0.09, ny + nh + 0.28, CsSheetSetup.TEXT.heading, "N", CsLayers.NORTH_ARROW), "label");
         var reading = job.reading;
         var decl = "";
         if (!isNull(reading) && reading.declination !== 0) {
             decl = "  (DECLINATION " + Number(reading.declination).toFixed(1) + "° APPLIED)";
         }
-        text(nx - 0.9, ny - 0.2, CsSheetSetup.TEXT.small, "TRUE NORTH" + decl, CsLayers.NORTH_ARROW);
+        mk(text(nx - 0.9, ny - 0.2, CsSheetSetup.TEXT.small, "TRUE NORTH" + decl, CsLayers.NORTH_ARROW), "caption");
         if (!isNull(reading)) {
-            greyed(text(nx - 0.9, ny - (0.2 + CsSheetSetup.TEXT.small * 2), CsSheetSetup.TEXT.small,
-                CsSheetSetup.magneticText(reading), CsLayers.NORTH_ARROW));
+            mk(greyed(text(nx - 0.9, ny - (0.2 + CsSheetSetup.TEXT.small * 2), CsSheetSetup.TEXT.small,
+                CsSheetSetup.magneticText(reading), CsLayers.NORTH_ARROW)), "caption");
             var mag = CsSheetSetup.magneticUnit(reading.declination);
             var mh = arrow.magneticHeight;
             var tipX = nx + mag.x * mh, tipY = ny + mag.y * mh;
-            greyed(line(nx, ny, tipX, tipY, CsLayers.NORTH_ARROW));
+            mk(greyed(line(nx, ny, tipX, tipY, CsLayers.NORTH_ARROW)), "shape");
             var back = arrow.magneticHeadLength, half = arrow.magneticHeadHalf;
             var bx2 = tipX - mag.x * back, by2 = tipY - mag.y * back;
-            greyed(line(tipX, tipY, bx2 - mag.y * half, by2 + mag.x * half, CsLayers.NORTH_ARROW));
-            greyed(line(tipX, tipY, bx2 + mag.y * half, by2 - mag.x * half, CsLayers.NORTH_ARROW));
-            greyed(text(tipX + mag.x * 0.12 - 0.06, tipY + 0.18, CsSheetSetup.TEXT.small, "mN",
-                CsLayers.NORTH_ARROW, null, true));
+            mk(greyed(line(tipX, tipY, bx2 - mag.y * half, by2 + mag.x * half, CsLayers.NORTH_ARROW)), "shape");
+            mk(greyed(line(tipX, tipY, bx2 + mag.y * half, by2 - mag.x * half, CsLayers.NORTH_ARROW)), "shape");
+            mk(greyed(text(tipX + mag.x * 0.12 - 0.06, tipY + 0.18, CsSheetSetup.TEXT.small, "mN",
+                CsLayers.NORTH_ARROW, null, true)), "label");
             drew.push("a north arrow with magnetic north at " + Number(reading.declination).toFixed(1) + "°");
         }
         else {

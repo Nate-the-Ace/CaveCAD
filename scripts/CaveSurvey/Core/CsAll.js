@@ -295,6 +295,7 @@ if (typeof Layouts === "undefined" && typeof include === "function" && typeof QF
     include("scripts/Layouts/LayoutPlot.js");
 }
 include(includeBasePath + "/CsScaleBar.js");
+include(includeBasePath + "/CsNorth.js");
 include(includeBasePath + "/CsLayoutGen.js");
 // After CsAdjust (whose per-station shifts it draws) and CsNetwork
 // (whose loops it labels): turning a closure percentage into arrows.
