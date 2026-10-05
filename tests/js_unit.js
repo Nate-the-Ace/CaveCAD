@@ -275,6 +275,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsNorth.js",
     "scripts/CaveSurvey/Core/CsLayoutFurniture.js",
     "scripts/CaveSurvey/Core/CsLayoutTemplate.js",
+    "scripts/CaveSurvey/Core/CsLayoutPlot.js",
     "scripts/CaveSurvey/Core/CsLayoutGen.js",
     // Pure: exaggeration, colour bands, arrow geometry and the caption
     // that has to state the exaggeration.

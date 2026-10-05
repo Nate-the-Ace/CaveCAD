@@ -746,6 +746,39 @@
     "LayoutSaveTemplate"
    ],
    "shots": []
+  },
+  {
+   "id": "layout-border",
+   "title": "Add Border",
+   "class": "tool",
+   "file": "layout-border.html",
+   "stage": 454,
+   "tools": [
+    "LayoutBorder"
+   ],
+   "shots": []
+  },
+  {
+   "id": "layout-legend",
+   "title": "Add Legend",
+   "class": "tool",
+   "file": "layout-legend.html",
+   "stage": 454,
+   "tools": [
+    "LayoutLegend"
+   ],
+   "shots": []
+  },
+  {
+   "id": "layout-plot",
+   "title": "Plot Layout",
+   "class": "tool",
+   "file": "layout-plot.html",
+   "stage": 454,
+   "tools": [
+    "LayoutPlot"
+   ],
+   "shots": []
   }
  ]
 }

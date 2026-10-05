@@ -64,6 +64,16 @@ CsLayoutTemplate.BUILTIN = [
                    { kind: "north", at: { x: 0.93, y: 0.88 }, viewport: "plan" },
                    { kind: "scalebar", at: { x: 0.04, y: 0.05 }, viewport: "elevation" },
                    { kind: "title", at: { x: 0.66, y: 0.04 } } ] },
+    { version: 1, name: "Plan sheet with legend - Tabloid",
+      paper: "Tabloid", landscape: true, margins: 12.7,
+      viewports: [ { id: "plan", box: { x: 0.025, y: 0.025, w: 0.72, h: 0.95 }, shape: null, view: "cave", scale: "fit",
+                     rotation: 0, locked: false, freeze: ["profile", "section"], hide: [] },
+                   { id: "legend", box: { x: 0.76, y: 0.30, w: 0.22, h: 0.67 }, shape: null, view: "legend", scale: "fit",
+                     rotation: 0, locked: true, freeze: [], hide: [] } ],
+      furniture: [ { kind: "border", inset: 0.25 },
+                   { kind: "scalebar", at: { x: 0.04, y: 0.05 }, viewport: "plan" },
+                   { kind: "north", at: { x: 0.69, y: 0.88 }, viewport: "plan" },
+                   { kind: "title", at: { x: 0.76, y: 0.04 } } ] },
     { version: 1, name: "Blank - Letter",
       paper: "Letter", landscape: true, margins: 12.7, viewports: [],
       furniture: [ { kind: "border", inset: 0.2 } ] }
@@ -200,6 +210,10 @@ CsLayoutTemplate.save = function(def, folder) {
 CsLayoutTemplate.extentsOf = function(doc, view) {
     var box = null;
     try {
+        if (view === "legend") {
+            box = CsLayoutFurniture.legendBox(doc);
+            return isNull(box) ? undefined : box;
+        }
         if (view === "profile") {
             box = SheetSetup.frameBox(doc, "profile");
         }
@@ -259,7 +273,18 @@ CsLayoutTemplate.apply = function(doc, di, def, name) {
         vp.setViewTarget(new RVector(0, 0));
         vp.setBlockId(info.blockId);
         vp.setLayerId(doc.getCurrentLayerId());
-        vp.setFrozenLayerIds(CsLayoutTemplate.frozenIds(doc, vd));
+        if (vd.view === "legend") {
+            // a legend viewport shows the LEGEND layer and nothing else
+            vp.setFrozenLayerIds(CsLayoutFurniture.allLayersExcept(doc, CsLayers.LEGEND));
+            vp.setCustomProperty("CaveCAD", "Legend", "1");
+        }
+        else {
+            var hidden = CsLayoutTemplate.frozenIds(doc, vd), lid = doc.getLayerId(CsLayers.LEGEND);
+            if (lid !== RObject.INVALID_ID && hidden.indexOf(lid) < 0) {
+                hidden.push(lid);     // the map's viewports never show the legend
+            }
+            vp.setFrozenLayerIds(hidden);
+        }
         vp.setRotation((isNull(vd.rotation) ? 0 : vd.rotation) * Math.PI / 180);
         // a plotted map carries no raster
         vp.setCustomProperty("CaveCAD", "NoRaster", "1");
@@ -363,10 +388,18 @@ CsLayoutTemplate.capture = function(doc, info, name) {
         for (var fk in frames) {
             if (frames.hasOwnProperty(fk)) { freeze.push(fk); }
         }
+        var isLegend = CsLayoutFurniture.isLegendViewport(vp);
+        if (isLegend) {
+            freeze = [];
+            hide = [];
+        }
+        else {
+            hide = hide.filter(function(n) { return n !== CsLayers.LEGEND; });
+        }
         var id = "vp" + (def.viewports.length + 1);
         ids[vp.getId()] = id;
         def.viewports.push({ id: id, box: box, shape: shape,
-            view: frames.plan === true && frames.profile !== true ? "profile" : "cave",
+            view: isLegend ? "legend" : (frames.plan === true && frames.profile !== true ? "profile" : "cave"),
             scale: Layouts.feetPerInch(doc, vp), rotation: vp.getRotation() * 180 / Math.PI,
             locked: Layouts.isLocked(vp), freeze: freeze, hide: hide });
     }

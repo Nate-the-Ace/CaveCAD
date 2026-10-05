@@ -148,3 +148,152 @@ CsLayoutFurniture.addBorder = function(doc, di, info, inset) {
     di.applyOperation(env.op);
     return true;
 };
+
+
+/** True when the layout already has a border (axis-aligned BORDER lines most of the paper wide and tall). */
+CsLayoutFurniture.hasBorder = function(doc, info) {
+    var ps = Layouts.paperSize(doc, info), inch = Layouts.toPaper(doc, 25.4);
+    var W = ps.w / inch, H = ps.h / inch, h = 0, v = 0;
+    var ids = doc.queryBlockEntities(info.blockId);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || e.isUndone() || e.getType() !== RS.EntityLine || CsBind.layerNameOf(doc, e) !== CsLayers.BORDER) {
+            continue;
+        }
+        var a = e.getStartPoint(), b = e.getEndPoint(), len = a.getDistanceTo(b) / inch;
+        if (Math.abs(a.y - b.y) < 1e-9 && len >= 0.6 * W) { h++; }
+        else if (Math.abs(a.x - b.x) < 1e-9 && len >= 0.6 * H) { v++; }
+    }
+    return h >= 2 && v >= 2;
+};
+
+// ---------------------------------------------------------------------
+// The legend: a VIEWPORT onto the legend in model space
+//
+// Build Legend draws the legend in model space on the LEGEND layer. A sheet
+// shows it the AutoCAD way: a viewport framed on the legend that hides every
+// other layer, while the cave's own viewports hide LEGEND -- so the legend is
+// drawn once, at its own scale, and never lands on top of the map.
+// ---------------------------------------------------------------------
+
+/** The legend's extents in model space, {minX, minY, maxX, maxY}, or undefined when none is built. */
+CsLayoutFurniture.legendBox = function(doc) {
+    var box;
+    var ids = doc.queryBlockEntities(doc.getModelSpaceBlockId());
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || e.isUndone()) {
+            continue;
+        }
+        var mine = CsTags.get(e, CsLegend.TAG) !== "" || CsBind.layerNameOf(doc, e) === CsLayers.LEGEND;
+        if (!mine) {
+            continue;
+        }
+        var b = e.getBoundingBox(), mn = b.getMinimum(), mx = b.getMaximum();
+        if (!isFinite(mn.x) || !isFinite(mx.x) || !isFinite(mn.y) || !isFinite(mx.y)) {
+            continue;
+        }
+        if (isNull(box)) {
+            box = { minX: mn.x, minY: mn.y, maxX: mx.x, maxY: mx.y };
+        }
+        else {
+            box.minX = Math.min(box.minX, mn.x); box.minY = Math.min(box.minY, mn.y);
+            box.maxX = Math.max(box.maxX, mx.x); box.maxY = Math.max(box.maxY, mx.y);
+        }
+    }
+    return box;
+};
+
+/** Every layer id EXCEPT the named one: what a legend viewport hides. */
+CsLayoutFurniture.allLayersExcept = function(doc, keepName) {
+    var ids = [], names = doc.getLayerNames();
+    for (var i = 0; i < names.length; i++) {
+        if (String(names[i]) !== keepName) {
+            ids.push(doc.getLayerId(names[i]));
+        }
+    }
+    return ids;
+};
+
+/** True when a viewport is a legend viewport. */
+CsLayoutFurniture.isLegendViewport = function(vp) {
+    return String(vp.getCustomProperty("CaveCAD", "Legend", "")) === "1";
+};
+
+/**
+ * Adds a legend viewport with its top left at paper (x, y), at the first
+ * standard scale at which the legend fits in about a third of the sheet, and
+ * makes the layout's other viewports hide LEGEND.
+ *
+ * \return true when added (false: no legend built yet; the caver is told)
+ */
+CsLayoutFurniture.addLegend = function(doc, di, info, x, y) {
+    var box = CsLayoutFurniture.legendBox(doc);
+    if (isNull(box)) {
+        CsTell.warn(qsTr("Add Legend: there is no legend in the drawing yet. In the model, run Cave Survey > Build Legend first."));
+        return false;
+    }
+    var ps = Layouts.paperSize(doc, info);
+    var w = Math.max(box.maxX - box.minX, 1e-9), h = Math.max(box.maxY - box.minY, 1e-9);
+    var fpi = NewViewport.fitScale(doc, ps.w / 3, ps.h / 3, box);
+    var s = Layouts.scaleFor(doc, fpi);
+    var vw = w * s * 1.04, vh = h * s * 1.04;
+    var x0 = Math.min(Math.max(x, 0), Math.max(0, ps.w - vw));
+    var y1 = Math.max(Math.min(y, ps.h), vh);
+    var vp = new RViewportEntity(doc, new RViewportData());
+    vp.setCenter(new RVector(x0 + vw / 2, y1 - vh / 2));
+    vp.setWidth(vw);
+    vp.setHeight(vh);
+    vp.setScale(s);
+    vp.setViewCenter(new RVector((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2));
+    vp.setViewTarget(new RVector(0, 0));
+    vp.setBlockId(info.blockId);
+    vp.setLayerId(doc.getCurrentLayerId());
+    vp.setFrozenLayerIds(CsLayoutFurniture.allLayersExcept(doc, CsLayers.LEGEND));
+    vp.setCustomProperty("CaveCAD", "NoRaster", "1");
+    vp.setCustomProperty("CaveCAD", "Legend", "1");
+    vp.setStatus(vp.getStatus() | Layouts.LOCK_BIT);
+
+    doc.startTransactionGroup();
+    var group = doc.getTransactionGroup();
+    var add = new RAddObjectOperation(vp, false);
+    add.setText(qsTr("Add legend"));
+    add.setTransactionGroup(group);
+    di.applyOperation(add);
+
+    // the map's own viewports must not show the legend
+    var legendId = doc.getLayerId(CsLayers.LEGEND);
+    var others = Layouts.viewports(doc, info);
+    for (var i = 0; i < others.length; i++) {
+        var o = others[i];
+        if (o.isOverall() || CsLayoutFurniture.isLegendViewport(o)) {
+            continue;
+        }
+        var ids = o.getFrozenLayerIds();
+        if (ids.indexOf(legendId) < 0 && legendId !== RObject.INVALID_ID) {
+            var fresh = doc.queryEntity(o.getId());
+            ids.push(legendId);
+            fresh.setFrozenLayerIds(ids);
+            var mod = new RModifyObjectOperation(fresh);
+            mod.setText(qsTr("Add legend"));
+            mod.setTransactionGroup(group);
+            di.applyOperation(mod);
+        }
+    }
+    return true;
+};
+
+
+/** The Add Border tool's body: a 0.2 inch border on the current layout, unless it already has one. */
+CsLayoutFurniture.addBorderTool = function(di) {
+    var doc = di.getDocument();
+    var info = CsLayoutFurniture.layoutOrWarn(doc, qsTr("Add Border"));
+    if (isNull(info)) {
+        return false;
+    }
+    if (CsLayoutFurniture.hasBorder(doc, info)) {
+        CsTell.warn(qsTr("Add Border: this layout already has a border."));
+        return false;
+    }
+    return CsLayoutFurniture.addBorder(doc, di, info, 0.2);
+};
