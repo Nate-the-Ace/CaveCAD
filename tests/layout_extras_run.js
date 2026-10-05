@@ -136,5 +136,56 @@ check(bare2.some(function(f) { return f.level === "note" && /not locked/.test(f.
 var order = bare2.map(function(f) { return f.level; });
 check(order.join() === order.slice(0).sort(function(a, b) { return { error: 0, warning: 1, note: 2 }[a] - { error: 0, warning: 1, note: 2 }[b]; }).join(), "most serious first");
 check(CsLayoutCheck.report("Bare", []).indexOf("looks ready") >= 0 && CsLayoutCheck.report("Bare", bare2).indexOf("Bare") >= 0, "the report reads as words");
+// ---- detail
+var di1 = Layouts.get(doc, "S1");
+var parent = Layouts.viewports(doc, di1).filter(function(v) { return !v.isOverall() && !CsLayoutFurniture.isLegendViewport(v) && String(v.getCustomProperty("CaveCAD", "Detail", "")) === ""; })[0];
+var pc = parent.getCenter(), pps = Layouts.paperSize(doc, di1);
+var letter = CsLayoutFurniture.addDetail(doc, di, di1, parent, { x: pc.x, y: pc.y }, 0.04, { x: pps.w * 0.85, y: pps.h * 0.7 }, 3);
+check(letter === "A", "the first detail is A");
+var dets = Layouts.viewports(doc, di1).filter(function(v) { return String(v.getCustomProperty("CaveCAD", "Detail", "")) === "A"; });
+check(dets.length === 1, "a detail viewport exists");
+var dv = dets[0];
+check(near(dv.getScale(), parent.getScale() * 3, 1e-12) && near(dv.getWidth(), 0.24, 1e-9), "magnified 3x, its diameter is 3 times the marked circle's");
+check(Layouts.hasClip(dv) && Layouts.clipLoops(dv)[0].length === 128 && Layouts.isLocked(dv), "round and locked");
+var m1 = Layouts.paperToModel(parent, pc.x, pc.y), m2 = Layouts.paperToModel(dv, dv.getCenter().x, dv.getCenter().y);
+check(near(m1.x, m2.x, 1e-6) && near(m1.y, m2.y, 1e-6), "it is centred on the marked point of the map");
+check(dv.getFrozenLayerIds().length === parent.getFrozenLayerIds().length, "and hides what the map hides");
+var marks = 0, ids5 = doc.queryBlockEntities(di1.blockId);
+for (var q = 0; q < ids5.length; q++) { var me = doc.queryEntity(ids5[q]); if (!me.isUndone() && CsTags.get(me, "DetailMark") === "A") marks++; }
+check(marks === 1, "the map carries a lettered circle");
+check(CsLayoutFurniture.addDetail(doc, di, di1, parent, { x: pc.x, y: pc.y }, 0.03, { x: pps.w * 0.85, y: pps.h * 0.3 }, 2) === "B", "the next is B");
+// ---- sheet index
+var inf = Layouts.get(doc, "Blank");
+var nrows = CsLayoutFurniture.addIndex(doc, di, inf, 0.1, 0.6);
+check(nrows === Layouts.list(doc).length, "the index has a row for every layout: " + nrows);
+var idxCount = function() { var n = 0, l = doc.queryBlockEntities(inf.blockId); for (var i = 0; i < l.length; i++) { var e = doc.queryEntity(l[i]); if (!e.isUndone() && CsTags.get(e, "SheetIndex") !== "") n++; } return n; };
+var first = idxCount();
+CsLayoutFurniture.addIndex(doc, di, inf, 0.1, 0.6);
+check(idxCount() === first && first >= nrows, "adding it again replaces it: " + first);
+check(CsLayoutFurniture.indexRows(doc)[0].scale !== undefined, "rows carry paper and scale");
+
+// ---- grid
+var gparent = Layouts.viewports(doc, Layouts.get(doc, "S1")).filter(function(v) { return !v.isOverall() && String(v.getCustomProperty("CaveCAD", "Detail", "")) === "" && !CsLayoutFurniture.isLegendViewport(v); })[0];
+var gf = doc.queryEntity(gparent.getId()); gf.setRotation(0); di.applyOperation(new RModifyObjectOperation(gf));
+var gp = doc.queryEntity(gparent.getId());
+var step = CsLayoutFurniture.gridStep(doc, gp, 0.8);
+check(step > 0 && CsLayoutFurniture.GRID_STEPS.indexOf(Math.round(step / Layouts.groundFoot(doc))) >= 0, "the grid interval is a round number of feet: " + step);
+var gn = CsLayoutFurniture.addGrid(doc, di, Layouts.get(doc, "S1"), gp, {});
+check(gn > 4, "ticks were drawn round the viewport: " + gn);
+var labels = [], l2 = doc.queryBlockEntities(Layouts.get(doc, "S1").blockId);
+for (var gi = 0; gi < l2.length; gi++) { var ge = doc.queryEntity(l2[gi]); if (!ge.isUndone() && CsTags.get(ge, "GridOf") !== "" && ge.getType() === RS.EntityText) labels.push(String(ge.getPlainText())); }
+check(labels.length > 0 && labels.every(function(t) { return Math.abs(parseFloat(t)) < 5000; }), "the default labels are small distances from the cave, not map coordinates: " + labels.slice(0, 5));
+check(labels.every(function(t) { return t.length < 6; }), "none is a seven-digit coordinate");
+var again = CsLayoutFurniture.addGrid(doc, di, Layouts.get(doc, "S1"), doc.queryEntity(gparent.getId()), {});
+var count2 = 0, l3 = doc.queryBlockEntities(Layouts.get(doc, "S1").blockId);
+for (var gj = 0; gj < l3.length; gj++) { var ge2 = doc.queryEntity(l3[gj]); if (!ge2.isUndone() && CsTags.get(ge2, "GridOf") !== "") count2++; }
+check(count2 === gn * 1 + (count2 - gn) && again === gn && count2 >= gn, "adding the grid again replaces it, not doubles it");
+var labels2 = [];
+CsLayoutFurniture.addGrid(doc, di, Layouts.get(doc, "S1"), doc.queryEntity(gparent.getId()), { absolute: true });
+var l4 = doc.queryBlockEntities(Layouts.get(doc, "S1").blockId);
+for (var gk = 0; gk < l4.length; gk++) { var ge3 = doc.queryEntity(l4[gk]); if (!ge3.isUndone() && CsTags.get(ge3, "GridOf") !== "" && ge3.getType() === RS.EntityText) labels2.push(String(ge3.getPlainText())); }
+check(labels2.some(function(t) { return t.length >= 6; }), "true coordinates are available when asked for: " + labels2.slice(0, 3));
+var shaped = Layouts.viewports(doc, Layouts.get(doc, "S1")).filter(function(v) { return Layouts.hasClip(v); })[0];
+check(isNull(shaped) || CsLayoutFurniture.addGrid(doc, di, Layouts.get(doc, "S1"), shaped, {}) === -1, "a shaped viewport takes no grid");
 if (fails === 0) print("### LAYOUT EXTRAS OK");
 QCoreApplication.exit(fails === 0 ? 0 : 1);

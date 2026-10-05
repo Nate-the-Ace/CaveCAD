@@ -378,3 +378,222 @@ CsLayoutFurniture.selectedViewport = function(doc, info) {
     }
     return found;
 };
+
+
+// ---------------------------------------------------------------------
+// Detail viewports: a magnified circle of the map, marked on the map
+// ---------------------------------------------------------------------
+
+/** The next detail letter on the layout: "A", "B", ... by counting the details already there. */
+CsLayoutFurniture.nextDetailLetter = function(doc, info) {
+    var n = 0, vps = Layouts.viewports(doc, info);
+    for (var i = 0; i < vps.length; i++) {
+        if (String(vps[i].getCustomProperty("CaveCAD", "Detail", "")) !== "") { n++; }
+    }
+    return String.fromCharCode(65 + (n % 26));
+};
+
+/**
+ * A detail of the map: a circle of radius `radius` (paper units) centred at
+ * paper `from` on the map viewport `parent` is shown MAGNIFIED `mag` times in
+ * a circular viewport centred at paper `to`. The map gets a circle and a
+ * leader to the detail; both carry the letter.
+ *
+ * \return the letter, or "" when it could not be made
+ */
+CsLayoutFurniture.addDetail = function(doc, di, info, parent, from, radius, to, mag) {
+    if (isNull(parent) || !(radius > 0) || !(mag > 0)) {
+        return "";
+    }
+    var letter = CsLayoutFurniture.nextDetailLetter(doc, info);
+    var ps = Layouts.paperSize(doc, info), inch = Layouts.toPaper(doc, 25.4);
+    var R = radius * mag;
+    var cx = Math.min(Math.max(to.x, R), ps.w - R), cy = Math.min(Math.max(to.y, R), ps.h - R);
+    var model = Layouts.paperToModel(parent, from.x, from.y);
+
+    var vp = new RViewportEntity(doc, new RViewportData());
+    vp.setCenter(new RVector(cx, cy));
+    vp.setWidth(2 * R);
+    vp.setHeight(2 * R);
+    vp.setScale(parent.getScale() * mag);
+    vp.setRotation(parent.getRotation());
+    vp.setViewCenter(new RVector(model.x - parent.getViewTarget().x, model.y - parent.getViewTarget().y));
+    vp.setViewTarget(new RVector(0, 0));
+    vp.setBlockId(info.blockId);
+    vp.setLayerId(doc.getCurrentLayerId());
+    vp.setFrozenLayerIds(parent.getFrozenLayerIds());
+    vp.setCustomProperty("CaveCAD", "NoRaster", "1");
+    vp.setCustomProperty("CaveCAD", "Detail", letter);
+    vp.setStatus(vp.getStatus() | Layouts.LOCK_BIT);
+    var loop = [], sides = 128;
+    for (var k = 0; k < sides; k++) {
+        var a = 2 * Math.PI * k / sides;
+        loop.push({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) });
+    }
+    Layouts._writeClip(vp, [loop]);
+
+    doc.startTransactionGroup();
+    var group = doc.getTransactionGroup();
+    var add = new RAddObjectOperation(vp, false);
+    add.setText(qsTr("Add detail"));
+    add.setTransactionGroup(group);
+    di.applyOperation(add);
+
+    // the marker on the map and the leader to the detail, in the border layer's ink
+    var env = CsLayoutGen.envFor(doc, di, info.blockId, qsTr("Add detail"), "");
+    env.op.setTransactionGroup(group);
+    var P = function(v) { return v / inch; };
+    var circle = new RCircleEntity(doc, new RCircleData(new RVector(from.x, from.y), radius));
+    env.add(circle, CsLayers.BORDER, "detail");
+    CsTags.set(circle, "DetailMark", letter);
+    var ang = Math.atan2(cy - from.y, cx - from.x);
+    var dist = Math.sqrt((cx - from.x) * (cx - from.x) + (cy - from.y) * (cy - from.y));
+    if (dist > radius + R) {
+        env.line(P(from.x + radius * Math.cos(ang)), P(from.y + radius * Math.sin(ang)),
+                 P(cx - R * Math.cos(ang)), P(cy - R * Math.sin(ang)), CsLayers.BORDER, "detail");
+    }
+    env.text(P(from.x), P(from.y + radius) + 0.12, CsSheetSetup.TEXT.body, letter, CsLayers.BORDER, "detail", false, 0, RS.HAlignCenter);
+    env.text(P(cx), P(cy + R) + 0.12, CsSheetSetup.TEXT.body, qsTr("DETAIL %1  (x%2)").arg(letter).arg(mag), CsLayers.BORDER, "detail", false, 0, RS.HAlignCenter);
+    di.applyOperation(env.op);
+    return letter;
+};
+
+
+// ---------------------------------------------------------------------
+// Sheet index
+// ---------------------------------------------------------------------
+
+/** Removes what an earlier `kind` ("SheetIndex" | "Grid") put on the layout (tagged ids kept in `key`). */
+CsLayoutFurniture.removeTagged = function(doc, di, info, tagKey, value) {
+    var op = null, ids = doc.queryBlockEntities(info.blockId);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || e.isUndone()) { continue; }
+        var t = CsTags.get(e, tagKey);
+        if (t !== "" && (isNull(value) || t === value)) {
+            if (op === null) {
+                op = new RDeleteObjectsOperation();
+                op.setText(qsTr("Replace"));
+            }
+            op.deleteObject(e);
+        }
+    }
+    if (op !== null) {
+        di.applyOperation(op);
+    }
+};
+
+/** The rows of the index: one per layout, "name   paper   1" = 40 ft". */
+CsLayoutFurniture.indexRows = function(doc) {
+    var rows = [], all = Layouts.list(doc);
+    for (var i = 0; i < all.length; i++) {
+        var vps = Layouts.viewports(doc, all[i]).filter(function(v) { return !v.isOverall() && !CsLayoutFurniture.isLegendViewport(v) && String(v.getCustomProperty("CaveCAD", "Detail", "")) === ""; });
+        var scale = vps.length > 0 ? Layouts.scaleLabel(Layouts.feetPerInch(doc, vps[0])) : "";
+        var paper = Layouts.paperNameOf(all[i].paperMM.w, all[i].paperMM.h);
+        rows.push({ name: all[i].name, scale: scale, paper: paper ? paper : "" });
+    }
+    return rows;
+};
+
+/**
+ * A sheet index with its top left at paper (x, y): every layout, its paper
+ * and its scale. Re-adding it replaces the earlier one on this layout.
+ */
+CsLayoutFurniture.addIndex = function(doc, di, info, x, y) {
+    CsLayoutFurniture.removeTagged(doc, di, info, "SheetIndex");
+    var rows = CsLayoutFurniture.indexRows(doc);
+    var env = CsLayoutGen.envFor(doc, di, info.blockId, qsTr("Add sheet index"), "");
+    var inch = Layouts.toPaper(doc, 25.4);
+    var xIn = x / inch, yIn = y / inch, h = CsSheetSetup.TEXT.body, step = h * 1.6;
+    var put = function(px, py, label, heading) {
+        var t = env.text(px, py, heading ? CsSheetSetup.TEXT.heading : h, label, CsLayers.TITLE_BLOCK, "index", true);
+        CsTags.set(t, "SheetIndex", "1");
+    };
+    put(xIn, yIn, qsTr("SHEET INDEX"), true);
+    var row = yIn - step * 1.4;
+    for (var i = 0; i < rows.length; i++) {
+        put(xIn, row, rows[i].name, false);
+        put(xIn + 1.6, row, rows[i].paper, false);
+        put(xIn + 2.8, row, rows[i].scale, false);
+        row -= step;
+    }
+    di.applyOperation(env.op);
+    return rows.length;
+};
+
+// ---------------------------------------------------------------------
+// Coordinate grid round a viewport
+//
+// Ticks and labels just OUTSIDE a rectangular, unturned viewport. By default
+// the labels are DISTANCES FROM THE CAVE'S SOUTH-WEST CORNER (0, 100, 200 ...):
+// a map must not carry where the cave is. True map coordinates are offered
+// only after the caver has said so in as many words.
+// ---------------------------------------------------------------------
+
+CsLayoutFurniture.GRID_STEPS = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
+
+/** The first step (in the drawing's own units) at which grid lines are at least `minIn` inches apart on paper. */
+CsLayoutFurniture.gridStep = function(doc, vp, minIn) {
+    var perUnitIn = vp.getScale() / Layouts.toPaper(doc, 25.4);      // inches of paper per model unit
+    var feetUnit = Layouts.groundFoot(doc);                          // model units per foot
+    var steps = CsLayoutFurniture.GRID_STEPS;
+    for (var i = 0; i < steps.length; i++) {
+        if (steps[i] * feetUnit * perUnitIn >= minIn) {
+            return steps[i] * feetUnit;
+        }
+    }
+    return steps[steps.length - 1] * feetUnit;
+};
+
+/**
+ * \param opts.absolute  label with the true map coordinates (default: distance from the cave's south-west corner)
+ * \return the number of ticks drawn, or -1 when the viewport cannot take a grid
+ */
+CsLayoutFurniture.addGrid = function(doc, di, info, vp, opts) {
+    if (Layouts.hasClip(vp) || Math.abs(vp.getRotation()) > 1e-9) {
+        CsTell.warn(qsTr("Add Grid: a grid goes round a rectangular viewport that is not turned."));
+        return -1;
+    }
+    var guid = CsScaleBar.ensureGuid(vp);
+    CsLayoutFurniture.removeTagged(doc, di, info, "GridOf", guid);
+    var absolute = !isNull(opts) && opts.absolute === true;
+    var origin = { x: 0, y: 0 };
+    if (!absolute) {
+        var cb = null;
+        try { cb = SheetSetup.caveBox(doc); } catch (e) { cb = null; }
+        if (isNull(cb)) { cb = NewViewport.modelExtents(doc); }
+        if (!isNull(cb)) { origin = { x: cb.minX, y: cb.minY }; }
+    }
+    var inch = Layouts.toPaper(doc, 25.4);
+    var step = CsLayoutFurniture.gridStep(doc, vp, 0.8);
+    var c = vp.getCenter(), hw = vp.getWidth() / 2, hh = vp.getHeight() / 2;
+    var left = c.x - hw, right = c.x + hw, bottom = c.y - hh, top = c.y + hh;
+    var env = CsLayoutGen.envFor(doc, di, info.blockId, qsTr("Add grid"), "");
+    var P = function(v) { return v / inch; };
+    var tick = 0.08, th = CsSheetSetup.TEXT.small, n = 0;
+    var mark = function(entity) { CsTags.set(entity, "GridOf", guid); return entity; };
+    var fmt = function(v) { return String(Math.round(v / Layouts.groundFoot(doc))); };
+    // model x at a paper x, and back
+    var modelX = function(px) { return Layouts.paperToModel(vp, px, c.y).x; };
+    var modelY = function(py) { return Layouts.paperToModel(vp, c.x, py).y; };
+    var paperX = function(mx) { return c.x + (mx - Layouts.paperToModel(vp, c.x, c.y).x) * vp.getScale(); };
+    var paperY = function(my) { return c.y + (my - Layouts.paperToModel(vp, c.x, c.y).y) * vp.getScale(); };
+    var x0 = Math.ceil((modelX(left) - origin.x) / step), x1 = Math.floor((modelX(right) - origin.x) / step);
+    for (var gx = x0; gx <= x1; gx++) {
+        var px = paperX(origin.x + gx * step);
+        mark(env.line(P(px), P(bottom) - tick, P(px), P(bottom), CsLayers.BORDER, "grid"));
+        mark(env.line(P(px), P(top), P(px), P(top) + tick, CsLayers.BORDER, "grid"));
+        mark(env.text(P(px), P(bottom) - tick - th, th, fmt(absolute ? origin.x + gx * step : gx * step), CsLayers.BORDER, "grid", true, 0, RS.HAlignCenter));
+        n += 2;
+    }
+    var y0 = Math.ceil((modelY(bottom) - origin.y) / step), y1 = Math.floor((modelY(top) - origin.y) / step);
+    for (var gy = y0; gy <= y1; gy++) {
+        var py = paperY(origin.y + gy * step);
+        mark(env.line(P(left) - tick, P(py), P(left), P(py), CsLayers.BORDER, "grid"));
+        mark(env.line(P(right), P(py), P(right) + tick, P(py), CsLayers.BORDER, "grid"));
+        mark(env.text(P(left) - tick - 0.04, P(py), th, fmt(absolute ? origin.y + gy * step : gy * step), CsLayers.BORDER, "grid", true, 0, RS.HAlignRight));
+        n += 2;
+    }
+    di.applyOperation(env.op);
+    return n;
+};
