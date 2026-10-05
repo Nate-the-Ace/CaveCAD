@@ -1129,6 +1129,22 @@ else
 fi
 
 echo
+echo "=============================================================="
+echo " 67/67 Polygon viewports and trimming (shape API, hit test, DXF round trip)"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/viewport_shape_run.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### VIEWPORT SHAPE OK"*) ;;
+        *) echo "Viewport shape run did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found at $QCAD"
+fi
+
+echo
 if [ "$status" -eq 0 ]; then
     if [ "$engine" -eq 0 ]; then
         echo "STRUCTURAL TESTS PASSED -- the 43 engine suites were SKIPPED"

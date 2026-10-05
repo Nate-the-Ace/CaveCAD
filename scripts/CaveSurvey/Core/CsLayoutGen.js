@@ -180,15 +180,21 @@ CsLayoutGen.layersOfFrames = function(doc, frames) {
  * \param info        the layout (Layouts.get) the sheet goes on
  * \return the list of things drawn, as words
  */
-CsLayoutGen.draw = function(doc, di, job, info, extra) {
-    var blockId = info.blockId;
+/**
+ * The drawing helpers every furniture piece is made with, bound to one
+ * layout block and one operation: {op, P, add, text, line, greyed}. Sheet
+ * generation and the Layout menu's "add a north arrow / title block / ..."
+ * tools draw through the same ones, so a piece looks the same however it got
+ * there.
+ *
+ * \param tag  value of the generator's own tag (CsLayoutGen.TAG) on what is drawn;
+ *             pieces carrying it are Sheet Setup's to rewrite, so the menu tools pass ""
+ */
+CsLayoutGen.envFor = function(doc, di, blockId, opText, tag) {
     var inch = Layouts.toPaper(doc, 25.4);              // paper-space coordinates in one inch
     var P = function(inches) { return inches * inch; };
     var op = new RAddObjectsOperation();
-    op.setText(qsTr("Generate sheet"));
-    var drew = [];
-    var ex = isNull(extra) ? {} : extra;
-
+    op.setText(opText);
     var layerIds = {};
     var ensure = function(name) {
         CsLayers.ensure(doc, di, name);
@@ -197,11 +203,13 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
         }
         return layerIds[name];
     };
-
     var add = function(entity, layer, kind) {
         entity.setBlockId(blockId);
         entity.setLayerId(ensure(layer));
-        CsTags.set(entity, CsLayoutGen.TAG, kind);
+        var t = isNull(tag) ? kind : tag;
+        if (t !== "") {
+            CsTags.set(entity, CsLayoutGen.TAG, t);
+        }
         op.addObject(entity, false);
         return entity;
     };
@@ -226,6 +234,79 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
         }
         return entity;
     };
+    return { op: op, P: P, add: add, text: text, line: line, greyed: greyed };
+};
+
+/**
+ * The north arrow at (nx, ny) inches of paper, linked to the viewport named
+ * by `guid` so it turns with it (CsNorth). `reading` is a declination reading
+ * or null.
+ *
+ * \return true when a magnetic north was drawn too
+ */
+CsLayoutGen.drawNorth = function(env, nx, ny, reading, guid) {
+    var arrow = CsSheetSetup.NORTH;
+    var line = env.line, text = env.text, greyed = env.greyed, P = env.P;
+    var nh = arrow.height;
+    // every piece names its viewport and its pivot: CsNorth turns them with it
+    var pivot = { x: P(nx), y: P(ny) };
+    var mk = function(entity, part) { return CsNorth.mark(entity, guid, pivot, part); };
+    mk(line(nx, ny, nx, ny + nh, CsLayers.NORTH_ARROW), "shape");
+    mk(line(nx, ny + nh, nx - arrow.headHalf, ny + nh - arrow.headLength, CsLayers.NORTH_ARROW), "shape");
+    mk(line(nx, ny + nh, nx + arrow.headHalf, ny + nh - arrow.headLength, CsLayers.NORTH_ARROW), "shape");
+    mk(text(nx - 0.09, ny + nh + 0.28, CsSheetSetup.TEXT.heading, "N", CsLayers.NORTH_ARROW), "label");
+    var decl = "";
+    if (!isNull(reading) && reading.declination !== 0) {
+        decl = "  (DECLINATION " + Number(reading.declination).toFixed(1) + "\u00b0 APPLIED)";
+    }
+    mk(text(nx - 0.9, ny - 0.2, CsSheetSetup.TEXT.small, "TRUE NORTH" + decl, CsLayers.NORTH_ARROW), "caption");
+    if (isNull(reading)) {
+        return false;
+    }
+    mk(greyed(text(nx - 0.9, ny - (0.2 + CsSheetSetup.TEXT.small * 2), CsSheetSetup.TEXT.small,
+        CsSheetSetup.magneticText(reading), CsLayers.NORTH_ARROW)), "caption");
+    var mag = CsSheetSetup.magneticUnit(reading.declination);
+    var mh = arrow.magneticHeight;
+    var tipX = nx + mag.x * mh, tipY = ny + mag.y * mh;
+    mk(greyed(line(nx, ny, tipX, tipY, CsLayers.NORTH_ARROW)), "shape");
+    var back = arrow.magneticHeadLength, half = arrow.magneticHeadHalf;
+    var bx2 = tipX - mag.x * back, by2 = tipY - mag.y * back;
+    mk(greyed(line(tipX, tipY, bx2 - mag.y * half, by2 + mag.x * half, CsLayers.NORTH_ARROW)), "shape");
+    mk(greyed(line(tipX, tipY, bx2 + mag.y * half, by2 - mag.x * half, CsLayers.NORTH_ARROW)), "shape");
+    mk(greyed(text(tipX + mag.x * 0.12 - 0.06, tipY + 0.18, CsSheetSetup.TEXT.small, "mN",
+        CsLayers.NORTH_ARROW, null, true)), "label");
+    return true;
+};
+
+/**
+ * The title block's lines with their lower-left at (titleX, ...): `y` is the
+ * TOP of the first line. Fields that are filled in carry their id and full
+ * text so a re-run reads them back (see SheetSetup.titleValues).
+ *
+ * \return the y the block ended at (where its heading went)
+ */
+CsLayoutGen.drawTitle = function(env, titleX, y, lines, values, kind) {
+    var v = isNull(values) ? {} : values;
+    for (var n = 0; n < lines.length; n++) {
+        var t = env.text(titleX, y, lines[n].inches, lines[n].text, CsLayers.TITLE_BLOCK);
+        if (lines[n].fieldId !== "") {
+            CsTags.set(t, CsSheet.TAG, lines[n].fieldId);
+            CsTags.set(t, CsSheetSetup.TAG_FULL,
+                isNull(v[lines[n].fieldId]) ? "" : String(v[lines[n].fieldId]));
+        }
+        y -= lines[n].inches * CsSheetSetup.LINE_SPACING;
+    }
+    env.text(titleX, y, CsSheetSetup.TEXT.heading,
+        kind === "elevation" ? "EXTENDED ELEVATION" : "PLAN", CsLayers.TITLE_BLOCK);
+    return y;
+};
+
+CsLayoutGen.draw = function(doc, di, job, info, extra) {
+    var blockId = info.blockId;
+    var env = CsLayoutGen.envFor(doc, di, blockId, qsTr("Generate sheet"), null);
+    var P = env.P, op = env.op, add = env.add, text = env.text, line = env.line, greyed = env.greyed;
+    var drew = [];
+    var ex = isNull(extra) ? {} : extra;
 
     var W = job.paperInches.w, H = job.paperInches.h, m = job.marginInches;
     var fur = job.fur;
@@ -331,18 +412,7 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
         var tOff = off("title");
         var titleX = leftX + fur.pieces.title.x + tOff.x;
         var y = footY + fur.pieces.title.y + CsSheetSetup.linesHeight(lines) + tOff.y;
-        var values = isNull(ex.titleValues) ? {} : ex.titleValues;
-        for (var n = 0; n < lines.length; n++) {
-            var t = text(titleX, y, lines[n].inches, lines[n].text, CsLayers.TITLE_BLOCK);
-            if (lines[n].fieldId !== "") {
-                CsTags.set(t, CsSheet.TAG, lines[n].fieldId);
-                CsTags.set(t, CsSheetSetup.TAG_FULL,
-                    isNull(values[lines[n].fieldId]) ? "" : String(values[lines[n].fieldId]));
-            }
-            y -= lines[n].inches * CsSheetSetup.LINE_SPACING;
-        }
-        text(titleX, y, CsSheetSetup.TEXT.heading,
-            job.kind === "elevation" ? "EXTENDED ELEVATION" : "PLAN", CsLayers.TITLE_BLOCK);
+        CsLayoutGen.drawTitle(env, titleX, y, lines, isNull(ex.titleValues) ? {} : ex.titleValues, job.kind);
         drew.push("a title block");
     }
 
@@ -359,43 +429,12 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
     }
 
     if (wants.north === true) {
-        var arrow = CsSheetSetup.NORTH;
         var np = fur.pieces.north;
         var nOff = off("north");
         var nx = leftX + np.x + np.pinX + nOff.x;
         var ny = footY + np.y + np.pinY + nOff.y;
-        var nh = arrow.height;
-        // every piece names its viewport and its pivot: CsNorth turns them with it
-        var pivot = { x: P(nx), y: P(ny) };
-        var mk = function(entity, part) { return CsNorth.mark(entity, viewportGuid, pivot, part); };
-        mk(line(nx, ny, nx, ny + nh, CsLayers.NORTH_ARROW), "shape");
-        mk(line(nx, ny + nh, nx - arrow.headHalf, ny + nh - arrow.headLength, CsLayers.NORTH_ARROW), "shape");
-        mk(line(nx, ny + nh, nx + arrow.headHalf, ny + nh - arrow.headLength, CsLayers.NORTH_ARROW), "shape");
-        mk(text(nx - 0.09, ny + nh + 0.28, CsSheetSetup.TEXT.heading, "N", CsLayers.NORTH_ARROW), "label");
-        var reading = job.reading;
-        var decl = "";
-        if (!isNull(reading) && reading.declination !== 0) {
-            decl = "  (DECLINATION " + Number(reading.declination).toFixed(1) + "° APPLIED)";
-        }
-        mk(text(nx - 0.9, ny - 0.2, CsSheetSetup.TEXT.small, "TRUE NORTH" + decl, CsLayers.NORTH_ARROW), "caption");
-        if (!isNull(reading)) {
-            mk(greyed(text(nx - 0.9, ny - (0.2 + CsSheetSetup.TEXT.small * 2), CsSheetSetup.TEXT.small,
-                CsSheetSetup.magneticText(reading), CsLayers.NORTH_ARROW)), "caption");
-            var mag = CsSheetSetup.magneticUnit(reading.declination);
-            var mh = arrow.magneticHeight;
-            var tipX = nx + mag.x * mh, tipY = ny + mag.y * mh;
-            mk(greyed(line(nx, ny, tipX, tipY, CsLayers.NORTH_ARROW)), "shape");
-            var back = arrow.magneticHeadLength, half = arrow.magneticHeadHalf;
-            var bx2 = tipX - mag.x * back, by2 = tipY - mag.y * back;
-            mk(greyed(line(tipX, tipY, bx2 - mag.y * half, by2 + mag.x * half, CsLayers.NORTH_ARROW)), "shape");
-            mk(greyed(line(tipX, tipY, bx2 + mag.y * half, by2 - mag.x * half, CsLayers.NORTH_ARROW)), "shape");
-            mk(greyed(text(tipX + mag.x * 0.12 - 0.06, tipY + 0.18, CsSheetSetup.TEXT.small, "mN",
-                CsLayers.NORTH_ARROW, null, true)), "label");
-            drew.push("a north arrow with magnetic north at " + Number(reading.declination).toFixed(1) + "°");
-        }
-        else {
-            drew.push("a north arrow");
-        }
+        var withMag = CsLayoutGen.drawNorth(env, nx, ny, job.reading, viewportGuid);
+        drew.push(withMag ? "a north arrow with magnetic north at " + Number(job.reading.declination).toFixed(1) + "\u00b0" : "a north arrow");
     }
 
     di.applyOperation(op);
