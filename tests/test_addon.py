@@ -1831,6 +1831,9 @@ MENU = {
     "GenerateProfile/GenerateProfile.js": (454, 20, ["generateprofile", "gp", "genprofile"]),
     "BuildLegend/BuildLegend.js":         (454, 30, ["buildlegend", "bl"]),
     "Callout/Callout.js":                 (454, 40, ["callout", "cal", "cscallout", "cscal"]),
+    "LayoutNorthArrow/LayoutNorthArrow.js": (454, 60, ["northarrow", "nar"]),
+    "LayoutScaleBar/LayoutScaleBar.js":   (454, 61, ["scalebar", "sbar"]),
+    "LayoutTitleBlock/LayoutTitleBlock.js": (454, 62, ["titleblock", "tblock"]),
     # 455 -- fix and share
     "CheckMap/CheckMap.js":               (455, 5, ["checkmap", "chk"]),
     "RepairDrawing/RepairDrawing.js":     (455, 10, ["repairdrawing", "rep"]),
@@ -2082,6 +2085,9 @@ class TestSheetGuard(unittest.TestCase):
     # reason, so moving one across is a decision rather than a drift.
     READ_ONLY = {
         "CheckMap": "reads the drawing and reports; changes nothing",
+        "LayoutNorthArrow": "draws on a LAYOUT only (refuses the model); never touches model space",
+        "LayoutScaleBar": "draws on a LAYOUT only (refuses the model); never touches model space",
+        "LayoutTitleBlock": "draws on a LAYOUT only (refuses the model); never touches model space",
         "SurveyStats": "computes length, depth and grade",
         "ExportCaveSurvey": "writes a survey file, never the drawing",
         "PackageCave": "copies a cave folder; never edits a drawing",

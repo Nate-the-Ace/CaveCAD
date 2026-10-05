@@ -1,696 +1,729 @@
 {
-  "pages": [
-    {
-      "id": "start-here",
-      "title": "Start here",
-      "class": "process",
-      "file": "start-here.html",
-      "shots": []
-    },
-    {
-      "id": "start-here-tool",
-      "title": "Start Here",
-      "class": "tool",
-      "stage": 450,
-      "tools": [
-        "StartHere"
-      ],
-      "file": "start-here-tool.html",
-      "shots": [
-        {
-          "image": "start-here-panel.png",
-          "depicts": "scripts/CaveSurvey/StartHere/StartHere.js",
-          "hash": "8f0f17fc34e2991104025082218f7b98685cec57d1f647e2aef9a65d6b894cd9"
-        }
-      ]
-    },
-    {
-      "id": "handbook",
-      "title": "Handbook",
-      "class": "tool",
-      "file": "handbook.html",
-      "stage": 450,
-      "tools": [
-        "Handbook"
-      ],
-      "shots": [
-        {
-          "image": "handbook-panel.png",
-          "depicts": "scripts/CaveSurvey/Handbook/Handbook.js",
-          "hash": "d72e0d67fef106b4445aa3cfc96401289ddac455dec063c3bd04e5679455939e"
-        }
-      ]
-    },
-    {
-      "id": "caves",
-      "title": "Caves",
-      "class": "tool",
-      "file": "caves.html",
-      "stage": 450,
-      "tools": [
-        "CaveShelf"
-      ],
-      "shots": []
-    },
-    {
-      "id": "new-cave-map",
-      "title": "New Cave Map",
-      "class": "tool",
-      "file": "new-cave-map.html",
-      "stage": 450,
-      "tools": [
-        "CaveTemplate"
-      ],
-      "shots": []
-    },
-    {
-      "id": "teaching-cave",
-      "title": "Teaching Cave",
-      "class": "tool",
-      "file": "teaching-cave.html",
-      "stage": 450,
-      "tools": [
-        "TeachingCave"
-      ],
-      "shots": []
-    },
-    {
-      "id": "reset-drawing",
-      "title": "Reset Drawing",
-      "class": "tool",
-      "file": "reset-drawing.html",
-      "stage": 450,
-      "tools": [
-        "ResetDrawing"
-      ],
-      "shots": []
-    },
-    {
-      "id": "survey-notebook",
-      "title": "Survey Notebook",
-      "class": "tool",
-      "file": "survey-notebook.html",
-      "stage": 451,
-      "tools": [
-        "SurveyNotebook"
-      ],
-      "shots": [
-        {
-          "image": "survey-notebook-panel.png",
-          "depicts": "scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js",
-          "hash": "b8b1cc3a2c613940b501720df9fb75da98b659bee74fa7956c73a0454cf86fb5"
-        }
-      ]
-    },
-    {
-      "id": "import-cave-survey",
-      "title": "Import Cave Survey",
-      "class": "tool",
-      "file": "import-cave-survey.html",
-      "stage": 451,
-      "tools": [
-        "ImportCaveSurvey"
-      ],
-      "shots": []
-    },
-    {
-      "id": "export-cave-survey",
-      "title": "Export Cave Survey",
-      "class": "tool",
-      "file": "export-cave-survey.html",
-      "stage": 451,
-      "tools": [
-        "ExportCaveSurvey"
-      ],
-      "shots": []
-    },
-    {
-      "id": "loop-errors",
-      "title": "Loop Errors",
-      "class": "tool",
-      "file": "loop-errors.html",
-      "stage": 451,
-      "tools": [
-        "LoopErrors"
-      ],
-      "shots": []
-    },
-    {
-      "id": "station-table",
-      "title": "Station Table",
-      "class": "tool",
-      "file": "station-table.html",
-      "stage": 451,
-      "tools": [
-        "StationTable"
-      ],
-      "shots": []
-    },
-    {
-      "id": "expedition-planner",
-      "title": "Expedition Planner",
-      "class": "tool",
-      "file": "expedition-planner.html",
-      "stage": 451,
-      "tools": [
-        "ExpeditionPlanner"
-      ],
-      "shots": []
-    },
-    {
-      "id": "expedition-planner-sop",
-      "title": "Plan a trip with the Expedition Planner (the standard way)",
-      "class": "process",
-      "file": "expedition-planner-sop.html",
-      "shots": []
-    },
-    {
-      "id": "3d-view",
-      "title": "3D View",
-      "class": "tool",
-      "file": "3d-view.html",
-      "stage": 451,
-      "tools": [
-        "Cave3D"
-      ],
-      "shots": []
-    },
-    {
-      "id": "draw",
-      "title": "Draw",
-      "class": "tool",
-      "file": "draw.html",
-      "stage": 452,
-      "tools": [
-        "DrawPanel"
-      ],
-      "shots": [
-        {
-          "image": "draw-panel.png",
-          "depicts": "scripts/CaveSurvey/DrawPanel/DrawPanel.js",
-          "hash": "03d3c5c8ef27d2eb5dbe42e842d63f057067bae1a6773b4570cafc470f0c4bce"
-        }
-      ]
-    },
-    {
-      "id": "feature-trace",
-      "title": "Feature Trace",
-      "class": "tool",
-      "file": "feature-trace.html",
-      "stage": 452,
-      "tools": [
-        "FeatureTrace"
-      ],
-      "shots": []
-    },
-    {
-      "id": "shaped-lines",
-      "title": "Shaped Lines",
-      "class": "tool",
-      "file": "shaped-lines.html",
-      "stage": 452,
-      "tools": [
-        "ShapedLines"
-      ],
-      "shots": []
-    },
-    {
-      "id": "scatter-breakdown",
-      "title": "Scatter Breakdown",
-      "class": "tool",
-      "file": "scatter-breakdown.html",
-      "stage": 452,
-      "tools": [
-        "ScatterBreakdown"
-      ],
-      "shots": []
-    },
-    {
-      "id": "sync-areas",
-      "title": "Sync Areas",
-      "class": "tool",
-      "file": "sync-areas.html",
-      "stage": 452,
-      "tools": [
-        "AreaSync"
-      ],
-      "shots": []
-    },
-    {
-      "id": "cross-section",
-      "title": "Cross Section",
-      "class": "tool",
-      "file": "cross-section.html",
-      "stage": 452,
-      "tools": [
-        "CrossSection"
-      ],
-      "shots": []
-    },
-    {
-      "id": "symbol-palette",
-      "title": "Symbol Palette",
-      "class": "tool",
-      "file": "symbol-palette.html",
-      "stage": 452,
-      "tools": [
-        "SymbolPalette"
-      ],
-      "shots": []
-    },
-    {
-      "id": "linetype-maker",
-      "title": "Linetype Maker",
-      "class": "tool",
-      "file": "linetype-maker.html",
-      "stage": 452,
-      "tools": [
-        "LinetypeMaker"
-      ],
-      "shots": []
-    },
-    {
-      "id": "area-fill",
-      "title": "Area Fill",
-      "class": "tool",
-      "file": "area-fill.html",
-      "stage": 452,
-      "tools": [
-        "AreaFill"
-      ],
-      "shots": []
-    },
-    {
-      "id": "sketch-scans",
-      "title": "Sketch Scans",
-      "class": "tool",
-      "file": "sketch-scans.html",
-      "stage": 453,
-      "tools": [
-        "SketchScans"
-      ],
-      "shots": [
-        {
-          "image": "sketch-scans-panel.png",
-          "depicts": "scripts/CaveSurvey/SketchScans/SketchScans.js",
-          "hash": "0afeff4516856ce889495e68dbc12a82a5ad14676ff29959de4a3288d70a3cfc"
-        }
-      ]
-    },
-    {
-      "id": "entrance-location",
-      "title": "Entrance Location",
-      "class": "tool",
-      "file": "entrance-location.html",
-      "stage": 453,
-      "tools": [
-        "EntranceLocation"
-      ],
-      "shots": []
-    },
-    {
-      "id": "surface-data",
-      "title": "Surface Data",
-      "class": "tool",
-      "file": "surface-data.html",
-      "stage": 453,
-      "tools": [
-        "SurfaceData"
-      ],
-      "shots": []
-    },
-    {
-      "id": "sheet-setup",
-      "title": "Sheet Setup",
-      "class": "tool",
-      "file": "sheet-setup.html",
-      "stage": 454,
-      "tools": [
-        "SheetSetup"
-      ],
-      "shots": [
-        {
-          "image": "sheet-setup-panel.png",
-          "depicts": "scripts/CaveSurvey/SheetSetup/SheetSetup.js",
-          "hash": "fb9ec0d4f13e3bda03c74dbb67d69a5c7a718754b1ccc79b13b45efda83e9ec9"
-        }
-      ]
-    },
-    {
-      "id": "survey-stats",
-      "title": "Survey Stats",
-      "class": "tool",
-      "file": "survey-stats.html",
-      "stage": 454,
-      "tools": [
-        "SurveyStats"
-      ],
-      "shots": []
-    },
-    {
-      "id": "generate-profile",
-      "title": "Generate Profile",
-      "class": "tool",
-      "file": "generate-profile.html",
-      "stage": 454,
-      "tools": [
-        "GenerateProfile"
-      ],
-      "shots": []
-    },
-    {
-      "id": "build-legend",
-      "title": "Build Legend",
-      "class": "tool",
-      "file": "build-legend.html",
-      "stage": 454,
-      "tools": [
-        "BuildLegend"
-      ],
-      "shots": []
-    },
-    {
-      "id": "callout",
-      "title": "Callout",
-      "class": "tool",
-      "file": "callout.html",
-      "stage": 454,
-      "tools": [
-        "Callout"
-      ],
-      "shots": []
-    },
-    {
-      "id": "check-map",
-      "title": "Check Map",
-      "class": "tool",
-      "file": "check-map.html",
-      "stage": 455,
-      "tools": [
-        "CheckMap"
-      ],
-      "shots": [
-        {
-          "image": "check-map-panel.png",
-          "depicts": "scripts/CaveSurvey/CheckMap/CheckMap.js",
-          "hash": "823dd6c703b4d4e8d793447ab313f52b55b3391b0466363bf5f1cbfffc5d53b6"
-        }
-      ]
-    },
-    {
-      "id": "repair-drawing",
-      "title": "Repair Drawing",
-      "class": "tool",
-      "file": "repair-drawing.html",
-      "stage": 455,
-      "tools": [
-        "RepairDrawing"
-      ],
-      "shots": []
-    },
-    {
-      "id": "package-cave-project",
-      "title": "Package Cave Project",
-      "class": "tool",
-      "file": "package-cave-project.html",
-      "stage": 455,
-      "tools": [
-        "PackageCave"
-      ],
-      "shots": []
-    },
-    {
-      "id": "line-up-a-scan",
-      "title": "Get a scan to line up under the drawing",
-      "class": "task",
-      "file": "line-up-a-scan.html",
-      "shots": []
-    },
-    {
-      "id": "put-a-scan-back",
-      "title": "Put a scan back when its file moved",
-      "class": "task",
-      "file": "put-a-scan-back.html",
-      "shots": []
-    },
-    {
-      "id": "trim-a-scan",
-      "title": "Trim a scan to the sketch, not the page",
-      "class": "task",
-      "file": "trim-a-scan.html",
-      "shots": []
-    },
-    {
-      "id": "sketches-in-3d",
-      "title": "Lay sketches on the passage in 3D",
-      "class": "task",
-      "file": "sketches-in-3d.html",
-      "shots": []
-    },
-    {
-      "id": "surface-under-the-cave",
-      "title": "Put aerial imagery and contours under the cave",
-      "class": "task",
-      "file": "surface-under-the-cave.html",
-      "shots": []
-    },
-    {
-      "id": "layer-manager",
-      "title": "Find, switch and restyle layers in the Layer Manager",
-      "class": "task",
-      "file": "layer-manager.html",
-      "shots": []
-    },
-    {
-      "id": "add-a-trip",
-      "title": "Add a trip to a cave you already have",
-      "class": "task",
-      "file": "add-a-trip.html",
-      "shots": []
-    },
-    {
-      "id": "correct-a-reading",
-      "title": "Correct a bad reading",
-      "class": "task",
-      "file": "correct-a-reading.html",
-      "shots": []
-    },
-    {
-      "id": "bring-in-a-survey",
-      "title": "Bring in a survey from other software",
-      "class": "task",
-      "file": "bring-in-a-survey.html",
-      "shots": []
-    },
-    {
-      "id": "hand-the-survey-out",
-      "title": "Write the survey back out",
-      "class": "task",
-      "file": "hand-the-survey-out.html",
-      "shots": []
-    },
-    {
-      "id": "set-the-location",
-      "title": "Set the cave's location",
-      "class": "task",
-      "file": "set-the-location.html",
-      "shots": []
-    },
-    {
-      "id": "trace-a-long-wall",
-      "title": "Trace one wall across several passes",
-      "class": "task",
-      "file": "trace-a-long-wall.html",
-      "shots": []
-    },
-    {
-      "id": "draw-a-ledge",
-      "title": "Draw a ledge or pit the right way round",
-      "class": "task",
-      "file": "draw-a-ledge.html",
-      "shots": []
-    },
-    {
-      "id": "fill-the-floor",
-      "title": "Fill the floor with a pattern",
-      "class": "task",
-      "file": "fill-the-floor.html",
-      "shots": []
-    },
-    {
-      "id": "capture-a-section",
-      "title": "Capture a cross section, three routes",
-      "class": "task",
-      "file": "capture-a-section.html",
-      "shots": []
-    },
-    {
-      "id": "rebuild-the-elevation",
-      "title": "Rebuild the extended elevation",
-      "class": "task",
-      "file": "rebuild-the-elevation.html",
-      "shots": []
-    },
-    {
-      "id": "build-a-sheet",
-      "title": "Put a sheet together at a scale that fits",
-      "class": "task",
-      "file": "build-a-sheet.html",
-      "shots": []
-    },
-    {
-      "id": "layouts-and-viewports",
-      "title": "Sheets, layouts and viewports",
-      "class": "task",
-      "file": "layouts-and-viewports.html",
-      "shots": []
-    },
-    {
-      "id": "make-the-legend",
-      "title": "Make the legend say what the map uses",
-      "class": "task",
-      "file": "make-the-legend.html",
-      "shots": []
-    },
-    {
-      "id": "work-check-map-down",
-      "title": "Work Check Map's list down to nothing",
-      "class": "task",
-      "file": "work-check-map-down.html",
-      "shots": []
-    },
-    {
-      "id": "where-the-loop-error-is",
-      "title": "See where a loop error actually happened",
-      "class": "task",
-      "file": "where-the-loop-error-is.html",
-      "shots": []
-    },
-    {
-      "id": "hand-a-cave-over",
-      "title": "Hand a cave to someone else",
-      "class": "task",
-      "file": "hand-a-cave-over.html",
-      "shots": []
-    },
-    {
-      "id": "privacy",
-      "title": "Privacy",
-      "class": "process",
-      "file": "privacy.html",
-      "shots": []
-    },
-    {
-      "id": "set-up-a-student",
-      "title": "Set a student up on the teaching cave",
-      "class": "task",
-      "file": "set-up-a-student.html",
-      "shots": []
-    },
-    {
-      "id": "words-survey",
-      "title": "Station, shot, splay, LRUD",
-      "class": "concept",
-      "file": "words-survey.html",
-      "shots": []
-    },
-    {
-      "id": "words-layers",
-      "title": "Layers: what the map is saying",
-      "class": "concept",
-      "file": "words-layers.html",
-      "shots": []
-    },
-    {
-      "id": "words-datum",
-      "title": "Elevation, and the datum trap",
-      "class": "concept",
-      "file": "words-datum.html",
-      "shots": []
-    },
-    {
-      "id": "words-vertical",
-      "title": "Vertical caves: how to tell CaveCAD",
-      "class": "concept",
-      "file": "words-vertical.html",
-      "shots": []
-    },
-    {
-      "id": "words-trips",
-      "title": "Trips, and revising one",
-      "class": "concept",
-      "file": "words-trips.html",
-      "shots": []
-    },
-    {
-      "id": "words-files",
-      "title": "Where a cave's files live",
-      "class": "concept",
-      "file": "words-files.html",
-      "shots": []
-    },
-    {
-      "id": "words-privacy",
-      "title": "The privacy rule",
-      "class": "concept",
-      "file": "words-privacy.html",
-      "shots": []
-    },
-    {
-      "id": "words-symbols",
-      "title": "Symbol conventions",
-      "class": "concept",
-      "file": "words-symbols.html",
-      "shots": []
-    },
-    {
-      "id": "words-closure",
-      "title": "Loop closure and adjustment",
-      "class": "concept",
-      "file": "words-closure.html",
-      "shots": []
-    },
-    {
-      "id": "lesson-1",
-      "title": "Lesson 1 \u2014 Your first cave map",
-      "class": "process",
-      "file": "lesson-1.html",
-      "shots": []
-    },
-    {
-      "id": "lesson-2",
-      "title": "Lesson 2 \u2014 Typing a trip into the notebook",
-      "class": "process",
-      "file": "lesson-2.html",
-      "shots": []
-    },
-    {
-      "id": "lesson-3",
-      "title": "Lesson 3 \u2014 Drawing walls over a scan",
-      "class": "process",
-      "file": "lesson-3.html",
-      "shots": []
-    },
-    {
-      "id": "lesson-4",
-      "title": "Lesson 4 \u2014 Sections and the profile",
-      "class": "process",
-      "file": "lesson-4.html",
-      "shots": []
-    },
-    {
-      "id": "lesson-5",
-      "title": "Lesson 5 \u2014 Reading the map for faults",
-      "class": "process",
-      "file": "lesson-5.html",
-      "shots": []
-    },
-    {
-      "id": "lesson-6",
-      "title": "Lesson 6 \u2014 Sharing it",
-      "class": "process",
-      "file": "lesson-6.html",
-      "shots": []
+ "pages": [
+  {
+   "id": "start-here",
+   "title": "Start here",
+   "class": "process",
+   "file": "start-here.html",
+   "shots": []
+  },
+  {
+   "id": "start-here-tool",
+   "title": "Start Here",
+   "class": "tool",
+   "stage": 450,
+   "tools": [
+    "StartHere"
+   ],
+   "file": "start-here-tool.html",
+   "shots": [
+    {
+     "image": "start-here-panel.png",
+     "depicts": "scripts/CaveSurvey/StartHere/StartHere.js",
+     "hash": "8f0f17fc34e2991104025082218f7b98685cec57d1f647e2aef9a65d6b894cd9"
     }
-  ]
+   ]
+  },
+  {
+   "id": "handbook",
+   "title": "Handbook",
+   "class": "tool",
+   "file": "handbook.html",
+   "stage": 450,
+   "tools": [
+    "Handbook"
+   ],
+   "shots": [
+    {
+     "image": "handbook-panel.png",
+     "depicts": "scripts/CaveSurvey/Handbook/Handbook.js",
+     "hash": "d72e0d67fef106b4445aa3cfc96401289ddac455dec063c3bd04e5679455939e"
+    }
+   ]
+  },
+  {
+   "id": "caves",
+   "title": "Caves",
+   "class": "tool",
+   "file": "caves.html",
+   "stage": 450,
+   "tools": [
+    "CaveShelf"
+   ],
+   "shots": []
+  },
+  {
+   "id": "new-cave-map",
+   "title": "New Cave Map",
+   "class": "tool",
+   "file": "new-cave-map.html",
+   "stage": 450,
+   "tools": [
+    "CaveTemplate"
+   ],
+   "shots": []
+  },
+  {
+   "id": "teaching-cave",
+   "title": "Teaching Cave",
+   "class": "tool",
+   "file": "teaching-cave.html",
+   "stage": 450,
+   "tools": [
+    "TeachingCave"
+   ],
+   "shots": []
+  },
+  {
+   "id": "reset-drawing",
+   "title": "Reset Drawing",
+   "class": "tool",
+   "file": "reset-drawing.html",
+   "stage": 450,
+   "tools": [
+    "ResetDrawing"
+   ],
+   "shots": []
+  },
+  {
+   "id": "survey-notebook",
+   "title": "Survey Notebook",
+   "class": "tool",
+   "file": "survey-notebook.html",
+   "stage": 451,
+   "tools": [
+    "SurveyNotebook"
+   ],
+   "shots": [
+    {
+     "image": "survey-notebook-panel.png",
+     "depicts": "scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js",
+     "hash": "b8b1cc3a2c613940b501720df9fb75da98b659bee74fa7956c73a0454cf86fb5"
+    }
+   ]
+  },
+  {
+   "id": "import-cave-survey",
+   "title": "Import Cave Survey",
+   "class": "tool",
+   "file": "import-cave-survey.html",
+   "stage": 451,
+   "tools": [
+    "ImportCaveSurvey"
+   ],
+   "shots": []
+  },
+  {
+   "id": "export-cave-survey",
+   "title": "Export Cave Survey",
+   "class": "tool",
+   "file": "export-cave-survey.html",
+   "stage": 451,
+   "tools": [
+    "ExportCaveSurvey"
+   ],
+   "shots": []
+  },
+  {
+   "id": "loop-errors",
+   "title": "Loop Errors",
+   "class": "tool",
+   "file": "loop-errors.html",
+   "stage": 451,
+   "tools": [
+    "LoopErrors"
+   ],
+   "shots": []
+  },
+  {
+   "id": "station-table",
+   "title": "Station Table",
+   "class": "tool",
+   "file": "station-table.html",
+   "stage": 451,
+   "tools": [
+    "StationTable"
+   ],
+   "shots": []
+  },
+  {
+   "id": "expedition-planner",
+   "title": "Expedition Planner",
+   "class": "tool",
+   "file": "expedition-planner.html",
+   "stage": 451,
+   "tools": [
+    "ExpeditionPlanner"
+   ],
+   "shots": []
+  },
+  {
+   "id": "expedition-planner-sop",
+   "title": "Plan a trip with the Expedition Planner (the standard way)",
+   "class": "process",
+   "file": "expedition-planner-sop.html",
+   "shots": []
+  },
+  {
+   "id": "3d-view",
+   "title": "3D View",
+   "class": "tool",
+   "file": "3d-view.html",
+   "stage": 451,
+   "tools": [
+    "Cave3D"
+   ],
+   "shots": []
+  },
+  {
+   "id": "draw",
+   "title": "Draw",
+   "class": "tool",
+   "file": "draw.html",
+   "stage": 452,
+   "tools": [
+    "DrawPanel"
+   ],
+   "shots": [
+    {
+     "image": "draw-panel.png",
+     "depicts": "scripts/CaveSurvey/DrawPanel/DrawPanel.js",
+     "hash": "03d3c5c8ef27d2eb5dbe42e842d63f057067bae1a6773b4570cafc470f0c4bce"
+    }
+   ]
+  },
+  {
+   "id": "feature-trace",
+   "title": "Feature Trace",
+   "class": "tool",
+   "file": "feature-trace.html",
+   "stage": 452,
+   "tools": [
+    "FeatureTrace"
+   ],
+   "shots": []
+  },
+  {
+   "id": "shaped-lines",
+   "title": "Shaped Lines",
+   "class": "tool",
+   "file": "shaped-lines.html",
+   "stage": 452,
+   "tools": [
+    "ShapedLines"
+   ],
+   "shots": []
+  },
+  {
+   "id": "scatter-breakdown",
+   "title": "Scatter Breakdown",
+   "class": "tool",
+   "file": "scatter-breakdown.html",
+   "stage": 452,
+   "tools": [
+    "ScatterBreakdown"
+   ],
+   "shots": []
+  },
+  {
+   "id": "sync-areas",
+   "title": "Sync Areas",
+   "class": "tool",
+   "file": "sync-areas.html",
+   "stage": 452,
+   "tools": [
+    "AreaSync"
+   ],
+   "shots": []
+  },
+  {
+   "id": "cross-section",
+   "title": "Cross Section",
+   "class": "tool",
+   "file": "cross-section.html",
+   "stage": 452,
+   "tools": [
+    "CrossSection"
+   ],
+   "shots": []
+  },
+  {
+   "id": "symbol-palette",
+   "title": "Symbol Palette",
+   "class": "tool",
+   "file": "symbol-palette.html",
+   "stage": 452,
+   "tools": [
+    "SymbolPalette"
+   ],
+   "shots": []
+  },
+  {
+   "id": "linetype-maker",
+   "title": "Linetype Maker",
+   "class": "tool",
+   "file": "linetype-maker.html",
+   "stage": 452,
+   "tools": [
+    "LinetypeMaker"
+   ],
+   "shots": []
+  },
+  {
+   "id": "area-fill",
+   "title": "Area Fill",
+   "class": "tool",
+   "file": "area-fill.html",
+   "stage": 452,
+   "tools": [
+    "AreaFill"
+   ],
+   "shots": []
+  },
+  {
+   "id": "sketch-scans",
+   "title": "Sketch Scans",
+   "class": "tool",
+   "file": "sketch-scans.html",
+   "stage": 453,
+   "tools": [
+    "SketchScans"
+   ],
+   "shots": [
+    {
+     "image": "sketch-scans-panel.png",
+     "depicts": "scripts/CaveSurvey/SketchScans/SketchScans.js",
+     "hash": "0afeff4516856ce889495e68dbc12a82a5ad14676ff29959de4a3288d70a3cfc"
+    }
+   ]
+  },
+  {
+   "id": "entrance-location",
+   "title": "Entrance Location",
+   "class": "tool",
+   "file": "entrance-location.html",
+   "stage": 453,
+   "tools": [
+    "EntranceLocation"
+   ],
+   "shots": []
+  },
+  {
+   "id": "surface-data",
+   "title": "Surface Data",
+   "class": "tool",
+   "file": "surface-data.html",
+   "stage": 453,
+   "tools": [
+    "SurfaceData"
+   ],
+   "shots": []
+  },
+  {
+   "id": "sheet-setup",
+   "title": "Sheet Setup",
+   "class": "tool",
+   "file": "sheet-setup.html",
+   "stage": 454,
+   "tools": [
+    "SheetSetup"
+   ],
+   "shots": [
+    {
+     "image": "sheet-setup-panel.png",
+     "depicts": "scripts/CaveSurvey/SheetSetup/SheetSetup.js",
+     "hash": "fb9ec0d4f13e3bda03c74dbb67d69a5c7a718754b1ccc79b13b45efda83e9ec9"
+    }
+   ]
+  },
+  {
+   "id": "survey-stats",
+   "title": "Survey Stats",
+   "class": "tool",
+   "file": "survey-stats.html",
+   "stage": 454,
+   "tools": [
+    "SurveyStats"
+   ],
+   "shots": []
+  },
+  {
+   "id": "generate-profile",
+   "title": "Generate Profile",
+   "class": "tool",
+   "file": "generate-profile.html",
+   "stage": 454,
+   "tools": [
+    "GenerateProfile"
+   ],
+   "shots": []
+  },
+  {
+   "id": "build-legend",
+   "title": "Build Legend",
+   "class": "tool",
+   "file": "build-legend.html",
+   "stage": 454,
+   "tools": [
+    "BuildLegend"
+   ],
+   "shots": []
+  },
+  {
+   "id": "callout",
+   "title": "Callout",
+   "class": "tool",
+   "file": "callout.html",
+   "stage": 454,
+   "tools": [
+    "Callout"
+   ],
+   "shots": []
+  },
+  {
+   "id": "check-map",
+   "title": "Check Map",
+   "class": "tool",
+   "file": "check-map.html",
+   "stage": 455,
+   "tools": [
+    "CheckMap"
+   ],
+   "shots": [
+    {
+     "image": "check-map-panel.png",
+     "depicts": "scripts/CaveSurvey/CheckMap/CheckMap.js",
+     "hash": "823dd6c703b4d4e8d793447ab313f52b55b3391b0466363bf5f1cbfffc5d53b6"
+    }
+   ]
+  },
+  {
+   "id": "repair-drawing",
+   "title": "Repair Drawing",
+   "class": "tool",
+   "file": "repair-drawing.html",
+   "stage": 455,
+   "tools": [
+    "RepairDrawing"
+   ],
+   "shots": []
+  },
+  {
+   "id": "package-cave-project",
+   "title": "Package Cave Project",
+   "class": "tool",
+   "file": "package-cave-project.html",
+   "stage": 455,
+   "tools": [
+    "PackageCave"
+   ],
+   "shots": []
+  },
+  {
+   "id": "line-up-a-scan",
+   "title": "Get a scan to line up under the drawing",
+   "class": "task",
+   "file": "line-up-a-scan.html",
+   "shots": []
+  },
+  {
+   "id": "put-a-scan-back",
+   "title": "Put a scan back when its file moved",
+   "class": "task",
+   "file": "put-a-scan-back.html",
+   "shots": []
+  },
+  {
+   "id": "trim-a-scan",
+   "title": "Trim a scan to the sketch, not the page",
+   "class": "task",
+   "file": "trim-a-scan.html",
+   "shots": []
+  },
+  {
+   "id": "sketches-in-3d",
+   "title": "Lay sketches on the passage in 3D",
+   "class": "task",
+   "file": "sketches-in-3d.html",
+   "shots": []
+  },
+  {
+   "id": "surface-under-the-cave",
+   "title": "Put aerial imagery and contours under the cave",
+   "class": "task",
+   "file": "surface-under-the-cave.html",
+   "shots": []
+  },
+  {
+   "id": "layer-manager",
+   "title": "Find, switch and restyle layers in the Layer Manager",
+   "class": "task",
+   "file": "layer-manager.html",
+   "shots": []
+  },
+  {
+   "id": "add-a-trip",
+   "title": "Add a trip to a cave you already have",
+   "class": "task",
+   "file": "add-a-trip.html",
+   "shots": []
+  },
+  {
+   "id": "correct-a-reading",
+   "title": "Correct a bad reading",
+   "class": "task",
+   "file": "correct-a-reading.html",
+   "shots": []
+  },
+  {
+   "id": "bring-in-a-survey",
+   "title": "Bring in a survey from other software",
+   "class": "task",
+   "file": "bring-in-a-survey.html",
+   "shots": []
+  },
+  {
+   "id": "hand-the-survey-out",
+   "title": "Write the survey back out",
+   "class": "task",
+   "file": "hand-the-survey-out.html",
+   "shots": []
+  },
+  {
+   "id": "set-the-location",
+   "title": "Set the cave's location",
+   "class": "task",
+   "file": "set-the-location.html",
+   "shots": []
+  },
+  {
+   "id": "trace-a-long-wall",
+   "title": "Trace one wall across several passes",
+   "class": "task",
+   "file": "trace-a-long-wall.html",
+   "shots": []
+  },
+  {
+   "id": "draw-a-ledge",
+   "title": "Draw a ledge or pit the right way round",
+   "class": "task",
+   "file": "draw-a-ledge.html",
+   "shots": []
+  },
+  {
+   "id": "fill-the-floor",
+   "title": "Fill the floor with a pattern",
+   "class": "task",
+   "file": "fill-the-floor.html",
+   "shots": []
+  },
+  {
+   "id": "capture-a-section",
+   "title": "Capture a cross section, three routes",
+   "class": "task",
+   "file": "capture-a-section.html",
+   "shots": []
+  },
+  {
+   "id": "rebuild-the-elevation",
+   "title": "Rebuild the extended elevation",
+   "class": "task",
+   "file": "rebuild-the-elevation.html",
+   "shots": []
+  },
+  {
+   "id": "build-a-sheet",
+   "title": "Put a sheet together at a scale that fits",
+   "class": "task",
+   "file": "build-a-sheet.html",
+   "shots": []
+  },
+  {
+   "id": "layouts-and-viewports",
+   "title": "Sheets, layouts and viewports",
+   "class": "task",
+   "file": "layouts-and-viewports.html",
+   "shots": []
+  },
+  {
+   "id": "make-the-legend",
+   "title": "Make the legend say what the map uses",
+   "class": "task",
+   "file": "make-the-legend.html",
+   "shots": []
+  },
+  {
+   "id": "work-check-map-down",
+   "title": "Work Check Map's list down to nothing",
+   "class": "task",
+   "file": "work-check-map-down.html",
+   "shots": []
+  },
+  {
+   "id": "where-the-loop-error-is",
+   "title": "See where a loop error actually happened",
+   "class": "task",
+   "file": "where-the-loop-error-is.html",
+   "shots": []
+  },
+  {
+   "id": "hand-a-cave-over",
+   "title": "Hand a cave to someone else",
+   "class": "task",
+   "file": "hand-a-cave-over.html",
+   "shots": []
+  },
+  {
+   "id": "privacy",
+   "title": "Privacy",
+   "class": "process",
+   "file": "privacy.html",
+   "shots": []
+  },
+  {
+   "id": "set-up-a-student",
+   "title": "Set a student up on the teaching cave",
+   "class": "task",
+   "file": "set-up-a-student.html",
+   "shots": []
+  },
+  {
+   "id": "words-survey",
+   "title": "Station, shot, splay, LRUD",
+   "class": "concept",
+   "file": "words-survey.html",
+   "shots": []
+  },
+  {
+   "id": "words-layers",
+   "title": "Layers: what the map is saying",
+   "class": "concept",
+   "file": "words-layers.html",
+   "shots": []
+  },
+  {
+   "id": "words-datum",
+   "title": "Elevation, and the datum trap",
+   "class": "concept",
+   "file": "words-datum.html",
+   "shots": []
+  },
+  {
+   "id": "words-vertical",
+   "title": "Vertical caves: how to tell CaveCAD",
+   "class": "concept",
+   "file": "words-vertical.html",
+   "shots": []
+  },
+  {
+   "id": "words-trips",
+   "title": "Trips, and revising one",
+   "class": "concept",
+   "file": "words-trips.html",
+   "shots": []
+  },
+  {
+   "id": "words-files",
+   "title": "Where a cave's files live",
+   "class": "concept",
+   "file": "words-files.html",
+   "shots": []
+  },
+  {
+   "id": "words-privacy",
+   "title": "The privacy rule",
+   "class": "concept",
+   "file": "words-privacy.html",
+   "shots": []
+  },
+  {
+   "id": "words-symbols",
+   "title": "Symbol conventions",
+   "class": "concept",
+   "file": "words-symbols.html",
+   "shots": []
+  },
+  {
+   "id": "words-closure",
+   "title": "Loop closure and adjustment",
+   "class": "concept",
+   "file": "words-closure.html",
+   "shots": []
+  },
+  {
+   "id": "lesson-1",
+   "title": "Lesson 1 \u2014 Your first cave map",
+   "class": "process",
+   "file": "lesson-1.html",
+   "shots": []
+  },
+  {
+   "id": "lesson-2",
+   "title": "Lesson 2 \u2014 Typing a trip into the notebook",
+   "class": "process",
+   "file": "lesson-2.html",
+   "shots": []
+  },
+  {
+   "id": "lesson-3",
+   "title": "Lesson 3 \u2014 Drawing walls over a scan",
+   "class": "process",
+   "file": "lesson-3.html",
+   "shots": []
+  },
+  {
+   "id": "lesson-4",
+   "title": "Lesson 4 \u2014 Sections and the profile",
+   "class": "process",
+   "file": "lesson-4.html",
+   "shots": []
+  },
+  {
+   "id": "lesson-5",
+   "title": "Lesson 5 \u2014 Reading the map for faults",
+   "class": "process",
+   "file": "lesson-5.html",
+   "shots": []
+  },
+  {
+   "id": "lesson-6",
+   "title": "Lesson 6 \u2014 Sharing it",
+   "class": "process",
+   "file": "lesson-6.html",
+   "shots": []
+  },
+  {
+   "id": "layout-north-arrow",
+   "title": "Add North Arrow",
+   "class": "tool",
+   "file": "layout-north-arrow.html",
+   "stage": 454,
+   "tools": [
+    "LayoutNorthArrow"
+   ],
+   "shots": []
+  },
+  {
+   "id": "layout-scale-bar",
+   "title": "Add Scale Bar",
+   "class": "tool",
+   "file": "layout-scale-bar.html",
+   "stage": 454,
+   "tools": [
+    "LayoutScaleBar"
+   ],
+   "shots": []
+  },
+  {
+   "id": "layout-title-block",
+   "title": "Add Title Block",
+   "class": "tool",
+   "file": "layout-title-block.html",
+   "stage": 454,
+   "tools": [
+    "LayoutTitleBlock"
+   ],
+   "shots": []
+  }
+ ]
 }

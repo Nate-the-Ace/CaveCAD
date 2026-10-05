@@ -241,9 +241,10 @@ CsScaleBar.hasBar = function(doc, vp) {
  * that is closer to the edge. One undo step. The bar follows the viewport's
  * scale from then on, like a generated one.
  *
+ * \param atXIn, atYIn  where the baseline starts, inches of paper (default: below the viewport)
  * \return true when a bar was added
  */
-CsScaleBar.addFor = function(doc, di, vp) {
+CsScaleBar.addFor = function(doc, di, vp, atXIn, atYIn) {
     if (CsScaleBar.hasBar(doc, vp)) {
         return false;
     }
@@ -260,6 +261,10 @@ CsScaleBar.addFor = function(doc, di, vp) {
     var c = fresh.getCenter();
     var xIn = (c.x - fresh.getWidth() / 2) / inch;
     var yIn = Math.max(0.35, (c.y - fresh.getHeight() / 2) / inch - 0.45);
+    if (!isNull(atXIn) && !isNull(atYIn)) {
+        xIn = atXIn;
+        yIn = atYIn;
+    }
     var add = new RAddObjectsOperation();
     add.setText(qsTr("Add scale bar"));
     add.setTransactionGroup(group);
