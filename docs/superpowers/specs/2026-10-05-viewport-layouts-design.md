@@ -188,10 +188,16 @@ at `position + R(rotation) · (P − viewCenter − viewTarget) · scale`, where
 `position` is the viewport centre on paper. `scale` = paper units per model
 unit.
 
-**Units decision:** paper-space coordinates are in the layout's PAPER unit
-(inches or millimetres), not the drawing unit. A cave drawn in feet at
-1 in = 50 ft has `scale = 1/50`. Rendering is unit-blind; only plot and
-scale-bar text care.
+**Units decision (revised after measuring):** paper-space coordinates are in
+the DRAWING unit, like model space. Measured via PDF content streams: line
+weights (mm), text heights, linetype patterns and `Print`'s unit scale all
+convert through the drawing unit, and line weights inside a viewport are NOT
+scaled by the viewport scale (a 0.5 mm line stays 0.5 mm at 1/600). A paper
+coordinate system in another unit (inches in a feet drawing) would make
+lines 12x too thin. A Letter sheet in a feet drawing is 0.9167 x 0.7083 ft;
+1 in = 50 ft is viewport scale (1/12)/50 = 1/600. People still type and read
+inches or millimetres: `RLayout` plot paper units is an entry/display
+preference only, and `Layouts.toPaper/fromPaper` convert.
 
 **DXF fixtures:** QCAD's own `examples/flange.dxf` and the `iso_en_a3`
 templates carry real LAYOUT/VIEWPORT data (4 viewports on one layout; two

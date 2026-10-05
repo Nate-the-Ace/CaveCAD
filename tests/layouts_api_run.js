@@ -23,10 +23,11 @@ function main() {
     check(Layouts.list(doc).length === 1, "still exactly one sheet (no stray default)");
     check(near(a.paperMM.w, 279.4) && near(a.paperMM.h, 215.9), "Letter landscape = 279.4 x 215.9 mm");
     check(a.units === Layouts.INCHES && a.mode === "auto", "Letter defaults to inches, mode auto");
-    var ps = Layouts.paperSize(a);
-    check(near(ps.w, 11) && near(ps.h, 8.5), "paper size in paper coordinates 11 x 8.5: " + ps.w + "x" + ps.h);
-    var pb = Layouts.printableBox(a);
-    check(near(pb.x1, 0.25) && near(pb.y2, 8.25), "printable box inset by 0.25 in");
+    var ps = Layouts.paperSize(doc, a);
+    check(near(ps.w, 11 / 12) && near(ps.h, 8.5 / 12), "paper coordinates are DRAWING units: 11 x 8.5 in = 0.9167 x 0.7083 ft: " + ps.w + "x" + ps.h);
+    var pb = Layouts.printableBox(doc, a);
+    check(near(pb.x1, 0.25 / 12) && near(pb.y2, 8.25 / 12), "printable box inset by 0.25 in");
+    check(near(Layouts.fromPaper(doc, Layouts.toPaper(doc, 100)), 100), "toPaper / fromPaper round trip");
 
     var b = Layouts.create(di, { name: "B2", paper: "A3", landscape: false });
     check(!isNull(b) && b.blockName === "*Paper_Space1", "second sheet gets *Paper_Space1: " + (b && b.blockName));
