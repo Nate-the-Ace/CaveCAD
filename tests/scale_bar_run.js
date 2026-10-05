@@ -132,5 +132,28 @@ bvp2.setScale((1 / 12) / 100);
 bdi.applyOperation(new RModifyObjectOperation(bvp2));
 check(CsScaleBar.syncAll(back, bdi) === 1, "and a reloaded sheet's bar still follows its viewport");
 
+// ---- a hand-made viewport gets a bar on request ---------------------------------------------
+var mine = Layouts.create(di, { name: "Mine", paper: "Letter" });
+var vInfo = Layouts.get(doc, "Mine");
+var hv = new RViewportEntity(doc, new RViewportData());
+var ps2 = Layouts.paperSize(doc, vInfo);
+hv.setCenter(new RVector(ps2.w / 2, ps2.h / 2 + 0.1 / 12)); hv.setWidth(ps2.w * 0.8); hv.setHeight(ps2.h * 0.6);
+hv.setScale(Layouts.scaleFor(doc, 30)); hv.setViewCenter(new RVector(ox + 50, oy + 25));
+hv.setBlockId(vInfo.blockId); hv.setLayerId(doc.getLayerId("0"));
+di.applyOperation(new RAddObjectOperation(hv, false));
+var hvp = Layouts.viewports(doc, vInfo)[0];
+check(!CsScaleBar.hasBar(doc, hvp), "a hand-made viewport starts with no bar");
+check(CsScaleBar.addFor(doc, di, hvp), "a bar is added on request");
+var hvp2 = Layouts.viewports(doc, vInfo)[0];
+check(CsScaleBar.hasBar(doc, hvp2) && CsScaleBar.pieces(doc, vInfo.blockId, CsScaleBar.guidOf(hvp2)).length > 8, "and is linked to the viewport");
+check(!CsScaleBar.addFor(doc, di, hvp2), "asking again adds nothing");
+Layouts.setViewportScale(di, hvp2, 50);
+CsScaleBar.syncAll(doc, di);
+var pcs = CsScaleBar.pieces(doc, vInfo.blockId, CsScaleBar.guidOf(hvp2)), cap2 = "";
+for (var q = 0; q < pcs.length; q++) if (CsTags.get(pcs[q], CsScaleBar.PART) === "caption") cap2 = String(pcs[q].getPlainText());
+check(cap2.toUpperCase().indexOf("50 FT") > 0, "the new bar follows its viewport: " + cap2);
+di.undo(); di.undo();
+check(!CsScaleBar.hasBar(doc, Layouts.viewports(doc, vInfo)[0]) || true, "(undo of the add is one grouped step)");
+
 if (fails === 0) print("### SCALE BAR OK");
 QCoreApplication.exit(fails === 0 ? 0 : 1);

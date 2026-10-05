@@ -227,3 +227,50 @@ CsScaleBar.syncAll = function(doc, di, group, quiet) {
     }
     return n;
 };
+
+
+/** True when a viewport already has a bar linked to it. */
+CsScaleBar.hasBar = function(doc, vp) {
+    var g = CsScaleBar.guidOf(vp);
+    return g !== "" && CsScaleBar.pieces(doc, vp.getBlockId(), g).length > 0;
+};
+
+/**
+ * Adds a linked scale bar for a viewport that has none (a viewport drawn by
+ * hand): just below its lower left corner, or inside the sheet's margin if
+ * that is closer to the edge. One undo step. The bar follows the viewport's
+ * scale from then on, like a generated one.
+ *
+ * \return true when a bar was added
+ */
+CsScaleBar.addFor = function(doc, di, vp) {
+    if (CsScaleBar.hasBar(doc, vp)) {
+        return false;
+    }
+    doc.startTransactionGroup();
+    var group = doc.getTransactionGroup();
+    var fresh = doc.queryEntity(vp.getId());
+    var guid = CsScaleBar.ensureGuid(fresh);
+    var mod = new RModifyObjectOperation(fresh);
+    mod.setText(qsTr("Add scale bar"));
+    mod.setTransactionGroup(group);
+    di.applyOperation(mod);
+
+    var inch = Layouts.toPaper(doc, 25.4);
+    var c = fresh.getCenter();
+    var xIn = (c.x - fresh.getWidth() / 2) / inch;
+    var yIn = Math.max(0.35, (c.y - fresh.getHeight() / 2) / inch - 0.45);
+    var add = new RAddObjectsOperation();
+    add.setText(qsTr("Add scale bar"));
+    add.setTransactionGroup(group);
+    CsScaleBar.build(doc, di, add, { blockId: fresh.getBlockId(), xIn: xIn, yIn: yIn,
+        fpi: Layouts.feetPerInch(doc, fresh), guid: guid, tag: "" });
+    di.applyOperation(add);
+    return true;
+};
+
+// The engine's viewport controls offer "Scale bar" through these hooks.
+if (typeof Layouts !== "undefined") {
+    Layouts.hasScaleBarOf = CsScaleBar.hasBar;
+    Layouts.addScaleBarFor = CsScaleBar.addFor;
+}
