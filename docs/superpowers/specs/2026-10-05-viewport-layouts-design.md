@@ -156,6 +156,42 @@ viewport clip to polygon, sheet index table, title-block field attributes,
 open-in-AutoCAD fidelity pass, handbook pages and translations
 ([[cavecad-i18n]]), live-restart and dock traps re-tested.
 
+## V0 results (2026-10-05) — GO
+
+Probes live in `probe/viewport/` (headless, run with the dev app copy in
+`~/Documents/github/viewport-dev/`, never `/Applications`).
+
+| Question | Result |
+|---|---|
+| Does a viewport added to `*Paper_Space` render model space? | **Yes**, headless, via `exportBitmap` and via `Print.js`. |
+| Clip to the viewport frame | **Yes** (circle larger than frame is cut). |
+| Twist (`rotation`, radians) | **Yes**; content rotates about the viewport centre, frame stays axis-aligned. |
+| Per-viewport frozen layers | **Yes**; a layer frozen in viewport B still shows in viewport A. |
+| Absolute coordinates (500000, 3900000) | **Fine**: `viewCenter` is an absolute model point; no datum trap. |
+| Print to PDF through `Print.js` unchanged | **Yes**, layout prints with clip when current block = paper space. Print scales by the DOCUMENT unit (`unitScale` 304.8 for feet), so a layout in inches needs scale `1:12` in a feet drawing — layout printing must set that itself. |
+| DXF save/reload today | **Viewport, paper-space entities and layout all lost** (baseline in `v0_dxf.js`); reload also invents a stray `*Paper_Space0`. V1 is mandatory. |
+| Entity block assignment | Entities go into the CURRENT block; setting `blockId` before an `RAddObjectsOperation` is overridden. Set `setCurrentBlock(paper)` first (a viewport added through `RAddObjectOperation` kept its block; a line added via `RAddObjectsOperation` did not). |
+| Cost | Linear walk of model entities per viewport: 20k entities 245 ms/viewport, 100k entities ~790 ms/viewport (4 viewports 3.5 s). Acceptable for a first release (scene is cached between changes) but the spatial query is a V2 item. |
+
+Mapping (from `getViewOffset` and the rendering test): a model point P lands
+at `position + R(rotation) · (P − viewCenter − viewTarget) · scale`, where
+`position` is the viewport centre on paper. `scale` = paper units per model
+unit.
+
+**Units decision:** paper-space coordinates are in the layout's PAPER unit
+(inches or millimetres), not the drawing unit. A cave drawn in feet at
+1 in = 50 ft has `scale = 1/50`. Rendering is unit-blind; only plot and
+scale-bar text care.
+
+**DXF fixtures:** QCAD's own `examples/flange.dxf` and the `iso_en_a3`
+templates carry real LAYOUT/VIEWPORT data (4 viewports on one layout; two
+layouts: `*Paper_Space` ↔ "Layout2", `*Paper_Space1` ↔ "Layout"). Used as
+read fixtures for V1. Viewport scale there = `height / DXF 45 (view height)`.
+dxflib already writes a FAKE skeleton for every file: BLOCK_RECORDs
+`*Model_Space` (1F), `*Paper_Space` (1B), `*Paper_Space0` (23) and LAYOUT
+objects Layout1/Layout2/Model with hard-wired handles; V1 replaces it with
+the real layout list.
+
 ## Risks and open traps
 
 - **DXF fidelity** (V1) is the largest unknown; the fallback is a blob.
