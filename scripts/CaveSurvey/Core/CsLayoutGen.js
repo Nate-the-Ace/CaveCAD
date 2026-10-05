@@ -33,6 +33,9 @@ var CsLayoutGen = {};
 /** Tag on every entity this file draws; its value says which piece it is. */
 CsLayoutGen.TAG = "LayoutGen";
 
+/** Where a sheet's own border sits, inches from the paper edge. */
+CsLayoutGen.BORDER_INSET = 0.2;
+
 /** Tag on a layout's generator inputs (custom property of the layout). */
 CsLayoutGen.INPUTS = "GenInputs";
 
@@ -254,10 +257,13 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
     // The viewport's own frame IS the border when there is no footer band
     // (every tile); a sheet with a band gets the margin box besides.
     if (wants.border === true && job.box.footer > 0) {
-        line(m, m, W - m, m, CsLayers.BORDER);
-        line(W - m, m, W - m, H - m, CsLayers.BORDER);
-        line(W - m, H - m, m, H - m, CsLayers.BORDER);
-        line(m, H - m, m, m, CsLayers.BORDER);
+        // OUTSIDE the margin box (at 0.2 in: clear of a plotter's own unprintable
+        // edge) so the furniture, which starts at the margin, does not sit on the line
+        var bd = Math.min(CsLayoutGen.BORDER_INSET, m);
+        line(bd, bd, W - bd, bd, CsLayers.BORDER);
+        line(W - bd, bd, W - bd, H - bd, CsLayers.BORDER);
+        line(W - bd, H - bd, bd, H - bd, CsLayers.BORDER);
+        line(bd, H - bd, bd, bd, CsLayers.BORDER);
         drew.push("a border");
     }
 
@@ -289,7 +295,8 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
     }
 
     // ---- FURNITURE ----------------------------------------------------
-    var footY = m, leftX = m;
+    // a hair inside the margin so text never touches the map frame / border
+    var footY = m + 0.06, leftX = m + 0.12;
 
     // WHITE BACKING, where the furniture sits over the map (every tile: no
     // band is kept clear -- Nathan, 2026-10-05, overlap is fine). A WIPEOUT,
@@ -658,3 +665,12 @@ CsLayoutGen.generate = function(doc, di, o) {
     doc.setCurrentBlock(savedBlock);
     return res;
 };
+
+
+// The engine's layout tabs ask "is this sheet automatic?" and offer Revert
+// through these hooks (the engine knows nothing of the cave suite).
+if (typeof Layouts !== "undefined") {
+    Layouts.stateOf = CsLayoutGen.state;
+    Layouts.canRevertOf = CsLayoutGen.canRevert;
+    Layouts.revertOf = CsLayoutGen.revert;
+}
