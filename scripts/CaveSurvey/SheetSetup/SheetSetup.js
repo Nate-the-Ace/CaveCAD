@@ -858,6 +858,14 @@ SheetSetup.repaint = function() {
     var tiles = SheetSetup.tileLayoutFor(w.state, sheet, scale, w.offsets,
         picked, SheetSetup.turnedOf(w));
     w.tiles = tiles;
+    if (tiles !== null && tiles.tooMany === true) {
+        // not previewed, not buildable: say what to do instead
+        w.fitLabel.text = SheetSetup.tooManyText(w.state, scale, tiles);
+        w.note.setStyleSheet("color:" + SheetSetup.LEVELS[SheetSetup.WARNING].colour + ";");
+        w.note.text = "";
+        w.buildButton.enabled = false;
+        return;
+    }
     var preview = CsSheetSetup.preview({
         caveBox: w.state.caveBox, sheet: sheet, scale: scale,
         tileLayout: tiles,
@@ -958,6 +966,13 @@ SheetSetup.repaint = function() {
         "of this drawing. A sheet you have changed by hand is left alone.");
 };
 
+/** The panel's words when the scale asks for more sheets than a cave ever needs. */
+SheetSetup.tooManyText = function(state, scale, tiles) {
+    return qsTr("The plan measures %1 x %2 ft: at 1\" = %3 ft that is %4 sheets. Pick a smaller scale (a larger number of feet per inch).")
+        .arg(Math.round(state.caveW)).arg(Math.round(state.caveH)).arg(scale)
+        .arg(tiles.count > CsSheetTile.MAX_SHEETS * 6 ? qsTr("hundreds of") : tiles.count);
+};
+
 /** Builds the file. */
 SheetSetup.build = function() {
     var w = SheetSetup.widgets;
@@ -1002,6 +1017,10 @@ SheetSetup.build = function() {
         SheetSetup.turnedOf(w));
     var tiles = SheetSetup.tileLayoutFor(w.state, sheet, scale, w.offsets,
         SheetSetup.wantsOf(w), SheetSetup.turnedOf(w));
+    if (tiles !== null && tiles.tooMany === true) {
+        SheetSetup.tell(SheetSetup.tooManyText(w.state, scale, tiles), SheetSetup.WARNING);
+        return;
+    }
     var turned = tiles !== null ? tiles.turned : fit.turned;
     var perFoot = CsShapeLine.perFoot(doc);
 

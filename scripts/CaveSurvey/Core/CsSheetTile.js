@@ -116,7 +116,20 @@ CsSheetTile.inside = function(a, b) {
 CsSheetTile.covered = function(part, rects, from) {
     var e = 1e-7 * (1 + Math.abs(part.maxX - part.minX) +
         Math.abs(part.maxY - part.minY));
-    for (var i = (from === undefined ? 0 : from); i < rects.length; i++) {
+    // ONLY THE RECTANGLES THAT TOUCH THE PART MATTER, and with a hundred
+    // sheets that is a handful: asking the rest at every level of the
+    // subtraction below multiplied the work until a 9 x 9 grid took
+    // minutes and a 12 x 10 one never finished.
+    if (from !== undefined && from > 0) {
+        rects = rects.slice(from);
+        from = 0;
+    }
+    var near = [];
+    for (var n = 0; n < rects.length; n++) {
+        if (CsSheetTile.clip(part, rects[n]) !== null) { near.push(rects[n]); }
+    }
+    rects = near;
+    for (var i = 0; i < rects.length; i++) {
         var c = CsSheetTile.clip(part, rects[i]);
         if (c === null) { continue; }
         // what is left of `part` outside `c`, as up to four strips
@@ -174,6 +187,21 @@ CsSheetTile.covered = function(part, rects, from) {
  *         CsSheetSetup.borderBox answers; matches: [{edge, to, x1, y1,
  *         x2, y2}] one per neighbour that was built.
  */
+/**
+ * The most sheets one cave is ever laid over. A scale far too large for the
+ * cave (1" = 5 ft on a cave 800 ft across) would otherwise ask for tens of
+ * thousands of cells, and the layout, the preview and the build would each
+ * spend minutes on them with the program unresponsive. Past this the layout
+ * comes back `tooMany`, with how many it would have taken.
+ */
+CsSheetTile.MAX_SHEETS = 150;
+
+/** What a layout that would need too many sheets looks like. */
+CsSheetTile.tooMany = function(count, turned) {
+    return { tiled: true, tooMany: true, count: count, rows: 0, cols: 0,
+        turned: turned, tiles: [], matchLines: [], span: null, overlap: 0 };
+};
+
 CsSheetTile.layoutOne = function(o) {
     var scale = o.scale;
     var margin = CsSheetSetup.MARGIN_INCHES;
@@ -247,6 +275,15 @@ CsSheetTile.layoutOne = function(o) {
             }
         }
     }
+    var cellCount = 0;
+    for (var cc in cells) {
+        if (cells.hasOwnProperty(cc)) { cellCount++; }
+    }
+    // cells reached overcount sheets (overlap, pruning), so allow headroom
+    // before giving up, and never start the quadratic pruning below on more
+    if (cellCount > CsSheetTile.MAX_SHEETS * 6) {
+        return CsSheetTile.tooMany(cellCount, turned);
+    }
     var order = [];
     for (var ck in cells) {
         if (cells.hasOwnProperty(ck)) { order.push(cells[ck]); }
@@ -268,7 +305,7 @@ CsSheetTile.layoutOne = function(o) {
         }
         return out;
     };
-    for (var oi = 0; oi < order.length && kept.length < 400; oi++) {
+    for (var oi = 0; oi < order.length && kept.length <= CsSheetTile.MAX_SHEETS; oi++) {
         var cell = order[oi];
         var needed = false;
         for (var pi = 0; pi < cell.pieces.length && !needed; pi++) {
@@ -287,6 +324,9 @@ CsSheetTile.layoutOne = function(o) {
             allCovered = CsSheetTile.covered(kept[back].pieces[bp], rest);
         }
         if (allCovered) { kept.splice(back, 1); }
+    }
+    if (kept.length > CsSheetTile.MAX_SHEETS) {
+        return CsSheetTile.tooMany(kept.length, turned);
     }
     if (kept.length === 0) {
         // never an empty set of sheets: the viewport itself
@@ -396,7 +436,8 @@ CsSheetTile.layout = function(o) {
     };
     var plain = CsSheetTile.layoutOne(copy(false));
     var turned = CsSheetTile.layoutOne(copy(true));
-    return turned.tiles.length < plain.tiles.length ? turned : plain;
+    var size = function(l) { return l.tooMany === true ? 1e9 : l.tiles.length; };
+    return size(turned) < size(plain) ? turned : plain;
 };
 
 /** The words printed on a sheet along the edge it shares. */
@@ -408,6 +449,9 @@ CsSheetTile.matchText = function(toId) {
 CsSheetTile.describe = function(layout) {
     if (isNull(layout) || layout.tiled !== true) {
         return "";
+    }
+    if (layout.tooMany === true) {
+        return "more than " + CsSheetTile.MAX_SHEETS + " sheets";
     }
     var first = layout.tiles[0].id;
     var last = layout.tiles[layout.tiles.length - 1].id;
