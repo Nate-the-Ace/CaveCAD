@@ -4,7 +4,10 @@ include("scripts/EAction.js");
 include("scripts/Layouts/Layouts.js");
 include("scripts/Widgets/CustomGrips/CustomGrips.js");
 include("scripts/Layouts/RotateViewport/RotateViewport.js");
+include("scripts/Layouts/ViewportShape/ViewportShape.js");
+include("scripts/Layouts/MoveVertex/MoveVertex.js");
 var fails = 0;
+function near(a, b, t) { return Math.abs(a - b) < (t === undefined ? 1e-9 : t); }
 function check(c, m) { if (!c) { fails++; print("### CUSTOM GRIPS FAILED: " + m); } else print("ok: " + m); }
 
 // ---- the registry ----------------------------------------------------------------
@@ -72,5 +75,44 @@ check(rot() === -45, "typing an angle sets it exactly: " + rot());
 c.commit();
 Layouts.setLocked(di, Layouts.viewports(doc, info)[0], true);
 check(RotateViewport.start(di, id) === false, "a locked viewport refuses to turn");
+// ---- grips with many targets (a polygon's corners)
+CustomGrips.register({ id: "many", shape: "square", size: [8, 8], targets: function(e) { return e.pts.map(function(p, i) { return { key: "p" + i, target: p }; }); },
+    anchor: function(v, t) { return { x: t, y: t }; } });
+var ap = CustomGrips.applicable({ pts: [1, 2, 3] }).filter(function(g) { return g.id === "many"; });
+check(ap.length === 3 && ap[0].key === "many#p0" && ap[2].target === 3, "a grip kind can give one grip per target, each with its own key");
+check(CustomGrips.applicable({ pts: [] }).filter(function(g) { return g.id === "many"; }).length === 0, "and none when it has no targets");
+
+// ---- Move Vertex
+var doc2 = new RDocument(new RMemoryStorage(), new RSpatialIndexSimple());
+doc2.setUnit(RS.Foot);
+var di2 = new RDocumentInterface(doc2);
+var info2 = Layouts.create(di2, { name: "S", paper: "Letter" });
+doc2.setCurrentBlock(info2.blockId);
+ViewportShape.createPolygon(di2, [{ x: 0.1, y: 0.1 }, { x: 0.6, y: 0.1 }, { x: 0.6, y: 0.5 }, { x: 0.1, y: 0.5 }]);
+var pv = Layouts.viewports(doc2, info2)[0], pid = pv.getId();
+var corners = function() { return Layouts.clipLoops(doc2.queryEntity(pid))[0]; };
+var model0 = Layouts.paperToModel(doc2.queryEntity(pid), 0.3, 0.3);
+check(MoveVertex.start(di2, pid, 0, 2), "the tool starts on a corner of an unlocked polygon viewport");
+var mv = MoveVertex.current;
+var ev = function(x, y) { var p = new RVector(x, y); return { getModelPosition: function() { return p; }, button: function() { return Qt.LeftButton; } }; };
+mv.mouseMoveEvent(ev(0.8, 0.7));
+check(near(corners()[2].x, 0.8) && near(corners()[2].y, 0.7) && near(corners()[0].x, 0.1), "the corner follows the mouse, the others stay");
+var grown = doc2.queryEntity(pid);
+check(near(grown.getWidth(), 0.7, 1e-9) && near(grown.getHeight(), 0.6, 1e-9), "and the viewport's box grows with it");
+var model1 = Layouts.paperToModel(grown, 0.3, 0.3);
+check(near(model0.x, model1.x, 1e-6) && near(model0.y, model1.y, 1e-6), "what the map shows at a fixed place on the paper does not slide");
+mv.mouseReleaseEvent(ev(0.8, 0.7));
+check(near(corners()[2].x, 0.8), "a click puts the corner down");
+di2.undo();
+check(near(corners()[2].x, 0.6) && near(corners()[2].y, 0.5), "one undo puts it back where it was before the whole move");
+di2.redo();
+check(near(corners()[2].x, 0.8), "redo moves it again");
+MoveVertex.start(di2, pid, 0, 0);
+var mv2 = MoveVertex.current;
+mv2.mouseMoveEvent(ev(0.0, 0.0));
+mv2.escapeEvent();
+check(near(corners()[0].x, 0.1) && near(corners()[0].y, 0.1), "Escape puts the corner back");
+Layouts.setLocked(di2, doc2.queryEntity(pid), true);
+check(MoveVertex.start(di2, pid, 0, 1) === false, "a locked viewport's corners do not move");
 if (fails === 0) print("### CUSTOM GRIPS OK");
 QCoreApplication.exit(fails === 0 ? 0 : 1);

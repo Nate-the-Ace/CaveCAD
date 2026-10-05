@@ -2,7 +2,7 @@
 //
 // QCAD add-on tool: add a detail view to a layout: a magnified circle of the map, marked on the map with a lettered circle and a leader.
 //
-// Layout menu / Cave Survey menu. Works on a layout only. See Core/CsLayoutFurniture.js (addDetail).
+// Layout menu / Cave Survey menu. Works on a layout only. See addDetail in Core/CsLayoutFurniture.js, which does the work.
 //
 // USAGE:
 //   Layout > Add Detail   (or type "detail")
