@@ -126,7 +126,7 @@ var bare = Layouts.create(di, { name: "Bare", paper: "Letter" });
 var bv = new RViewportEntity(doc, new RViewportData());
 var bps = Layouts.paperSize(doc, bare);
 bv.setCenter(new RVector(bps.w / 2, bps.h / 2)); bv.setWidth(bps.w / 2); bv.setHeight(bps.h / 2); bv.setScale(0.00001);
-bv.setViewCenter(new RVector(1, 1)); bv.setBlockId(bare.blockId); bv.setLayerId(doc.getLayerId("0"));
+bv.setViewCenter(new RVector(-9000000, -9000000)); bv.setBlockId(bare.blockId); bv.setLayerId(doc.getLayerId("0"));
 di.applyOperation(new RAddObjectOperation(bv, false));
 var bare2 = CsLayoutCheck.findings(doc, Layouts.get(doc, "Bare"));
 check(bare2[0].level === "error" && /images/.test(bare2[0].what), "a viewport that would print images is the first finding: " + bare2[0].what);
