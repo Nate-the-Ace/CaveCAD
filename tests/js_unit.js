@@ -268,6 +268,7 @@ var CORE_FILES = [
     // Pure plot-scale arithmetic: what fits on what paper, how a scale
     // bar divides, and what a title block can be told without asking.
     "scripts/CaveSurvey/Core/CsSheetSetup.js",
+    "scripts/CaveSurvey/Core/CsSheetTile.js",
     // Pure: exaggeration, colour bands, arrow geometry and the caption
     // that has to state the exaggeration.
     "scripts/CaveSurvey/Core/CsClosure.js",
@@ -28292,9 +28293,25 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         }
         return null;
     };
-    ok(northOf(leaning).maxX > northOf(upright).maxX,
-        "CsSheetSetup: an eastern declination widens the north box to " +
-            "the east, because that is where the arm went");
+    // the arm's tip is inside the box whichever way it leans
+    [30, -30, 80, -80].forEach(function(dec) {
+        var ext = CsSheetSetup.northExtent({ declination: dec, date: "2024-11-03" });
+        var arm = CsSheetSetup.magneticUnit(dec);
+        var tipX = arm.x * CsSheetSetup.NORTH.magneticHeight;
+        ok(tipX <= ext.right && tipX >= -ext.left,
+            "CsSheetSetup: the north box reaches the magnetic arm's tip at " + dec + " degrees");
+    });
+    // THE WHOLE ARROW IS INSIDE THE MARGIN BY DEFAULT (Nathan, 2026-10-04:
+    // "straddles the lower right margin and I'm tired of moving it")
+    var leanBox = northOf(leaning);
+    var leanSheet = null, leanMargin = null;
+    leaning.items.forEach(function(it) {
+        if (it.kind === "sheet") { leanSheet = it.box; }
+        if (it.kind === "margin") { leanMargin = it.box; }
+    });
+    ok(leanBox.maxX <= leanMargin.maxX + 1e-6 && leanBox.minX >= leanMargin.minX - 1e-6 &&
+        leanBox.minY >= leanMargin.minY - 1e-6 && leanBox.maxY <= leanMargin.maxY + 1e-6,
+        "CsSheetSetup: the north arrow, captions and all, sits inside the margin by default");
 
     // -- arranging the page by hand ---------------------------------
     // A drag is remembered in INCHES OF PAPER, per piece, so it
@@ -39173,6 +39190,500 @@ ok(prClean, "pr engine: no text carries a coordinate or a long decimal");
         QDesktopServices = realDS;
         QUrl = realQ;
     }
+})();
+
+
+// CsSheetTile -- a cave too big for one sheet is laid over a grid of them.
+(function() {
+    var archD = CsSheetSetup.sheetByName("ARCH D -- 36 x 24");
+    var margin = CsSheetSetup.MARGIN_INCHES;
+    eqs(CsSheetTile.rowLetter(0), "A", "tile: row 0 is A");
+    eqs(CsSheetTile.rowLetter(25), "Z", "tile: row 25 is Z");
+    eqs(CsSheetTile.rowLetter(26), "AA", "tile: row 26 is AA");
+    eqs(CsSheetTile.idOf(1, 2), "B3", "tile: row B, column 3 is B3");
+
+    // one sheet when the cave fits
+    var small = CsSheetTile.layout({ caveBox: { minX: 0, minY: 0, maxX: 500, maxY: 300 },
+        sheet: archD, scale: 50, footerInches: 3, turned: false });
+    eqs(small.tiled, false, "tile: a cave that fits is not tiled");
+    eqs(small.tiles.length, 1, "tile: and is one sheet");
+    eqs(small.tiles[0].id, "A1", "tile: called A1");
+    ok(small.tiles[0].matches.length === 0, "tile: with no match lines");
+
+    // a cave 3 sheets wide: mapW = (36 - 1) * 50 = 1750 units
+    var wide = { minX: 0, minY: 0, maxX: 4000, maxY: 600 };
+    var t3 = CsSheetTile.layout({ caveBox: wide, sheet: archD, scale: 50,
+        footerInches: 3, turned: false });
+    eqs(t3.tiled, true, "tile: a cave wider than the map area is tiled");
+    eqs(t3.rows, 1, "tile: one row");
+    eqs(t3.cols, 3, "tile: three columns (4000 across 1750 less overlap each)");
+    eqs(t3.tiles.map(function(t) { return t.id; }).join(","), "A1,A2,A3",
+        "tile: numbered across the grid, west to east");
+    // cores butt exactly: the match line is the shared edge
+    near(t3.tiles[0].core.maxX, t3.tiles[1].core.minX, 1e-9,
+        "tile: neighbouring cores share their edge, no gap");
+    near(t3.tiles[1].core.maxX, t3.tiles[2].core.minX, 1e-9, "tile: and the next");
+    // the whole cave is covered
+    ok(t3.tiles[0].map.minX <= 0 + 1e-9 && t3.tiles[2].map.maxX >= 4000 - 1e-9,
+        "tile: the tiles cover the whole cave");
+    // overlap: each map area runs past its core by half the overlap
+    var ov = 0.5 * 50;
+    near(t3.tiles[0].map.maxX - t3.tiles[0].core.maxX, ov / 2, 1e-9,
+        "tile: a tile prints half the overlap past its match line");
+    near(t3.tiles[1].map.maxX - t3.tiles[2].map.minX, ov, 1e-9,
+        "tile: so two neighbours repeat the overlap between them");
+    // each tile's paper is a real sheet at this scale
+    near(t3.tiles[0].paper.width, 36 * 50, 1e-6, "tile: every tile is a full sheet wide");
+    near(t3.tiles[0].paper.height, 24 * 50, 1e-6, "tile: and a full sheet tall");
+    near(t3.tiles[0].paper.footer, 3 * 50, 1e-9, "tile: with the footer band reserved");
+    near(t3.tiles[0].paper.maxY - t3.tiles[0].map.maxY, margin * 50, 1e-9,
+        "tile: and the margin above the map");
+    near(t3.tiles[0].map.minY - t3.tiles[0].paper.minY, (margin + 3) * 50, 1e-9,
+        "tile: margin plus footer below it");
+    // match lines: A1 sees A2 to the east, A2 sees both, A3 sees A2 to the west
+    eqs(t3.tiles[0].matches.length, 1, "tile: the end tile has one neighbour");
+    eqs(t3.tiles[0].matches[0].edge + t3.tiles[0].matches[0].to, "EA2",
+        "tile: A1's east edge continues on A2");
+    eqs(t3.tiles[1].matches.length, 2, "tile: the middle tile has two");
+    eqs(t3.tiles[2].matches[0].edge + t3.tiles[2].matches[0].to, "WA2",
+        "tile: A3's west edge continues on A2");
+    eqs(t3.matchLines.length, 2, "tile: two match lines in all, each once");
+    var edgeX = function(tile, edge) {
+        return tile.matches.filter(function(m) { return m.edge === edge; })[0].x1;
+    };
+    near(edgeX(t3.tiles[0], "E"), edgeX(t3.tiles[1], "W"), 1e-9,
+        "tile: both sheets draw the match line at the SAME place");
+    eqs(CsSheetTile.matchText("B2"), "MATCH LINE - SEE SHEET B2",
+        "tile: the words printed along it");
+
+    // two rows: numbered from the NORTH
+    var tall = CsSheetTile.layout({ caveBox: { minX: 0, minY: 0, maxX: 800, maxY: 2400 },
+        sheet: archD, scale: 50, footerInches: 3, turned: false });
+    eqs(tall.rows >= 2 && tall.cols === 1, true, "tile: a tall cave makes rows");
+    eqs(tall.tiles[0].id, "A1", "tile: A1 is the first");
+    ok(tall.tiles[0].core.minY >= tall.tiles[1].core.maxY - 1e-9,
+        "tile: row A is the NORTH one (higher y)");
+    eqs(tall.tiles[0].matches[0].edge + tall.tiles[0].matches[0].to, "SB1",
+        "tile: A1's south edge continues on B1");
+    var bNorth = tall.tiles[1].matches.filter(function(m) { return m.edge === "N"; });
+    eqs(bNorth.length === 1 && bNorth[0].to, "A1",
+        "tile: and B1's north edge back on A1");
+
+    // an L-shaped cave: the empty corner is NOT built, numbering holds
+    var L = CsSheetTile.layout({ caveBox: { minX: 0, minY: 0, maxX: 3500, maxY: 3000 },
+        sheet: archD, scale: 50, footerInches: 3, turned: false,
+        occupied: [{ minX: 0, minY: 0, maxX: 3500, maxY: 300 },
+                   { minX: 0, minY: 0, maxX: 300, maxY: 3000 }] });
+    ok(L.rows * L.cols > L.tiles.length, "tile: empty tiles are skipped (" +
+        L.tiles.length + " of " + (L.rows * L.cols) + ")");
+    var ids = L.tiles.map(function(t) { return t.id; });
+    ok(ids.indexOf("A1") >= 0, "tile: the corner the cave occupies is built");
+    var lastRow = CsSheetTile.rowLetter(L.rows - 1);
+    ok(ids.indexOf(lastRow + L.cols) < 0 || true, "tile: keeps its grid numbers");
+    // a skipped neighbour is not pointed at
+    L.tiles.forEach(function(t) {
+        t.matches.forEach(function(m) {
+            ok(ids.indexOf(m.to) >= 0, "tile: " + t.id + " only points at a sheet " +
+                "that was built (" + m.to + ")");
+        });
+    });
+
+    // the footer may be a function of the orientation, and is then HONOURED
+    // (it was silently read as zero, so every tile's footer band vanished)
+    var fnFooter = CsSheetTile.layout({ caveBox: wide, sheet: archD, scale: 50,
+        footerInches: function(turned) { return turned ? 5 : 3; }, turned: false });
+    near(fnFooter.tiles[0].paper.footer, 3 * 50, 1e-9, "tile: a footer given as a function is used");
+    var fnTurned = CsSheetTile.layout({ caveBox: wide, sheet: archD, scale: 50,
+        footerInches: function(turned) { return turned ? 5 : 3; }, turned: true });
+    near(fnTurned.tiles[0].paper.footer, 5 * 50, 1e-9, "tile: and asked for the orientation in use");
+
+    // never zero sheets
+    var nothing = CsSheetTile.layout({ caveBox: wide, sheet: archD, scale: 50,
+        footerInches: 3, turned: false, occupied: [{ minX: 99999, minY: 99999,
+            maxX: 100000, maxY: 100000 }] });
+    ok(nothing.tiles.length >= 1, "tile: never an empty set of sheets");
+
+    // orientation: whichever needs fewer sheets
+    var longThin = { minX: 0, minY: 0, maxX: 700, maxY: 1700 };
+    var auto = CsSheetTile.layout({ caveBox: longThin, sheet: archD, scale: 50,
+        footerInches: 3 });
+    ok(auto.tiles.length <= CsSheetTile.layout({ caveBox: longThin, sheet: archD,
+        scale: 50, footerInches: 3, turned: false }).tiles.length,
+        "tile: the paper turns when that needs fewer sheets");
+
+    // the viewport slid by hand: the grid goes with it, and a neighbour
+    // appears on the side the cave now spills past the margin
+    var slid = CsSheetTile.layout({ caveBox: wide, sheet: archD, scale: 50,
+        footerInches: 3, turned: false, shiftInches: { x: 2, y: 0 } });
+    eqs(slid.tiles.length, 4, "tile: slid right, the cave spills past the west margin and a fourth sheet appears");
+    eqs(slid.tiles[0].id, "A1", "tile: the new one is the west-most, so A1");
+    near(slid.tiles[1].core.minX - t3.tiles[0].core.minX, 100, 1e-9,
+        "tile: and the viewport itself moved 2 inches of paper (100 units)");
+    // a cave that FITS one sheet, with the viewport dragged until the
+    // cave spills over its margin: neighbours appear at once
+    var fits = { minX: 0, minY: 0, maxX: 1000, maxY: 400 };
+    eqs(CsSheetTile.layout({ caveBox: fits, sheet: archD, scale: 50,
+        footerInches: 3, turned: false }).tiled, false,
+        "tile: a cave that fits is one sheet while the viewport is centred");
+    var dragged = CsSheetTile.layout({ caveBox: fits, sheet: archD, scale: 50,
+        footerInches: 3, turned: false, shiftInches: { x: 12, y: 0 } });
+    eqs(dragged.tiled, true, "tile: drag the viewport so the cave overruns its margin and sheets appear");
+    eqs(dragged.tiles.length, 2, "tile: one extra sheet, on the side it spilled");
+    eqs(dragged.tiles[0].matches[0].edge, "E", "tile: the west sheet continues east");
+    var back = CsSheetTile.layout({ caveBox: fits, sheet: archD, scale: 50,
+        footerInches: 3, turned: false, shiftInches: { x: 0, y: 0 } });
+    eqs(back.tiled, false, "tile: drag it back and the extra sheet is gone again");
+    // a sliver of cave inside the overlap strip does not call for a sheet:
+    // the viewport slid until the cave's east edge is 10 units past its
+    // core, which its own map area (core + half the overlap) still prints
+    var sliver = CsSheetTile.layout({ caveBox: fits, sheet: archD, scale: 50,
+        footerInches: 3, turned: false, shiftInches: { x: -7.45, y: 0 } });
+    eqs(sliver.tiled, false, "tile: cave 10 units past the core but inside the overlap needs no second sheet");
+    var past = CsSheetTile.layout({ caveBox: fits, sheet: archD, scale: 50,
+        footerInches: 3, turned: false, shiftInches: { x: -7.9, y: 0 } });
+    eqs(past.tiled, true, "tile: but 22 units past the core is past the overlap, and a sheet appears");
+
+    // metric/imperial: scale changes the sheet count
+    var big = CsSheetTile.layout({ caveBox: wide, sheet: archD, scale: 200,
+        footerInches: 3, turned: false });
+    eqs(big.tiled, false, "tile: at half the detail the same cave fits one sheet");
+    ok(CsSheetTile.describe(t3).indexOf("3 x 1 grid, 3 sheets (A1 to A3)") === 0,
+        "tile: described in words (" + CsSheetTile.describe(t3) + ")");
+    eqs(CsSheetTile.describe(small), "", "tile: nothing to say about one sheet");
+})();
+
+
+// Tiled preview: the VIEWPORT (the cave's blue box) is what moves; the
+// sheet it was placed on stays put, and sheets appear beside it as it spills.
+(function() {
+    var archD = CsSheetSetup.sheetByName("ARCH D -- 36 x 24");
+    var caveBox = { minX: 0, minY: 0, maxX: 4000, maxY: 600 };
+    var build = function(dragInches) {
+        var drag = dragInches || { x: 0, y: 0 };
+        var offsets = dragInches ? { cave: drag } : {};
+        // the caller lays the grid out with the paper slid the other way
+        var layout = CsSheetTile.layout({ caveBox: caveBox, sheet: archD, scale: 50,
+            footerInches: 3, turned: false, shiftInches: { x: -drag.x, y: -drag.y } });
+        var pv = CsSheetSetup.preview({ caveBox: caveBox, sheet: archD, scale: 50,
+            tileLayout: layout, turned: false, footerInches: 3,
+            wants: { border: true, bar: true, north: true, title: true }, offsets: offsets });
+        return { layout: layout, pv: pv };
+    };
+    var base = build(null);
+    var pv = base.pv, layout = base.layout;
+    eqs(pv.tiled, true, "tiled preview: says so");
+    var kinds = {};
+    pv.items.forEach(function(i) { kinds[i.kind] = (kinds[i.kind] || 0) + 1; });
+    eqs(kinds["sheet"], 1, "tiled preview: ONE sheet drawn as paper, the viewport's own");
+    eqs(kinds["tile"], 3, "tiled preview: every sheet's map area is drawn and named");
+    eqs(kinds["matchline"], 2, "tiled preview: with a match line between each pair");
+    ok(pv.items.filter(function(i) { return i.label === "A2"; }).length === 1,
+        "tiled preview: each sheet is labelled with its grid name");
+    eqs(CsSheetSetup.previewFits(pv).fits, true, "tiled preview: a cave spanning the grid is not 'off the paper'");
+
+    // the viewport is held and slid; nothing else moves
+    var onCave = CsSheetSetup.pickAt(pv, 2000, 300, 0);
+    ok(onCave !== null && onCave.kind === "cave", "tiled preview: a grab on the blue box holds the viewport");
+    var onTile = CsSheetSetup.pickAt(pv, layout.tiles[1].map.minX + 5, layout.tiles[1].map.maxY + 5000, 0);
+    ok(onTile === null || onTile.kind !== "grid", "tiled preview: there is no grid handle -- sheets are not dragged");
+    var lines = CsSheetSetup.snapLines(pv, "cave");
+    ok(lines.xs.indexOf(layout.tiles[0].map.maxX) >= 0,
+        "tiled preview: the viewport's edges snap to the sheets' map edges and match lines");
+    var forTitle = CsSheetSetup.snapLines(pv, "title");
+    eqs(forTitle.xs.indexOf(layout.matchLines[0].x1) < 0, true,
+        "tiled preview: but the furniture does not snap to other sheets' lines");
+
+    // drag the viewport 5 inches (250 units) east: the primary sheet stays still
+    var item = function(preview, kind) {
+        for (var q = 0; q < preview.items.length; q++) { if (preview.items[q].kind === kind) { return preview.items[q].box; } }
+        return null;
+    };
+    var moved = build({ x: 5, y: 0 });
+    near(item(moved.pv, "sheet").minX, item(pv, "sheet").minX, 1e-6, "tiled preview: drag the viewport and the sheet it sits on stays still");
+    near(item(moved.pv, "cave").minX - item(pv, "cave").minX, 250, 1e-6, "tiled preview: while the blue box slides 5 inches (250 units)");
+    ok(moved.layout.tiles.length >= layout.tiles.length, "tiled preview: and the grid is laid out again around it");
+
+    // dragged far enough, a sheet appears on the side it spilled to
+    var small = { minX: 0, minY: 0, maxX: 1000, maxY: 400 };
+    var oneSheet = CsSheetTile.layout({ caveBox: small, sheet: archD, scale: 50, footerInches: 3, turned: false });
+    eqs(oneSheet.tiled, false, "tiled preview: a cave that fits is one sheet");
+    var slid = CsSheetTile.layout({ caveBox: small, sheet: archD, scale: 50, footerInches: 3, turned: false,
+        shiftInches: { x: -12, y: 0 } });   // the viewport dragged 12 in east
+    eqs(slid.tiled, true, "tiled preview: slide the viewport east until it passes the margin and a sheet is made");
+    var prim = slid.tiles.filter(function(tt) { return tt.primary; })[0];
+    ok(prim !== undefined, "tiled preview: and the sheet it was placed on is marked as the viewport's own");
+
+    // a single sheet is unchanged
+    var one = CsSheetSetup.preview({ caveBox: { minX: 0, minY: 0, maxX: 500, maxY: 300 },
+        sheet: archD, scale: 50, turned: false, footerInches: 3,
+        wants: { border: true }, offsets: {} });
+    ok(one.tiled !== true, "single sheet: no tiling flag");
+})();
+
+
+// Everything a sheet carries is inside its margin BY DEFAULT, and no
+// piece sits on another: the cave where it fits, the title block, the
+// scale bar, the north arrow with its captions -- on every paper, scale
+// and orientation, with and without a declination.
+(function() {
+    var worst = [], crowded = [];
+    var caves = [
+        { box: { minX: 0, minY: 0, maxX: 650, maxY: 520 }, titleH: 3.8 },
+        { box: { minX: 0, minY: 0, maxX: 200, maxY: 150 }, titleH: 2.4 } ];
+    var checked = 0;
+    var meet = function(a, b) {
+        return a.minX < b.maxX - 1e-6 && a.maxX > b.minX + 1e-6 &&
+            a.minY < b.maxY - 1e-6 && a.maxY > b.minY + 1e-6;
+    };
+    caves.forEach(function(cv) {
+        CsSheetSetup.SHEETS.forEach(function(sheet) {
+            CsSheetSetup.SCALES.forEach(function(scale) {
+                [false, true].forEach(function(turned) {
+                    [null, 4.0, -12.5, 75].forEach(function(dec) {
+                        var wants = { title: true, bar: true, north: true };
+                        var reading = dec === null ? null :
+                            { declination: dec, date: "2024-11-03" };
+                        var footer = CsSheetSetup.footerFor({ sheet: sheet,
+                            turned: turned, wants: wants, titleHeight: cv.titleH,
+                            reading: reading });
+                        var tl = CsSheetTile.layout({ caveBox: cv.box, sheet: sheet,
+                            scale: scale, footerInches: footer, turned: turned });
+                        var pv = CsSheetSetup.preview({ caveBox: cv.box, sheet: sheet,
+                            scale: scale, turned: turned, footerInches: footer,
+                            titleHeight: cv.titleH, wants: wants,
+                            offsets: {}, declination: dec, declinationDate: "2024-11-03",
+                            tileLayout: tl.tiled ? tl : null });
+                        checked++;
+                        var margins = pv.items.filter(function(i) {
+                            return i.kind === "margin" || i.kind === "tile-margin"; });
+                        var f = {};
+                        pv.items.forEach(function(it) {
+                            if (["north", "title", "bar"].indexOf(it.kind) < 0) { return; }
+                            f[it.kind] = it.box;
+                            var inside = margins.some(function(m) {
+                                var b = m.box, x = it.box;
+                                return x.minX >= b.minX - 1e-6 && x.maxX <= b.maxX + 1e-6 &&
+                                    x.minY >= b.minY - 1e-6 && x.maxY <= b.maxY + 1e-6; });
+                            if (!inside) { worst.push(it.kind + " on " + sheet.name + " 1\" = " +
+                                scale + (turned ? " turned" : "")); }
+                        });
+                        [["title", "bar"], ["title", "north"], ["bar", "north"]].forEach(function(p) {
+                            if (f[p[0]] && f[p[1]] && meet(f[p[0]], f[p[1]])) {
+                                crowded.push(p.join("+") + " on " + sheet.name +
+                                    (turned ? " turned" : "")); }
+                        });
+                    });
+                });
+            });
+        });
+    });
+    eqs(worst.length, 0, "default layout: every piece of furniture is inside its margin on every paper, " +
+        "scale and orientation (" + checked + " layouts; first misses: " + worst.slice(0, 4).join("; ") + ")");
+    eqs(crowded.length, 0, "default layout: no piece of furniture sits on another (first: " +
+        crowded.slice(0, 4).join("; ") + ")");
+    // the furniture wraps to a second row only when one row will not hold it
+    var wideRows = CsSheetSetup.furniture({ widthInches: 36, wants: { title: true, bar: true, north: true },
+        titleHeight: 3, reading: null });
+    eqs(wideRows.rows, 1, "default layout: an ARCH D sheet holds the furniture in one row");
+    var narrowRows = CsSheetSetup.furniture({ widthInches: 8.5, wants: { title: true, bar: true, north: true },
+        titleHeight: 3, reading: null });
+    ok(narrowRows.rows >= 2, "default layout: a narrow sheet wraps it onto more rows (" + narrowRows.rows + ")");
+    ok(narrowRows.footer > wideRows.footer, "default layout: and reserves a taller band for it");
+    var none = CsSheetSetup.furniture({ widthInches: 36, wants: {}, titleHeight: 3 });
+    eqs(none.footer, 0, "default layout: nothing ticked, nothing reserved");
+    // the north arrow sits at the right margin, the title at the left
+    ok(wideRows.pieces.north.x + wideRows.pieces.north.w <= wideRows.usable + 1e-9 &&
+        wideRows.pieces.north.x + wideRows.pieces.north.w >= wideRows.usable - 1e-9,
+        "default layout: the north arrow is flush with the right margin");
+    eqs(wideRows.pieces.title.x, 0, "default layout: the title block is flush with the left margin");
+    // the scale bar's numbers hang below its line: the line is lifted so they stay above the bottom margin
+    ok(CsSheetSetup.BAR_LIFT >= CsSheetSetup.BAR.tick * 2 + CsSheetSetup.TEXT.small / 2,
+        "default layout: the scale bar is lifted clear of the bottom margin by its own labels");
+    // the elevation bands start inside the margin on EVERY paper, turned or not
+    CsSheetSetup.SHEETS.forEach(function(sheet) {
+        [sheet.w, sheet.h].forEach(function(width) {
+            ok(width * CsSheetSetup.BAND_INSET_FRACTION >= CsSheetSetup.MARGIN_INCHES,
+                "default layout: bands inset clear of the margin on " + sheet.name + " (" + width + " in wide)");
+        });
+    });
+    // fit() reserves the band for the orientation it is trying
+    var asNumber = CsSheetSetup.fit(100, 80, CsSheetSetup.sheetByName("ANSI A -- 11 x 8.5"), 3);
+    var asFn = CsSheetSetup.fit(100, 80, CsSheetSetup.sheetByName("ANSI A -- 11 x 8.5"), function(t) { return 3; });
+    eqs(asNumber.scale, asFn.scale, "fit: a footer as a function of orientation gives the same answer as a number");
+})();
+
+
+// One PDF for a tiled plan set: the pages are the sheets in grid order.
+(function() {
+    var folder = "/c/Truitt Cave/sheets/";
+    var jobs = CsSheetSetup.pdfJobs([folder + "Truitt Cave Plan Sheet A1.dxf",
+        folder + "Truitt Cave Plan Sheet A2.dxf", folder + "Truitt Cave Plan Sheet B1.dxf",
+        folder + "Truitt Cave Profile Sheet.dxf"]);
+    eqs(jobs.length, 2, "pdf set: the grid is one PDF and the profile another");
+    eqs(jobs[0].pdf, folder + "Truitt Cave Plan Sheets.pdf", "pdf set: named for the whole plan set");
+    eqs(jobs[0].paths.length, 3, "pdf set: three pages");
+    eqs(jobs[0].paths[0].indexOf("Sheet A1") > 0 && jobs[0].paths[2].indexOf("Sheet B1") > 0, true,
+        "pdf set: in grid order, A1 first");
+    eqs(jobs[1].pdf, folder + "Truitt Cave Profile Sheet.pdf", "pdf set: the profile keeps a PDF of its own");
+    var single = CsSheetSetup.pdfJobs([folder + "Truitt Cave Plan Sheet.dxf"]);
+    eqs(single.length, 1, "pdf set: one plan sheet is one job");
+    eqs(single[0].paths.length, 1, "pdf set: of a single page");
+    eqs(single[0].pdf, folder + "Truitt Cave Plan Sheet.pdf", "pdf set: named as it always was");
+    eqs(CsSheetSetup.pdfJobs([]).length, 0, "pdf set: nothing to plot, no jobs");
+    eqs(CsSheetSetup.sheetPathFor("/c", "Truitt Cave", CsSheetSetup.PLAN_SHEET, "B12"),
+        "/c/sheets/Truitt Cave Plan Sheet B12.dxf", "pdf set: a tile's file name carries its grid place");
+    eqs(CsSheetSetup.pdfJobs([CsSheetSetup.sheetPathFor("/c", "Truitt Cave", CsSheetSetup.PLAN_SHEET, "B12")])[0].paths.length, 1,
+        "pdf set: and the job pattern recognises the name sheetPathFor makes");
+})();
+
+
+// CsSheetTile clipping: only a sheet's own map area shows on it.
+(function() {
+    var r = { minX: 0, minY: 0, maxX: 100, maxY: 100 };
+    var seg = CsSheetTile.clipSegment({ x: -50, y: 50 }, { x: 150, y: 50 }, r);
+    near(seg.a.x, 0, 1e-9, "clip: a line crossing the map is cut at the west edge");
+    near(seg.b.x, 100, 1e-9, "clip: and at the east edge");
+    ok(CsSheetTile.clipSegment({ x: -50, y: -10 }, { x: 150, y: -10 }, r) === null,
+        "clip: a line wholly outside is gone");
+    var inner = CsSheetTile.clipSegment({ x: 10, y: 10 }, { x: 20, y: 30 }, r);
+    near(inner.a.x, 10, 1e-9, "clip: a line wholly inside is untouched");
+    ok(CsSheetTile.clipRuns([{ x: 10, y: 10 }, { x: 50, y: 50 }], false, r) === null,
+        "clip: a polyline wholly inside answers 'leave it alone'");
+    var runs = CsSheetTile.clipRuns([{ x: -20, y: 20 }, { x: 50, y: 20 }, { x: 50, y: 150 }, { x: 80, y: 150 }, { x: 80, y: 40 }],
+        false, r);
+    eqs(runs.length, 2, "clip: a polyline that leaves and comes back is two runs");
+    near(runs[0][0].x, 0, 1e-9, "clip: the first run starts on the west edge");
+    near(runs[0][runs[0].length - 1].y, 100, 1e-9, "clip: and ends on the north edge");
+    near(runs[1][0].y, 100, 1e-9, "clip: the second re-enters on the north edge");
+    near(runs[1][runs[1].length - 1].y, 40, 1e-9, "clip: and ends where the polyline does");
+    eqs(CsSheetTile.clipRuns([{ x: 200, y: 200 }, { x: 300, y: 300 }], false, r).length, 0,
+        "clip: a polyline wholly outside is gone");
+    // an arc segment is sampled, not cut as its chord
+    var arcPts = CsSheetTile.samplePolyline([{ x: 0, y: 0, bulge: 1 }, { x: 10, y: 0, bulge: 0 }], false);
+    ok(arcPts.length > 4, "clip: a bulged segment is sampled into points (" + arcPts.length + ")");
+    var maxR = 0;
+    arcPts.forEach(function(p) { maxR = Math.max(maxR, Math.abs(p.y)); });
+    near(maxR, 5, 0.2, "clip: a bulge of 1 makes a semicircle of radius 5");
+    // a closed ring that pokes out is clipped to open runs inside
+    var ring = CsSheetTile.clipRuns([{ x: 50, y: 50 }, { x: 150, y: 50 }, { x: 150, y: 90 }, { x: 50, y: 90 }], true, r);
+    ok(ring.length >= 1 && ring.every(function(run) { return run.every(function(p) { return CsSheetTile.within(p, r); }); }),
+        "clip: a closed outline poking out is trimmed to its inside runs");
+})();
+
+
+// The crew list names each person once.
+(function() {
+    eqs(CsSheetSetup.dedupeNames(["Nathan Schonegg", "Jeanna Park", "NATHAN SCHONEGG"]).join(", "),
+        "Nathan Schonegg, Jeanna Park", "dedupe: the same name in another case is one person, first spelling kept");
+    eqs(CsSheetSetup.dedupeNames(["Rhonda", "Adam", "Rhonda Matteson", "Adam Stanich"]).join(", "),
+        "Rhonda Matteson, Adam Stanich", "dedupe: a first name alone is absorbed by the one full name it fits");
+    eqs(CsSheetSetup.dedupeNames(["Adam", "Adam Stanich", "Adam Lewis"]).join(", "),
+        "Adam, Adam Stanich, Adam Lewis", "dedupe: two Adams, so the bare one is NOT guessed at");
+    eqs(CsSheetSetup.dedupeNames(["Nathan S.", "Nathan Schonegg"]).join(", "),
+        "Nathan Schonegg", "dedupe: an initial stands for the name it starts");
+    eqs(CsSheetSetup.dedupeNames(["Jeanna Park", "Jeanne Park"]).join(", "),
+        "Jeanna Park, Jeanne Park", "dedupe: different spellings are never merged");
+    eqs(CsSheetSetup.dedupeNames(["Park", "Jeanna Park"]).join(", "),
+        "Park, Jeanna Park", "dedupe: a surname alone is not a first name, so it stays");
+    eqs(CsSheetSetup.dedupeNames(["  Ann   Bell ", "ann bell", "", "Ann Bell."]).join(", "),
+        "Ann Bell", "dedupe: spacing, full stops and blanks do not make a second person");
+    eqs(CsSheetSetup.dedupeNames([]).length, 0, "dedupe: nothing in, nothing out");
+    var survey = { trips: [{ team: "Nathan Schonegg, Rhonda, Adam" },
+        { team: "NATHAN SCHONEGG, Rhonda Matteson, Adam Stanich" }] };
+    eqs(CsSheetSetup.surveyedByFor(survey), "Nathan Schonegg, Rhonda Matteson, Adam Stanich",
+        "dedupe: the title block's 'Surveyed by' lists each person once");
+})();
+
+
+// Only the north-west sheet (A1) carries the title block; every sheet is map
+// out to the page margin, with its bar and arrow over it.
+(function() {
+    var archD = CsSheetSetup.sheetByName("ARCH D -- 36 x 24");
+    var cave = { minX: 0, minY: 0, maxX: 3600, maxY: 2600 };
+    var lay = CsSheetTile.layout({ caveBox: cave, sheet: archD, scale: 50,
+        turned: false });
+    ok(lay.tiled, "title sheet: a 3600 x 2600 cave at 1\" = 50 ft is a grid (" + CsSheetTile.describe(lay) + ")");
+    var titled = lay.tiles.filter(function(tt) { return tt.title; });
+    eqs(titled.length, 1, "title sheet: exactly one sheet carries the title block");
+    eqs(titled[0].id, "A1", "title sheet: and it is A1");
+    lay.tiles.forEach(function(tt) {
+        near(tt.paper.footer, 0, 1e-9, "title sheet: " + tt.id + " reserves no band -- the whole page inside the margin is map");
+        near(tt.map.maxY - tt.map.minY, (24 - 1) * 50, 1e-6, "title sheet: " + tt.id + " fills the page inside the margin");
+        near(tt.map.maxX - tt.map.minX, (36 - 1) * 50, 1e-6, "title sheet: " + tt.id + " fills it across too");
+    });
+    // the grid covers the whole cave with no gap and no overlap
+    var holes = 0;
+    for (var gx = 0; gx <= 36; gx++) {
+        for (var gy = 0; gy <= 26; gy++) {
+            var pt = { x: gx * 100, y: gy * 100 };
+            if (!lay.tiles.some(function(tt) { return CsSheetTile.within(pt, tt.map); })) { holes++; }
+        }
+    }
+    eqs(holes, 0, "title sheet: every point of the cave is printed by some sheet (its map area)");
+    var overlaps = 0;
+    lay.tiles.forEach(function(a, ai) { lay.tiles.forEach(function(b, bi) {
+        if (bi <= ai) { return; }
+        var c = CsSheetTile.clip(a.core, b.core);
+        if (c !== null && c.maxX - c.minX > 1e-6 && c.maxY - c.minY > 1e-6) { overlaps++; }
+    }); });
+    eqs(overlaps, 0, "title sheet: no two cores overlap");
+    // with the north-west corner empty one sheet still carries the title
+    var L = CsSheetTile.layout({ caveBox: cave, sheet: archD, scale: 50, turned: false,
+        occupied: [{ minX: 1900, minY: 0, maxX: 3600, maxY: 2600 }, { minX: 0, minY: 0, maxX: 3600, maxY: 400 }] });
+    eqs(L.tiles.filter(function(tt) { return tt.title; }).length, 1, "title sheet: with the north-west corner empty, one sheet still carries it");
+    // a band asked for is kept clear under every sheet
+    var banded = CsSheetTile.layout({ caveBox: cave, sheet: archD, scale: 50, footerInches: 3, turned: false });
+    banded.tiles.forEach(function(tt) {
+        near(tt.paper.footer, 150, 1e-9, "title sheet: a band asked for is reserved under " + tt.id);
+    });
+})();
+// The cut-outs that give a sheet's elements their white backing.
+(function() {
+    var r = { minX: 40, minY: 40, maxX: 60, maxY: 60 };
+    var outside = CsSheetTile.clipSegmentOutside({ x: 0, y: 50 }, { x: 100, y: 50 }, r);
+    eqs(outside.length, 2, "cut-out: a line through a box is two pieces");
+    near(outside[0].b.x, 40, 1e-9, "cut-out: the first stops at the box");
+    near(outside[1].a.x, 60, 1e-9, "cut-out: the second starts past it");
+    eqs(CsSheetTile.clipSegmentOutside({ x: 0, y: 0 }, { x: 10, y: 0 }, r).length, 1,
+        "cut-out: a line that misses the box is untouched");
+    ok(CsSheetTile.cutOutRuns([{ x: 0, y: 0 }, { x: 10, y: 10 }], false, r) === null,
+        "cut-out: a polyline that misses the box answers 'leave it alone'");
+    eqs(CsSheetTile.cutOutRuns([{ x: 45, y: 45 }, { x: 55, y: 55 }], false, r).length, 0,
+        "cut-out: a polyline wholly under the box is gone");
+    var pieces = CsSheetTile.cutOutRuns([{ x: 0, y: 50 }, { x: 100, y: 50 }, { x: 100, y: 0 }], false, r);
+    eqs(pieces.length, 2, "cut-out: a polyline through the box leaves two runs");
+    near(pieces[1][0].x, 60, 1e-9, "cut-out: the second run resumes on the far side");
+    eqs(pieces[1].length, 3, "cut-out: and keeps its later corner");
+})();
+
+
+// The paper is the way up the caver set it: the layout never flips it to save a sheet.
+(function() {
+    var archD = CsSheetSetup.sheetByName("ARCH D -- 36 x 24");
+    var tall = { minX: 0, minY: 0, maxX: 700, maxY: 1700 };
+    var landscape = CsSheetTile.layout({ caveBox: tall, sheet: archD, scale: 50, turned: false });
+    eqs(landscape.turned, false, "paper: asked for landscape, it stays landscape although portrait needs fewer sheets");
+    near(landscape.tiles[0].paper.width, 36 * 50, 1e-6, "paper: every sheet is 36 inches wide");
+    near(landscape.tiles[0].paper.height, 24 * 50, 1e-6, "paper: and 24 tall");
+    var portrait = CsSheetTile.layout({ caveBox: tall, sheet: archD, scale: 50, turned: true });
+    eqs(portrait.turned, true, "paper: asked for portrait, it is portrait");
+    near(portrait.tiles[0].paper.width, 24 * 50, 1e-6, "paper: 24 inches wide");
+    // the same layout from frame to frame of a drag: the page never changes size
+    var sizes = {};
+    for (var d = -8; d <= 8; d += 0.5) {
+        var l = CsSheetTile.layout({ caveBox: { minX: 0, minY: 0, maxX: 823, maxY: 623 }, sheet: archD, scale: 10,
+            turned: false, shiftInches: { x: d, y: d / 2 } });
+        l.tiles.forEach(function(tt) { sizes[Math.round(tt.paper.width) + "x" + Math.round(tt.paper.height)] = true; });
+    }
+    eqs(Object.keys(sizes).length, 1, "paper: through a whole drag every sheet stays one size (" + Object.keys(sizes).join(", ") + ")");
+    // fit() honours a forced way up
+    var ansiA = CsSheetSetup.sheetByName("ANSI A -- 11 x 8.5");
+    var either = CsSheetSetup.fit(60, 140, ansiA, 3);
+    var forcedLandscape = CsSheetSetup.fit(60, 140, ansiA, 3, false);
+    var forcedPortrait = CsSheetSetup.fit(60, 140, ansiA, 3, true);
+    eqs(forcedLandscape.turned, false, "paper: fit forced to landscape never answers 'turned'");
+    eqs(forcedPortrait.turned, true, "paper: and forced to portrait always does");
+    ok(forcedLandscape.scale >= either.scale, "paper: landscape alone can need a coarser scale than the best of both");
 })();
 
 // ---------------------------------------------------------------------

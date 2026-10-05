@@ -293,6 +293,9 @@ var CsSheetPreview = {};
 CsSheetPreview.STYLE = {
     "sheet": { color: [70, 70, 70], width: 0.5 },
     "elevation-sheet": { color: [70, 70, 70], width: 0.5 },
+    "tile": { color: [90, 90, 90], width: 0.3 },
+    "tile-margin": { color: [170, 170, 170], width: 0, dashed: true },
+    "matchline": { color: [200, 40, 160], width: 0 },
     "margin": { color: [150, 150, 150], width: 0, dashed: true },
     "cave": { color: [40, 90, 190], width: 0 },
     "band": { color: [40, 90, 190], width: 0 },
@@ -481,8 +484,9 @@ CsSheetPreview.show = function(preview, data, opts) {
             // CsSheetSetup.preview ever sets item.label (one per
             // chunk, today).
             if (!isNull(item.label) && item.label !== "") {
-                var lblPos = new RVector(item.box.minX,
-                    item.box.maxY);
+                var lblPos = isNull(item.labelAt) ?
+                    new RVector(item.box.minX, item.box.maxY) :
+                    new RVector(item.labelAt.x, item.labelAt.y);
                 var lblData = new RTextData(lblPos, lblPos,
                     (item.box.maxY - item.box.minY) * 0.12,
                     item.box.maxX - item.box.minX, RS.VAlignTop,

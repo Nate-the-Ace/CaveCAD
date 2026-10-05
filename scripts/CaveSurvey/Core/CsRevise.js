@@ -934,6 +934,83 @@ CsRevise.isDerivedGeometry = function(entity) {
 };
 
 /**
+ * Where a callout's tip belongs, read off the SURVEY it was cut on
+ * rather than off its own geometry: a cross section's leg and fraction
+ * (or the station a sketch is leadered to), or the leg and fraction an
+ * elevation label was sampled at. Answers a {x, y} in the frame `pos`
+ * describes, or null when the callout carries no provenance or a
+ * station it names is not in `pos`.
+ *
+ * This is the exact answer where moveLinework's moving-least-squares
+ * guess would only be a close one -- the tip IS a point on a leg, so it
+ * goes where that leg's end stations took it.
+ *
+ * \param members [{entity, layer}] one callout's pieces
+ * \param pos     {name: {x, y}}
+ * \return {x, y, sketch} -- sketch is true for a traced section, whose
+ *         leader CalloutWrite.refreshSections re-aims on its own
+ */
+CsRevise.calloutProvenance = function(members, pos) {
+    if (typeof CsCallout === "undefined") {
+        return null;
+    }
+    var K = CsCallout.KEY;
+    var sketch = false;
+    for (var i = 0; i < members.length; i++) {
+        if (CsTags.get(members[i].entity, K.SECTION_SOURCE) ===
+                CsCallout.SOURCE_SKETCH) {
+            sketch = true;
+        }
+    }
+    var legAt = function(a, b, t) {
+        if (!pos.hasOwnProperty(a) || !pos.hasOwnProperty(b) || isNaN(t)) {
+            return null;
+        }
+        return { x: pos[a].x + (pos[b].x - pos[a].x) * t,
+            y: pos[a].y + (pos[b].y - pos[a].y) * t, sketch: sketch };
+    };
+    for (var m = 0; m < members.length; m++) {
+        var e = members[m].entity;
+        var st = CsTags.get(e, K.SECTION_STATION);
+        if (st !== "") {
+            return pos.hasOwnProperty(st) ?
+                { x: pos[st].x, y: pos[st].y, sketch: sketch } : null;
+        }
+        var sf = CsTags.get(e, K.SECTION_FROM);
+        if (sf !== "") {
+            return legAt(sf, CsTags.get(e, K.SECTION_TO),
+                parseFloat(CsTags.get(e, K.SECTION_FRACTION)));
+        }
+        var ef = CsTags.get(e, K.ELEV_FROM);
+        if (ef !== "") {
+            return legAt(ef, CsTags.get(e, K.ELEV_TO),
+                parseFloat(CsTags.get(e, K.ELEV_FRACTION)));
+        }
+    }
+    return null;
+};
+
+/**
+ * Reconnects what a revision's move left apart: a traced section's
+ * leader points at a STATION and its block is the caver's, so after the
+ * block has followed the station the leader is re-aimed at both
+ * (CalloutWrite.refreshSections does exactly that, idempotently). Soft
+ * dependency -- a context without the callout tools just skips it.
+ */
+CsRevise.settleSections = function(doc, di) {
+    try {
+        if (typeof CalloutWrite !== "undefined" &&
+                typeof CalloutWrite.refreshSectionsFromDocument ===
+                    "function") {
+            CalloutWrite.refreshSectionsFromDocument(doc, di);
+        }
+    } catch (eSettle) {
+        // the sections moved either way; a leader left a little off is
+        // visible and fixed by the next Draw
+    }
+};
+
+/**
  * Moves hand-traced linework so it follows the stations it was traced
  * against. QCAD context only.
  *
@@ -1217,6 +1294,34 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
             }
             var glabel = members[0].layer + " callout #" +
                 CsTags.get(members[0].entity, CsCallout.KEY.ID);
+            // A CROSS SECTION OR AN ELEVATION LABEL IS CUT ON A LEG, and
+            // says which in its own tags. Its tip goes where that leg's
+            // stations went -- exact, and needing no station list of its
+            // own. A traced section's LEADER is left out: it points at
+            // a station, CalloutWrite.refreshSections has already
+            // re-aimed it there, and moving it again would carry it a
+            // second time. The block and any text move; settleSections
+            // reconnects the leader afterwards.
+            var wasAt = CsRevise.calloutProvenance(members, oldPos);
+            var nowAt = CsRevise.calloutProvenance(members, newPos);
+            if (wasAt !== null && nowAt !== null) {
+                for (var pi = 0; pi < members.length; pi++) {
+                    var pm = members[pi];
+                    if (CsRevise.isWorldFixedLayer(pm.layer)) {
+                        continue;
+                    }
+                    if (nowAt.sketch === true &&
+                            pm.entity instanceof RLeaderEntity) {
+                        continue;
+                    }
+                    carry(pm.entity, new RVector(wasAt.x, wasAt.y), 0,
+                        nowAt.x - wasAt.x, nowAt.y - wasAt.y);
+                    op.addObject(pm.entity, false);
+                }
+                anyMoved = true;
+                result.moved++;
+                continue;
+            }
             if (pairsForGroup.length === 0) {
                 result.unmoved.push(glabel);
                 continue;
@@ -2658,6 +2763,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
             lineworkUnmoved = lw.unmoved;
             lineworkUntied = lw.untied;
         });
+        CsRevise.settleSections(doc, di);
     }
 
     // -- 6. report -----------------------------------------------------

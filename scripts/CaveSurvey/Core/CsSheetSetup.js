@@ -167,8 +167,14 @@ CsSheetSetup.MARGIN_INCHES = 0.5;
  * has no paper size and no plot scale to turn inches into units with.
  * The same number is used everywhere the bands are placed OR previewed,
  * which is what matters -- the picture and the placement have to agree.
+ *
+ * SEVEN PERCENT, NOT THREE (2026-10). Three percent of a small or turned
+ * sheet is under the half-inch margin -- 0.25 in on ANSI A -- so the
+ * bands started OUTSIDE the margin the rest of the sheet is kept behind.
+ * Seven percent of the narrowest sheet there is (8.27 in, A4 turned) is
+ * still 0.58 in, clear of it; tests/js_unit.js holds every paper to that.
  */
-CsSheetSetup.BAND_INSET_FRACTION = 0.03;
+CsSheetSetup.BAND_INSET_FRACTION = 0.07;
 
 /** Printed text heights, in INCHES on the finished sheet. Everything
  *  drawn by this tool is one of these multiplied by the plot scale.
@@ -212,30 +218,45 @@ CsSheetSetup.sheetByName = function(name) {
  * knowingly rather than discover at the plotter.
  */
 CsSheetSetup.fit = function(caveWidthFeet, caveHeightFeet, sheet,
-        footerInches) {
+        footerInches, forceTurned) {
     var margin = CsSheetSetup.MARGIN_INCHES;
-    var footer = (isNull(footerInches) || !(footerInches > 0)) ? 0 :
-        footerInches;
+    // The footer may depend on the paper's orientation (a turned sheet
+    // is narrower, so the furniture wraps to more rows): a function of
+    // `turned` is asked for each orientation in turn.
+    var footerOf = function(turned) {
+        var f = (typeof footerInches === "function") ?
+            footerInches(turned) : footerInches;
+        return (isNull(f) || !(f > 0)) ? 0 : f;
+    };
+    var footer = footerOf(false);
     var usableW = sheet.w - margin * 2;
     // The FOOTER is the band the title block, scale bar and north arrow
     // occupy. Counting it as usable is how a cave comes out overlapping
     // its own credits: Truitt Cave's title block is four inches tall
     // and the margin is under three, so the block rose into the map.
     var usableH = sheet.h - margin * 2 - footer;
+    var usableHTurned = sheet.w - margin * 2 - footerOf(true);
+    var usableWTurned = sheet.h - margin * 2;
     var w = Math.max(caveWidthFeet, 0.0001);
     var h = Math.max(caveHeightFeet, 0.0001);
+    // THE PAPER IS WHATEVER WAY UP THE CAVER SET (Nathan, 2026-10-05: "it
+    // seems to be switching sheet size; it should use the same size page
+    // that I set"). With forceTurned true or false only that way up is
+    // tried; left out, either is, and a turned answer says so.
+    var landscapeOk = forceTurned !== true;
+    var portraitOk = forceTurned !== false;
     for (var i = 0; i < CsSheetSetup.SCALES.length; i++) {
         var s = CsSheetSetup.SCALES[i];
-        if (w / s <= usableW && h / s <= usableH) {
+        if (landscapeOk && w / s <= usableW && h / s <= usableH) {
             return { scale: s, turned: false, fits: true };
         }
-        if (h / s <= usableW && w / s <= usableH) {
+        if (portraitOk && w / s <= usableWTurned && h / s <= usableHTurned) {
             return { scale: s, turned: true, fits: true };
         }
     }
     return {
         scale: CsSheetSetup.SCALES[CsSheetSetup.SCALES.length - 1],
-        turned: false,
+        turned: forceTurned === true,
         fits: false
     };
 };
@@ -321,6 +342,17 @@ CsSheetSetup.TITLE_INCHES = 6.0;
 CsSheetSetup.LINE_SPACING = 1.9;
 
 /**
+ * How wide a character is, as a fraction of its height, in the sheet's
+ * "standard" text font. MEASURED, not assumed (2026-10-04): a plotted
+ * 76-character credit line at 0.14 in measured 7.9 in, 0.104 in a
+ * character, 0.74 of the height. The wrap rule had used 0.55, so every
+ * title line ran about a third wider than the 6 inches it was wrapped
+ * to, and the furniture laid out beside it by those widths collided with
+ * it.
+ */
+CsSheetSetup.CHAR_WIDTH = 0.74;
+
+/**
  * How many characters of a given printed size fit across the title
  * block column.
  *
@@ -334,7 +366,8 @@ CsSheetSetup.charsPerLine = function(textInches) {
         return 40;
     }
     return Math.max(8,
-        Math.floor(CsSheetSetup.TITLE_INCHES / (textInches * 0.55)));
+        Math.floor(CsSheetSetup.TITLE_INCHES /
+            (textInches * CsSheetSetup.CHAR_WIDTH)));
 };
 
 /**
@@ -558,6 +591,158 @@ CsSheetSetup.pageSettings = function(box, sheet, turned, unitMM) {
         offsetX: box.minX,
         offsetY: box.minY
     };
+};
+
+/**
+ * How far the north arrow reaches from its pin, in inches of paper, the
+ * captions included: {left, right, down, up}.
+ *
+ * THE ARROW IS MORE THAN ITS SHAFT. Two caption lines hang below the pin
+ * and run sideways -- "TRUE NORTH  (DECLINATION 4.0 APPLIED)" and
+ * "MAGNETIC NORTH 4.0 E (2024-11-03)" -- and a magnetic arm and its "mN"
+ * stand off to one side. The pin used to be set ON the right margin line,
+ * which put roughly half of all that on the wrong side of it (Nathan,
+ * 2026-10-04: "straddles the lower right margin and I'm tired of moving
+ * it"). Placing the pin by the piece's real reach is what keeps the
+ * whole thing inside the margin by default.
+ *
+ * Width of a caption is estimated at the same 0.55 of its height per
+ * character that charsPerLine uses everywhere else on the sheet.
+ *
+ * \param reading  CsSheetSetup.latestDeclination's answer, or null
+ */
+CsSheetSetup.northExtent = function(reading) {
+    var A = CsSheetSetup.NORTH;
+    var small = CsSheetSetup.TEXT.small;
+    var charW = small * CsSheetSetup.CHAR_WIDTH;
+    var hasMag = !isNull(reading);
+    var out = {
+        left: 0.9,                       // captions start 0.9 in left of the pin
+        right: A.headHalf + 0.1,
+        down: 0.2 + small / 2,           // the "TRUE NORTH" line
+        up: A.height + 0.28 + CsSheetSetup.TEXT.heading
+    };
+    var trueLen = "TRUE NORTH".length;
+    if (hasMag && reading.declination !== 0) {
+        trueLen += ("  (DECLINATION " +
+            Number(reading.declination).toFixed(1) + "\u00b0 APPLIED)").length;
+    }
+    out.right = Math.max(out.right, -0.9 + trueLen * charW);
+    if (hasMag) {
+        var arm = CsSheetSetup.magneticUnit(reading.declination);
+        var armX = arm.x * A.magneticHeight, armY = arm.y * A.magneticHeight;
+        out.right = Math.max(out.right, armX + 0.12 + 0.2);
+        out.left = Math.max(out.left, -(armX - 0.1));
+        out.up = Math.max(out.up, armY + 0.18 + small);
+        out.down = 0.2 + small * 2 + small / 2;     // the magnetic caption line
+        out.right = Math.max(out.right, -0.9 +
+            CsSheetSetup.magneticText(reading).length * charW);
+    }
+    return out;
+};
+
+/**
+ * How far the scale bar's labels hang below its line, as a lift: the bar
+ * is drawn this far above its piece's bottom edge so the numbers stay
+ * on the right side of the margin. (They used to hang 0.18 in below it,
+ * across the bottom margin line.)
+ */
+CsSheetSetup.BAR_LIFT = CsSheetSetup.BAR.tick * 2 + CsSheetSetup.TEXT.small / 2 + 0.02;
+
+/**
+ * Where the sheet's furniture goes BY DEFAULT: the title block, the
+ * scale bar and the north arrow, each a box with a real size, packed
+ * into the band under the map so that none is outside the margin and
+ * none is on another.
+ *
+ * ONE ROW WHEN IT FITS, MORE WHEN IT DOES NOT. Title block (6 in), bar
+ * (about 3.6 in) and north arrow (about 3 in with its captions) need
+ * roughly 13 in side by side; an ARCH D sheet has 35, an ANSI A or an
+ * A4 has under 11 and a turned one under 8. The old layout put the
+ * pieces at fixed fractions of the width, which is how the arrow ended
+ * up on the title block on a small sheet. Pieces now wrap onto a second
+ * row, the band grows to hold it, and the map gives up that much paper.
+ *
+ * In a row the arrow is right-aligned to the margin, the title is left,
+ * and the bar sits in the middle of what is left.
+ *
+ * \param o.widthInches  the paper's width in the orientation drawn
+ * \param o.wants        {title, bar, north}
+ * \param o.titleHeight  the title block's height in inches
+ * \param o.reading      CsSheetSetup.latestDeclination's answer or null
+ * \return {footer, usable, pieces: {kind: {x, y, w, h, [pinX, pinY]}}}
+ *         x, y are INCHES from the margin box's lower left corner
+ */
+CsSheetSetup.furniture = function(o) {
+    var gap = 0.3, vgap = 0.2, pad = 0.4;
+    var usable = o.widthInches - CsSheetSetup.MARGIN_INCHES * 2;
+    var wants = isNull(o.wants) ? {} : o.wants;
+    var list = [];
+    if (wants.title === true) {
+        list.push({ kind: "title", w: CsSheetSetup.TITLE_INCHES,
+            h: Math.max(0.5, isNull(o.titleHeight) ? 2 : o.titleHeight) });
+    }
+    if (wants.bar === true) {
+        list.push({ kind: "bar", w: CsSheetSetup.BAR.length + 0.65,
+            h: CsSheetSetup.BAR_LIFT + CsSheetSetup.BAR.height +
+                CsSheetSetup.TEXT.body * 1.6 });
+    }
+    if (wants.north === true) {
+        var ext = CsSheetSetup.northExtent(o.reading);
+        list.push({ kind: "north", w: ext.left + ext.right,
+            h: ext.up + ext.down, pinX: ext.left, pinY: ext.down });
+    }
+    var rows = [];
+    for (var i = 0; i < list.length; i++) {
+        var row = rows.length > 0 ? rows[rows.length - 1] : null;
+        var need = (row !== null && row.items.length > 0 ? gap : 0) +
+            list[i].w;
+        if (row !== null && row.w + need <= usable + 1e-9) {
+            row.items.push(list[i]);
+            row.w += need;
+            row.h = Math.max(row.h, list[i].h);
+        } else {
+            rows.push({ items: [list[i]], w: list[i].w, h: list[i].h });
+        }
+    }
+    var pieces = {};
+    var y = 0;
+    for (var r = 0; r < rows.length; r++) {
+        var items = rows[r].items;
+        var x = 0;
+        var k;
+        for (k = 0; k < items.length; k++) {
+            items[k].x = x;
+            x += items[k].w + gap;
+        }
+        // the arrow goes to the right margin, and a bar left between the
+        // title and it is centred in the room there is
+        var last = items[items.length - 1];
+        if (items.length > 1 && last.kind === "north") {
+            last.x = Math.max(last.x, usable - last.w);
+            if (items.length === 3) {
+                var free = last.x - (items[0].x + items[0].w);
+                items[1].x = items[0].x + items[0].w +
+                    Math.max(gap, (free - items[1].w) / 2);
+            }
+        }
+        for (k = 0; k < items.length; k++) {
+            items[k].y = y;
+            pieces[items[k].kind] = items[k];
+        }
+        y += rows[r].h + vgap;
+    }
+    var total = rows.length > 0 ? y - vgap : 0;
+    return { footer: rows.length > 0 ? total + pad : 0, usable: usable,
+        rows: rows.length, pieces: pieces };
+};
+
+/** The footer band for one orientation of one paper -- the number fit(),
+ *  borderBox() and the tile layout all reserve. */
+CsSheetSetup.footerFor = function(o) {
+    var width = o.turned === true ? o.sheet.h : o.sheet.w;
+    return CsSheetSetup.furniture({ widthInches: width, wants: o.wants,
+        titleHeight: o.titleHeight, reading: o.reading }).footer;
 };
 
 // ---------------------------------------------------------------------
@@ -881,6 +1066,13 @@ CsSheetSetup.snapLines = function(preview, kind) {
         if (item.kind === kind) {
             continue;
         }
+        // The viewport lines up with the sheets (their map areas and the
+        // match lines); the furniture does not line up with the OTHER
+        // sheets, which carry their own copies of it.
+        if (kind !== "cave" && (item.kind === "tile" ||
+                item.kind === "tile-margin" || item.kind === "matchline")) {
+            continue;
+        }
         var b = item.box;
         push(out.xs, b.minX);
         push(out.xs, b.maxX);
@@ -1020,8 +1212,59 @@ CsSheetSetup.preview = function(state) {
     }
     var scale = state.scale;
     var wants = isNull(state.wants) ? {} : state.wants;
-    var box = CsSheetSetup.borderBox(state.caveBox, state.sheet, scale,
-        state.turned === true, state.footerInches);
+    // TILED: the cave overflows one sheet, so it is laid over a grid
+    // (CsSheetTile). The furniture is shown once, on the first sheet --
+    // every sheet gets the same arrangement, so one is the picture of all.
+    var tl = state.tileLayout;
+    var tiled = !isNull(tl) && tl.tiled === true && tl.tiles.length > 0;
+    // THE FURNITURE'S OWN LAYOUT (see CsSheetSetup.furniture): sized
+    // boxes packed under the map, none outside the margin and none on
+    // another. When the caller knows the title block's height the band
+    // under the map is whatever that layout needs; older callers that
+    // only know a footer keep theirs.
+    var paperTurned = tiled ? tl.turned === true : state.turned === true;
+    var reading = isNull(state.declination) ? null :
+        { declination: state.declination,
+            date: isNull(state.declinationDate) ? "" : state.declinationDate };
+    var titleHeight = !isNull(state.titleHeight) ? state.titleHeight :
+        Math.max(0.5, (isNull(state.footerInches) ? 2 :
+            state.footerInches) - 0.2);
+    var fur = CsSheetSetup.furniture({
+        widthInches: paperTurned ? state.sheet.h : state.sheet.w,
+        wants: wants, titleHeight: titleHeight, reading: reading });
+    var footerUsed = isNull(state.titleHeight) ? state.footerInches :
+        fur.footer;
+    // THE VIEWPORT IS WHAT MOVES. The sheet the cartographer placed stays
+    // where it is on the screen and the cave -- the blue box -- slides
+    // over it; sheets are created beside it wherever the cave spills past
+    // its margin. The layout was worked out in the cave's own frame (the
+    // paper slid the other way by the drag), so it is shifted back here
+    // to keep that sheet still.
+    var drag = CsSheetSetup.offsetOf(state.offsets, "cave");
+    var tx = tiled ? drag.x * scale : 0, ty = tiled ? drag.y * scale : 0;
+    var moved = function(b) {
+        var r = {};
+        for (var key in b) {
+            if (b.hasOwnProperty(key)) { r[key] = b[key]; }
+        }
+        r.minX = b.minX + tx; r.maxX = b.maxX + tx;
+        r.minY = b.minY + ty; r.maxY = b.maxY + ty;
+        return r;
+    };
+    // The paper shown, with the furniture on it, is the TITLE sheet's (A1,
+    // the north-west one): it is the only sheet with the whole set, and
+    // the others carry just a scale bar and a north arrow in the same
+    // places.
+    var primary = null;
+    if (tiled) {
+        primary = tl.tiles[0];
+        for (var pk = 0; pk < tl.tiles.length; pk++) {
+            if (tl.tiles[pk].title === true) { primary = tl.tiles[pk]; }
+        }
+    }
+    var box = tiled ? moved(primary.paper) :
+        CsSheetSetup.borderBox(state.caveBox, state.sheet, scale,
+            state.turned === true, footerUsed);
 
     // EVERY MOVABLE PIECE IS ADDED THROUGH ITS OWN OFFSET. A drag is
     // remembered in inches of paper, so it survives a scale step and a
@@ -1044,43 +1287,61 @@ CsSheetSetup.preview = function(state) {
         planMargin.maxX, planMargin.maxY);
     add("cave", state.caveBox.minX, state.caveBox.minY,
         state.caveBox.maxX, state.caveBox.maxY);
+    if (tiled) {
+        // EVERY SHEET'S MAP AREA, named by its place in the grid. Only the
+        // title sheet is drawn as paper (with the furniture on it): the
+        // papers overlap by their footers, so drawing all of them buries
+        // each sheet's name under the next one's furniture.
+        for (var ti = 0; ti < tl.tiles.length; ti++) {
+            var mp = moved(tl.tiles[ti].map);
+            add("tile", mp.minX, mp.minY, mp.maxX, mp.maxY);
+            out.items[out.items.length - 1].label = tl.tiles[ti].id;
+        }
+        var ml = Math.max(scale * 0.03, 1e-6);
+        for (var mi = 0; mi < tl.matchLines.length; mi++) {
+            var line = tl.matchLines[mi];
+            add("matchline", Math.min(line.x1, line.x2) + tx - ml,
+                Math.min(line.y1, line.y2) + ty - ml,
+                Math.max(line.x1, line.x2) + tx + ml,
+                Math.max(line.y1, line.y2) + ty + ml);
+        }
+        out.tiled = true;
+        var unionBox = { minX: Infinity, minY: Infinity, maxX: -Infinity,
+            maxY: -Infinity };
+        for (var ui = 0; ui < tl.tiles.length; ui++) {
+            var um = tl.tiles[ui].map;
+            unionBox.minX = Math.min(unionBox.minX, um.minX + tx);
+            unionBox.minY = Math.min(unionBox.minY, um.minY + ty);
+            unionBox.maxX = Math.max(unionBox.maxX, um.maxX + tx);
+            unionBox.maxY = Math.max(unionBox.maxY, um.maxY + ty);
+        }
+        out.tileUnion = unionBox;
+    }
 
     var inch = function(v) { return v * scale; };
-    // ON THE MARGIN LINE. With a margin of nearly three inches the
-    // furniture could sit at a fraction of it and still be inside the
-    // guide; at half an inch, anything less than the whole margin is
-    // furniture printed in the plotter's own unprintable border.
-    var foot = box.minY + box.margin;
-
-    if (wants.title === true) {
-        var titleH = isNull(state.footerInches) ? 2 : state.footerInches;
-        add("title", box.minX + box.margin,
-            box.minY + box.margin,
-            box.minX + box.margin + inch(CsSheetSetup.TITLE_INCHES),
-            box.minY + box.margin + inch(titleH));
-    }
-    if (wants.bar === true) {
-        var barX = box.minX + box.width * 0.45;
-        add("bar", barX, foot, barX + inch(CsSheetSetup.BAR.length),
-            foot + inch(CsSheetSetup.BAR.height * 3));
-    }
-    if (wants.north === true) {
-        var nx = box.maxX - box.margin;
-        // BOTH ARMS, and the two letters at the magnetic tip: the box
-        // is what a caver grabs and what the fit check measures, so it
-        // has to be the whole piece rather than the true arrow alone.
-        var arm = CsSheetSetup.magneticUnit(state.declination);
-        var reach = CsSheetSetup.NORTH.magneticHeight;
-        var armX = arm.x * reach;
-        var armY = arm.y * reach;
-        add("north",
-            nx + inch(Math.min(-0.2, armX - 0.1)), foot,
-            nx + inch(Math.max(0.2, armX + 0.35)),
-            foot + inch(Math.max(CsSheetSetup.NORTH.height, armY)));
-    }
+    // Each piece is a box at a place in inches from the margin box's
+    // lower left corner -- the same numbers the drawn sheet reads.
+    var fx = box.minX + box.margin, fy = box.minY + box.margin;
+    var piece = function(kind) {
+        var p = fur.pieces[kind];
+        if (isNull(p)) { return; }
+        add(kind, fx + inch(p.x), fy + inch(p.y),
+            fx + inch(p.x + p.w), fy + inch(p.y + p.h));
+    };
+    if (wants.title === true) { piece("title"); }
+    if (wants.bar === true) { piece("bar"); }
+    if (wants.north === true) { piece("north"); }
 
     if (state.elevation === true) {
-        var second = CsSheetSetup.elevationSheetBox(box, scale);
+        var planFor = box;
+        if (tiled) {
+            // below the WHOLE grid, one sheet in size
+            planFor = { minX: tl.span.minX + tx, maxX: tl.span.minX + tx + box.width,
+                minY: tl.span.minY + ty, maxY: tl.span.minY + ty + box.height,
+                width: box.width, height: box.height, footer: box.footer,
+                margin: box.margin };
+        }
+        var second = CsSheetSetup.elevationSheetBox(planFor, scale);
         add("elevation-sheet", second.minX, second.minY,
             second.maxX, second.maxY);
         var elevMargin = CsSheetSetup.marginBox(second);
@@ -1152,7 +1413,8 @@ CsSheetSetup.previewFits = function(preview) {
     var i, item;
     for (i = 0; i < preview.items.length; i++) {
         item = preview.items[i];
-        if (item.kind === "sheet" || item.kind === "elevation-sheet") {
+        if (item.kind === "sheet" || item.kind === "elevation-sheet" ||
+                item.kind === "tile") {
             sheets.push(item.box);
         }
     }
@@ -1160,13 +1422,23 @@ CsSheetSetup.previewFits = function(preview) {
     for (i = 0; i < preview.items.length; i++) {
         item = preview.items[i];
         if (item.kind === "sheet" || item.kind === "elevation-sheet" ||
-                item.kind === "margin") {
+                item.kind === "margin" || item.kind === "tile" ||
+                item.kind === "tile-margin" || item.kind === "matchline") {
             // A MARGIN IS A GUIDE, NOT A PIECE. It is drawn inside its
             // own sheet by construction, and counting it would make the
             // answer "everything fits" say nothing.
             continue;
         }
         var inside = false;
+        // A TILED CAVE SPANS SHEETS BY DESIGN: it only has to lie
+        // within the grid, not within any one sheet.
+        if (item.kind === "cave" && !isNull(preview.tileUnion) &&
+                item.box.minX >= preview.tileUnion.minX - 0.001 &&
+                item.box.maxX <= preview.tileUnion.maxX + 0.001 &&
+                item.box.minY >= preview.tileUnion.minY - 0.001 &&
+                item.box.maxY <= preview.tileUnion.maxY + 0.001) {
+            inside = true;
+        }
         for (var s = 0; s < sheets.length; s++) {
             if (item.box.minX >= sheets[s].minX - 0.001 &&
                     item.box.maxX <= sheets[s].maxX + 0.001 &&
@@ -1239,12 +1511,89 @@ CsSheetSetup.surveyedByFor = function(survey) {
         var parts = String(team).split(",");
         for (var p = 0; p < parts.length; p++) {
             var name = parts[p].replace(/^\s+|\s+$/g, "");
-            if (name !== "" && names.indexOf(name) === -1) {
+            if (name !== "") {
                 names.push(name);
             }
         }
     }
-    return names.join(", ");
+    return CsSheetSetup.dedupeNames(names).join(", ");
+};
+
+/**
+ * A crew list with each person once.
+ *
+ * Eleven trips list their parties by hand, so one caver turns up as
+ * "Nathan Schonegg", "NATHAN SCHONEGG", and sometimes just "Nathan" -- and
+ * a credit line reading "..., RHONDA, ADAM, RHONDA MATTESON, ADAM
+ * STANICH, NATHAN SCHONEGG" credits three people twice (Nathan, 2026-10-04:
+ * "you need to dedupe the names in the list").
+ *
+ * TWO NAMES ARE THE SAME PERSON when they match ignoring case, spacing and
+ * full stops, OR when the shorter is a first name (or "Nathan S.") that
+ * fits exactly ONE longer name in the list. If two longer names fit -- two
+ * Adams -- the short one is left alone: guessing which Adam is how a
+ * surveyor is credited with someone else's work. Different spellings
+ * ("Jeanna" and "Jeanne") are never merged; that is a person's call.
+ *
+ * The first spelling seen is the one kept, and the order is the order
+ * names first appeared.
+ */
+CsSheetSetup.dedupeNames = function(names) {
+    var key = function(n) {
+        return String(n).replace(/\./g, " ").replace(/\s+/g, " ")
+            .replace(/^\s+|\s+$/g, "").toLowerCase();
+    };
+    // exact duplicates first, first spelling wins
+    var seen = {};
+    var unique = [];
+    for (var i = 0; i < names.length; i++) {
+        var k = key(names[i]);
+        if (k === "" || seen.hasOwnProperty(k)) { continue; }
+        seen[k] = true;
+        unique.push({ name: String(names[i]).replace(/\s+/g, " ")
+            .replace(/^\s+|\s+$/g, ""),
+            tokens: k.split(" ") });
+    }
+    // does the shorter name fit inside the longer one, token for token in
+    // order, a one-letter token standing for any name that starts with it?
+    var fits = function(shortT, longT) {
+        if (shortT.length > longT.length || (shortT.length === longT.length &&
+                shortT.join(" ") === longT.join(" "))) {
+            return false;
+        }
+        var at = 0;
+        for (var s = 0; s < shortT.length; s++) {
+            var found = false;
+            while (at < longT.length) {
+                var t = longT[at++];
+                if (t === shortT[s] ||
+                        (shortT[s].length === 1 && t.charAt(0) === shortT[s])) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) { return false; }
+        }
+        // the first token must match too: "Adam" is Adam Stanich, not
+        // somebody whose SECOND name happens to be Adam
+        return longT[0] === shortT[0] ||
+            (shortT[0].length === 1 && longT[0].charAt(0) === shortT[0]);
+    };
+    var gone = {};
+    for (var a = 0; a < unique.length; a++) {
+        var candidates = 0;
+        for (var b = 0; b < unique.length; b++) {
+            if (a !== b && !gone[b] && fits(unique[a].tokens, unique[b].tokens)) {
+                candidates++;
+            }
+        }
+        if (candidates === 1) { gone[a] = true; }
+    }
+    var out = [];
+    for (var o = 0; o < unique.length; o++) {
+        if (!gone[o]) { out.push(unique[o].name); }
+    }
+    return out;
 };
 
 /**
@@ -1313,6 +1662,37 @@ CsSheetSetup.pdfPathFor = function(sheetPath) {
 };
 
 /**
+ * Which PDF each sheet file goes into.
+ *
+ * ONE FILE FOR THE WHOLE PLAN SET when the plan is a grid of sheets
+ * (Nathan, 2026-10-04): "<Cave> Plan Sheet A1.dxf", "... A2.dxf" and so
+ * on become the pages of a single "<Cave> Plan Sheets.pdf", in the order
+ * the paths arrive (grid order, A1 first). A lone plan sheet and the
+ * profile sheet each keep a PDF of their own, as before.
+ *
+ * \param paths sheet file paths, in build order
+ * \return [{pdf, paths}] -- more than one path means a multi-page PDF
+ */
+CsSheetSetup.pdfJobs = function(paths) {
+    var jobs = [];
+    var set = null;
+    for (var i = 0; i < paths.length; i++) {
+        var p = String(paths[i]);
+        var m = /^(.*) Plan Sheet [A-Z]+[0-9]+\.dxf$/i.exec(p);
+        if (m !== null) {
+            if (set === null) {
+                set = { pdf: m[1] + " Plan Sheets.pdf", paths: [] };
+                jobs.push(set);
+            }
+            set.paths.push(p);
+        } else {
+            jobs.push({ pdf: CsSheetSetup.pdfPathFor(p), paths: [p] });
+        }
+    }
+    return jobs;
+};
+
+/**
  * The page size a PDF declares, in inches, read from its own text; null
  * when it carries no /MediaBox. A PDF point is 1/72 inch. This is how
  * an export proves the paper it asked for is the paper it got.
@@ -1356,7 +1736,7 @@ CsSheetSetup.pageMatches = function(page, sheet, tolInches) {
  * cave" -- CsShelf.pickDrawing has to choose, and a generated sheet is
  * the wrong answer.
  */
-CsSheetSetup.sheetPathFor = function(caveFolder, caveName, kind) {
+CsSheetSetup.sheetPathFor = function(caveFolder, caveName, kind, tileId) {
     var folder = isNull(caveFolder) ? "" :
         String(caveFolder).replace(/\/+$/, "");
     var name = CsPackage.safeName(isNull(caveName) ? "" : caveName);
@@ -1368,8 +1748,12 @@ CsSheetSetup.sheetPathFor = function(caveFolder, caveName, kind) {
     // one drawing a plotter sees as one enormous page: printing either
     // of them means a window selection by hand, every time, for every
     // copy. A file per sheet is a file per press of Print.
+    // A TILED plan is a grid of sheets, one file each, named by its
+    // place in the grid: "<Cave> Plan Sheet B2.dxf".
+    var tile = (isNull(tileId) || String(tileId) === "") ? "" :
+        " " + String(tileId);
     var which = (kind === CsSheetSetup.ELEVATION_SHEET) ?
-        " Profile Sheet.dxf" : " Plan Sheet.dxf";
+        " Profile Sheet.dxf" : " Plan Sheet" + tile + ".dxf";
     return folder + "/" + CsSheetSetup.SHEETS_FOLDER + "/" + name + which;
 };
 

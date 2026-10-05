@@ -2049,6 +2049,7 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
             return CsRevise.moveLinework(doc, di, oldPos, newPos,
                 tripNames, lwExtent);
         });
+        CsRevise.settleSections(doc, di);
     }
     var lwLine = lw === null ? "" :
         ("\n\n" + CsRevise.lineworkSummary(lw.moved, lw.unmoved,

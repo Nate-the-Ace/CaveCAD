@@ -102,6 +102,85 @@ SheetSetup.caveBox = function(doc) {
     return box;
 };
 
+/**
+ * What the cave is MADE OF, as a list of boxes: one per plan entity,
+ * for a tiled plan to decide which sheets have anything on them. Scans
+ * and the aerial photograph are left out (a sheet carries no raster, so
+ * a photograph under the whole cave must not make every tile "occupied"),
+ * and so is anything this tool drew. Capped, because a box per entity of
+ * a big drawing is thousands.
+ */
+SheetSetup.occupancy = function(doc) {
+    var out = [];
+    var ids = doc.queryAllEntities(false, false);
+    var stride = Math.max(1, Math.ceil(ids.length / 8000));
+    for (var i = 0; i < ids.length; i += stride) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || CsTags.get(e, SS_TAG) !== "" ||
+                e instanceof RImageEntity) {
+            continue;
+        }
+        if (CsLayers.frameOf(CsBind.layerNameOf(doc, e)) !== "plan") {
+            continue;
+        }
+        try {
+            var b = e.getBoundingBox();
+            var mn = b.getMinimum(), mx = b.getMaximum();
+            if (isFinite(mn.x) && isFinite(mx.x)) {
+                out.push({ minX: mn.x, minY: mn.y, maxX: mx.x, maxY: mx.y });
+            }
+        } catch (eBox) {
+        }
+    }
+    return out;
+};
+
+/**
+ * The band under the map, as a function of the paper's orientation, for
+ * the choices on the panel (which pieces are ticked): the furniture packs
+ * into more rows on a narrower sheet, so the answer depends on which way
+ * up the paper is.
+ */
+SheetSetup.footerFn = function(state, sheet, wants) {
+    var picked = isNull(wants) ? { title: true, bar: true, north: true } :
+        wants;
+    var reading = isNull(state.declination) ? null :
+        { declination: state.declination,
+            date: isNull(state.declinationDate) ? "" : state.declinationDate };
+    return function(turned) {
+        return CsSheetSetup.footerFor({ sheet: sheet, turned: turned,
+            wants: picked, titleHeight: state.titleHeight,
+            reading: reading });
+    };
+};
+
+/**
+ * The tile layout for the choices on the panel, or null when the cave
+ * fits ONE sheet at this scale (so everything below stays exactly as it
+ * always was for the ordinary case).
+ *
+ * The cave dragged by hand slides the PAPER under it the other way,
+ * the same rule borderBox follows -- which is the layout's shiftInches.
+ */
+SheetSetup.tileLayoutFor = function(state, sheet, scale, offsets, wants,
+        turned) {
+    if (isNull(state) || isNull(state.caveBox) || isNull(sheet)) {
+        return null;
+    }
+    var drag = CsSheetSetup.offsetOf(offsets, "cave");
+    var layout = CsSheetTile.layout({ caveBox: state.caveBox,
+        sheet: sheet, scale: scale,
+        // NO BAND IS RESERVED on a tiled plan: every sheet is map right
+        // out to the page margin, and the title block, bar and arrow sit
+        // over it on a white backing (see clipToMap).
+        footerInches: 0,
+        // the paper's way up is the caver's, never worked out for them
+        turned: turned === true,
+        occupied: state.occupied,
+        shiftInches: { x: -drag.x, y: -drag.y } });
+    return layout.tiled === true ? layout : null;
+};
+
 /** True when this drawing has an extended elevation to place. */
 SheetSetup.hasElevation = function(doc) {
     try {
@@ -238,6 +317,11 @@ SheetSetup.PREVIEW_STYLE = {
     "sheet": { line: [70, 70, 70], fill: [255, 255, 255], width: 2 },
     "elevation-sheet": { line: [70, 70, 70], fill: [255, 255, 255],
         width: 2 },
+    "tile": { line: [90, 90, 90], fill: [255, 255, 255], width: 1 },
+    "tile-margin": { line: [170, 170, 170], fill: null, width: 1,
+        dashed: true },
+    "matchline": { line: [200, 40, 160], fill: [200, 40, 160, 120],
+        width: 1 },
     "margin": { line: [150, 150, 150], fill: null, width: 1,
         dashed: true },
     "cave": { line: [40, 90, 190], fill: [40, 90, 190, 40], width: 1 },
@@ -386,6 +470,7 @@ SheetSetup.readState = function(doc) {
             "first -- a sheet with nothing in it has no scale to be at.";
         return state;
     }
+    state.occupied = SheetSetup.occupancy(doc);
     var perFoot = CsShapeLine.perFoot(doc);
     state.caveW = (state.caveBox.maxX - state.caveBox.minX) / perFoot;
     state.caveH = (state.caveBox.maxY - state.caveBox.minY) / perFoot;
@@ -405,6 +490,8 @@ SheetSetup.readState = function(doc) {
     state.footerInches = Math.max(
         CsSheetSetup.linesHeight(state.titleLines) + 0.4,
         CsSheetSetup.BAR.height + CsSheetSetup.TEXT.body * 4);
+    // The title block's own height: what the furniture layout packs.
+    state.titleHeight = CsSheetSetup.linesHeight(state.titleLines) + 0.2;
     state.hasElevation = SheetSetup.hasElevation(doc);
     state.chunked = false;
     if (state.hasElevation) {
@@ -551,11 +638,19 @@ SheetSetup.buildDock = function(appWin) {
     form.addWidget(w.sheetCombo, 0, 1);
     form.addWidget(new QLabel(qsTr("Scale:")), 0, 2);
     form.addWidget(w.scaleCombo, 0, 3);
+    // WHICH WAY UP is part of choosing the paper, so it sits with the
+    // paper and the scale: the sheet is landscape, as listed, unless
+    // this is ticked.
+    w.cbTurn = new QCheckBox(qsTr("Portrait"));
+    w.cbTurn.toolTip = qsTr("The paper is used the way up you set it: " +
+        "landscape, as the paper is listed, unless this is ticked.");
+    form.addWidget(w.cbTurn, 0, 4);
     try {
         form.setColumnStretch(0, 0);
         form.setColumnStretch(1, 1);
         form.setColumnStretch(2, 0);
         form.setColumnStretch(3, 1);
+        form.setColumnStretch(4, 0);
     } catch (eStretch) {
         // a bridge without the setter gets whatever the grid gives,
         // which is still one row
@@ -662,12 +757,29 @@ SheetSetup.buildDock = function(appWin) {
     w.cbNorth.toggled.connect(changed);
     w.cbTitle.toggled.connect(changed);
     w.cbElevation.toggled.connect(changed);
+    w.cbTurn.toggled.connect(function() {
+        // a different way up fits a different scale
+        SheetSetup.suggestScale();
+        changed();
+    });
     w.buildButton.clicked.connect(function() { SheetSetup.build(); });
     w.pdfButton.clicked.connect(function() { SheetSetup.exportPdf(); });
     w.refreshButton.clicked.connect(function() { SheetSetup.refresh(); });
     w.resetButton.clicked.connect(function() { SheetSetup.resetLayout(); });
 
     return dock;
+};
+
+/** Which way up the paper is: the way the caver set it, never chosen
+ *  for them. */
+SheetSetup.turnedOf = function(w) {
+    return w.cbTurn.checked === true;
+};
+
+/** Which furniture the panel has ticked, in the shape the layout reads. */
+SheetSetup.wantsOf = function(w) {
+    return { title: w.cbTitle.checked === true, bar: w.cbBar.checked === true,
+        north: w.cbNorth.checked === true };
 };
 
 /** The paper's most detailed standard scale, chosen for the caver. */
@@ -678,7 +790,8 @@ SheetSetup.suggestScale = function() {
     }
     var sheet = CsSheetSetup.sheetByName(String(w.sheetCombo.currentText));
     var fit = CsSheetSetup.fit(w.state.caveW, w.state.caveH, sheet,
-        w.state.footerInches);
+        SheetSetup.footerFn(w.state, sheet, SheetSetup.wantsOf(w)),
+        SheetSetup.turnedOf(w));
     var at = CsSheetSetup.SCALES.indexOf(fit.scale);
     var was = w.quiet;
     w.quiet = true;
@@ -769,12 +882,20 @@ SheetSetup.repaint = function() {
     }
     var sheet = CsSheetSetup.sheetByName(String(w.sheetCombo.currentText));
     var scale = CsSheetSetup.SCALES[w.scaleCombo.currentIndex];
+    var picked = SheetSetup.wantsOf(w);
     var fit = CsSheetSetup.fit(w.state.caveW, w.state.caveH, sheet,
-        w.state.footerInches);
+        SheetSetup.footerFn(w.state, sheet, picked), SheetSetup.turnedOf(w));
 
+    // THE CAVE OVERFLOWS ONE SHEET at this scale: lay it over a grid.
+    var tiles = SheetSetup.tileLayoutFor(w.state, sheet, scale, w.offsets,
+        picked, SheetSetup.turnedOf(w));
+    w.tiles = tiles;
     var preview = CsSheetSetup.preview({
         caveBox: w.state.caveBox, sheet: sheet, scale: scale,
+        tileLayout: tiles,
         turned: fit.turned, footerInches: w.state.footerInches,
+        titleHeight: w.state.titleHeight,
+        declinationDate: w.state.declinationDate,
         wants: { border: w.cbBorder.checked, bar: w.cbBar.checked,
             north: w.cbNorth.checked, title: w.cbTitle.checked },
         elevation: w.cbElevation.checked === true,
@@ -789,9 +910,19 @@ SheetSetup.repaint = function() {
         // and not otherwise: a re-fit on every repaint would make a
         // drag chase its own tail, zooming out from under the cursor
         // as the piece it grabbed moved the bounds.
+        // The sheet ARRANGEMENT is part of the page -- more sheets want
+        // a wider view -- but not WHILE a sheet is held: a neighbour
+        // appearing mid-drag must not zoom the view out from under the
+        // hand that is moving it. The view settles when the sheet is let go.
+        var arrangement = tiles === null ? "one" : (tiles.rows + "x" +
+            tiles.cols + "x" + tiles.tiles.length);
+        if (!isNull(w.dragKind) && !isNull(w.lastArrangement)) {
+            arrangement = w.lastArrangement;
+        }
+        w.lastArrangement = arrangement;
         var pageKey = [String(w.sheetCombo.currentText), scale,
             fit.turned, w.cbElevation.checked === true,
-            w.state.recordPath].join("|");
+            w.state.recordPath, arrangement].join("|");
         CsSheetPreview.show(w.pane, preview, { scale: scale,
             guideX: w.guideX, guideY: w.guideY,
             centredX: w.centredX === true, centredY: w.centredY === true,
@@ -836,9 +967,27 @@ SheetSetup.repaint = function() {
         qsTr("Everything sits on the paper.") :
         qsTr("Off the paper: %1. Try a smaller scale or bigger paper.")
             .arg(spill.spilling.join(", "));
+    if (tiles !== null) {
+        // MORE THAN ONE SHEET IS NOT A PROBLEM, it is the answer: say
+        // what will be built, and what the sheets are called.
+        w.fitLabel.text = qsTr("The plan measures %1 x %2 ft: too big " +
+            "for one sheet at 1\" = %3 ft.")
+            .arg(Math.round(w.state.caveW)).arg(Math.round(w.state.caveH))
+            .arg(scale) + "  " + qsTr("It tiles over a %1.")
+            .arg(CsSheetTile.describe(tiles));
+        w.note.text = qsTr("Drag the blue viewport: sheets appear " +
+            "beside the first wherever the cave runs past a margin and " +
+            "go again when it does not. Each carries a match line and " +
+            "the name of the sheet that continues it, and repeats %1 in " +
+            "of its neighbour past the line.").arg(CsSheetTile.OVERLAP_INCHES) +
+            (spill.fits ? "" : "  " + qsTr("Off the grid: %1.")
+                .arg(spill.spilling.join(", ")));
+    }
     w.buildButton.enabled = (w.state.recordPath !== "");
-    w.buildButton.text = (w.state.rebuilding === true) ?
-        qsTr("Rebuild This Sheet") : qsTr("Build Sheet");
+    w.buildButton.text = (tiles !== null) ?
+        qsTr("Build %1 Sheets").arg(tiles.tiles.length) :
+        ((w.state.rebuilding === true) ?
+            qsTr("Rebuild This Sheet") : qsTr("Build Sheet"));
     if (w.state.recordPath === "") {
         w.buildButton.toolTip = qsTr("Save this drawing first -- the " +
             "sheet is written beside it, and an unsaved drawing has " +
@@ -900,10 +1049,14 @@ SheetSetup.build = function() {
     var sheet = CsSheetSetup.sheetByName(String(w.sheetCombo.currentText));
     var scale = CsSheetSetup.SCALES[w.scaleCombo.currentIndex];
     var fit = CsSheetSetup.fit(w.state.caveW, w.state.caveH, sheet,
-        w.state.footerInches);
+        SheetSetup.footerFn(w.state, sheet, SheetSetup.wantsOf(w)),
+        SheetSetup.turnedOf(w));
+    var tiles = SheetSetup.tileLayoutFor(w.state, sheet, scale, w.offsets,
+        SheetSetup.wantsOf(w), SheetSetup.turnedOf(w));
     var said = SheetSetup.intoCopy(w.state.recordPath, {
         caveBox: w.state.caveBox, sheet: sheet, scale: scale,
-        turned: fit.turned,
+        tiles: tiles,
+        turned: tiles !== null ? tiles.turned : fit.turned,
         wants: { border: w.cbBorder.checked, bar: w.cbBar.checked,
             north: w.cbNorth.checked, title: w.cbTitle.checked },
         filled: w.state.filled, survey: w.state.survey,
@@ -986,9 +1139,11 @@ SheetSetup.dragTo = function(kind, snapped) {
     // reports the whole move each time, measured against the box it
     // grabbed, so adding each frame to the last would move the piece
     // twice as far as the mouse.
+    var stored = kind;
+    var sign = 1;
     if (isNull(w.dragFrom) || w.dragKind !== kind) {
         w.dragKind = kind;
-        w.dragFrom = CsSheetSetup.offsetOf(w.offsets, kind);
+        w.dragFrom = CsSheetSetup.offsetOf(w.offsets, stored);
     }
     var moved = {};
     var k;
@@ -997,8 +1152,8 @@ SheetSetup.dragTo = function(kind, snapped) {
             moved[k] = CsSheetSetup.offsetOf(w.offsets, k);
         }
     }
-    moved[kind] = { x: w.dragFrom.x + snapped.dx / scale,
-                    y: w.dragFrom.y + snapped.dy / scale };
+    moved[stored] = { x: w.dragFrom.x + sign * snapped.dx / scale,
+                      y: w.dragFrom.y + sign * snapped.dy / scale };
     w.offsets = moved;
     w.guideX = snapped.guideX;
     w.guideY = snapped.guideY;
@@ -1107,9 +1262,20 @@ SheetSetup.intoCopy = function(recordPath, opts) {
     // file -- never one drawing holding both, which is one enormous
     // page as far as a plotter is concerned. See
     // CsSheetSetup.sheetPathFor.
-    var kinds = [CsSheetSetup.PLAN_SHEET];
+    //
+    // A TILED PLAN IS A GRID OF FILES, one per sheet the cave touches,
+    // named by place in the grid ("<Cave> Plan Sheet B2.dxf").
+    var jobs = [];
+    if (!isNull(opts.tiles) && opts.tiles.tiled === true) {
+        for (var ti = 0; ti < opts.tiles.tiles.length; ti++) {
+            jobs.push({ kind: CsSheetSetup.PLAN_SHEET,
+                tile: opts.tiles.tiles[ti] });
+        }
+    } else {
+        jobs.push({ kind: CsSheetSetup.PLAN_SHEET, tile: null });
+    }
     if (opts.elevation === true) {
-        kinds.push(CsSheetSetup.ELEVATION_SHEET);
+        jobs.push({ kind: CsSheetSetup.ELEVATION_SHEET, tile: null });
     }
 
     var written = [];
@@ -1118,8 +1284,9 @@ SheetSetup.intoCopy = function(recordPath, opts) {
     // "nothing written".
     SheetSetup.lastWritten = written;
     var said = "";
-    for (var k = 0; k < kinds.length; k++) {
-        var target = CsSheetSetup.sheetPathFor(folder, caveName, kinds[k]);
+    for (var k = 0; k < jobs.length; k++) {
+        var target = CsSheetSetup.sheetPathFor(folder, caveName,
+            jobs[k].kind, jobs[k].tile === null ? "" : jobs[k].tile.id);
         var di = new RDocumentInterface(
             new RDocument(new RMemoryStorage(), createSpatialIndex()));
         try {
@@ -1133,7 +1300,9 @@ SheetSetup.intoCopy = function(recordPath, opts) {
                     one[key] = opts[key];
                 }
             }
-            one.kind = kinds[k];
+            one.kind = jobs[k].kind;
+            one.tile = jobs[k].tile;
+            one.tileCount = isNull(opts.tiles) ? 0 : opts.tiles.tiles.length;
             said = SheetSetup.draw(di.getDocument(), di, one);
             if (!di.exportFile(target, CsSanitize.dxfFilter())) {
                 return "Sheet Setup: could not write " + target + ".";
@@ -1155,8 +1324,46 @@ SheetSetup.intoCopy = function(recordPath, opts) {
     for (var n = 0; n < written.length; n++) {
         names.push(CsShelf.basename(written[n]));
     }
+    if (!isNull(opts.tiles) && opts.tiles.tiled === true) {
+        said = "Sheet Setup: a " + CsSheetTile.describe(opts.tiles) +
+            ", at 1\" = " + opts.scale +
+            " ft on " + opts.sheet.name + ", each with its match lines " +
+            "and the name of the sheet that continues it.";
+        if (names.length > 4) {
+            names = names.slice(0, 3).concat(["... and " +
+                (names.length - 3) + " more"]);
+        }
+    }
     var tail = " Written to " + CsSheetSetup.SHEETS_FOLDER + "/: " +
         names.join(" and ") + " -- your own drawing was not touched.";
+    // EARLIER PLAN SHEETS THIS SET REPLACES ARE NAMED, not deleted: a
+    // layout with fewer sheets (or the single sheet it used to be) leaves
+    // the old files beside the new ones, and a stale "Plan Sheet A4"
+    // looks exactly like part of the set.
+    try {
+        var older = (new QDir(folder + "/" + CsSheetSetup.SHEETS_FOLDER))
+            .entryList(["* Plan Sheet*.dxf"], QDir.Files);
+        var stale = [];
+        for (var so = 0; so < older.length; so++) {
+            var theirPath = folder + "/" + CsSheetSetup.SHEETS_FOLDER + "/" +
+                older[so];
+            var kept = false;
+            for (var sw = 0; sw < written.length; sw++) {
+                if ((new QFileInfo(written[sw])).fileName() === older[so]) {
+                    kept = true;
+                }
+            }
+            if (!kept && theirPath.indexOf(caveName) >= 0) {
+                stale.push(String(older[so]));
+            }
+        }
+        if (stale.length > 0 && !isNull(opts.tiles)) {
+            tail += " Plan sheets from an earlier layout are still in that " +
+                "folder and are NOT part of this set: " + stale.join(", ") +
+                ".";
+        }
+    } catch (eStale) {
+    }
     // A SHEET ALREADY ON SCREEN IS NOT REOPENED (Nathan, 2026-09-14:
     // "Build Sheet failed to open the built sheet"). QCAD's openFiles
     // walks the open tabs first and, finding one whose file name
@@ -1261,6 +1468,175 @@ SheetSetup.openPending = function() {
 };
 
 /**
+ * Clips everything on a sheet that is not sheet furniture, inside the
+ * caller's operation:
+ *
+ *   to the MAP AREA `rect` (a tiled sheet shows only its own part of the
+ *   map; null skips this), and
+ *   around the HOLES -- the boxes the sheet's own elements stand in. A
+ *   title block, scale bar or north arrow is backed WHITE: whatever the
+ *   viewport has put under it is cut away, so the element reads clean
+ *   however the map was slid under it. (A white fill is no use: a CAD
+ *   plot prints anything near white as black.)
+ *
+ *   untouched            wholly inside the map and clear of every hole
+ *   dropped              wholly outside the map, or its middle in a hole
+ *   a line, a polyline   cut at the map edge and around each hole; the
+ *                        parts left are kept, as open polylines carrying
+ *                        the original's layer, colour, linetype and weight
+ *                        (a bulged segment is followed as the arc it is)
+ *   a spline             the same, through its polyline
+ *   anything else        kept or dropped by where its middle is -- a
+ *                        symbol, a note, a circle is small beside a sheet
+ *
+ * Sheet furniture (anything this tool tagged) and the sheet's own mark
+ * are never touched. The sheet is a derived file, rebuilt from the
+ * record on every build, so replacing a long wall with the pieces of it
+ * that survive loses nothing.
+ *
+ * \return { kept, trimmed, dropped }
+ */
+SheetSetup.clipToMap = function(doc, op, rect, holes) {
+    var out = { kept: 0, trimmed: 0, dropped: 0 };
+    var cut = isNull(holes) ? [] : holes;
+    var ids = doc.queryAllEntities(false, false);
+    var carry = function(from, to) {
+        to.setLayerId(from.getLayerId());
+        try { to.setColor(from.getColor()); } catch (eC) {}
+        try { to.setLinetypeId(from.getLinetypeId()); } catch (eL) {}
+        try { to.setLineweight(from.getLineweight()); } catch (eW) {}
+    };
+    var runsToEntities = function(e, runs) {
+        for (var r = 0; r < runs.length; r++) {
+            var made;
+            if (runs[r].length === 2 && e instanceof RLineEntity) {
+                made = new RLineEntity(doc, new RLineData(
+                    new RVector(runs[r][0].x, runs[r][0].y),
+                    new RVector(runs[r][1].x, runs[r][1].y)));
+            } else {
+                var pd = new RPolylineData();
+                for (var v = 0; v < runs[r].length; v++) {
+                    pd.appendVertex(new RVector(runs[r][v].x, runs[r][v].y));
+                }
+                made = new RPolylineEntity(doc, pd);
+            }
+            carry(e, made);
+            op.addObject(made, false);
+        }
+    };
+    var meets = function(a, b) {
+        return a.minX < b.maxX && a.maxX > b.minX &&
+            a.minY < b.maxY && a.maxY > b.minY;
+    };
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || CsTags.get(e, SS_TAG) !== "" ||
+                CsTags.get(e, CsSheetFile.TAG) !== "") {
+            continue;
+        }
+        var bb = e.getBoundingBox();
+        var mn = bb.getMinimum(), mx = bb.getMaximum();
+        if (!isFinite(mn.x) || !isFinite(mx.x)) {
+            continue;
+        }
+        var box = { minX: mn.x, minY: mn.y, maxX: mx.x, maxY: mx.y };
+        var overMap = rect !== null && !CsSheetTile.inside(box, rect);
+        var overHoles = [];
+        for (var h = 0; h < cut.length; h++) {
+            if (meets(box, cut[h])) { overHoles.push(cut[h]); }
+        }
+        if (!overMap && overHoles.length === 0) {
+            out.kept++;
+            continue;
+        }
+        if (rect !== null && (box.maxX < rect.minX || box.minX > rect.maxX ||
+                box.maxY < rect.minY || box.minY > rect.maxY)) {
+            op.deleteObject(e);
+            out.dropped++;
+            continue;
+        }
+        // A LINEAR THING: its points, to be cut
+        var points = null, closed = false;
+        if (e instanceof RLineEntity) {
+            var sp = e.getStartPoint(), ep = e.getEndPoint();
+            points = [{ x: sp.x, y: sp.y }, { x: ep.x, y: ep.y }];
+        } else if (e instanceof RPolylineEntity) {
+            var verts = [];
+            for (var vi = 0; vi < e.countVertices(); vi++) {
+                var vp = e.getVertexAt(vi);
+                verts.push({ x: vp.x, y: vp.y, bulge: e.getBulgeAt(vi) });
+            }
+            closed = e.isClosed() === true;
+            points = verts.length >= 2 ?
+                CsSheetTile.samplePolyline(verts, closed) : null;
+        } else if (e instanceof RSplineEntity) {
+            try {
+                var sampled = e.getData().toPolyline(24);
+                points = [];
+                for (var si = 0; si < sampled.countVertices(); si++) {
+                    var sv = sampled.getVertexAt(si);
+                    points.push({ x: sv.x, y: sv.y });
+                }
+            } catch (eSpline) {
+                points = null;
+            }
+        }
+        if (points !== null && points.length >= 2) {
+            var runs = [{ pts: points, closed: closed }];
+            var changed = false;
+            if (rect !== null) {
+                var inMap = CsSheetTile.clipRuns(points, closed, rect);
+                if (inMap !== null) {
+                    runs = inMap.map(function(r) { return { pts: r, closed: false }; });
+                    changed = true;
+                }
+            }
+            for (var ho = 0; ho < overHoles.length; ho++) {
+                var next = [];
+                for (var rr = 0; rr < runs.length; rr++) {
+                    var around = CsSheetTile.cutOutRuns(runs[rr].pts,
+                        runs[rr].closed, overHoles[ho]);
+                    if (around === null) {
+                        next.push(runs[rr]);
+                    } else {
+                        changed = true;
+                        for (var ar = 0; ar < around.length; ar++) {
+                            next.push({ pts: around[ar], closed: false });
+                        }
+                    }
+                }
+                runs = next;
+            }
+            if (!changed) {
+                out.kept++;
+                continue;
+            }
+            op.deleteObject(e);
+            if (runs.length === 0) {
+                out.dropped++;
+            } else {
+                runsToEntities(e, runs.map(function(r) { return r.pts; }));
+                out.trimmed++;
+            }
+            continue;
+        }
+        // anything else: by where its middle is
+        var mid = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2 };
+        var gone = rect !== null && !CsSheetTile.within(mid, rect);
+        for (var hm = 0; hm < cut.length && !gone; hm++) {
+            gone = CsSheetTile.within(mid, cut[hm]);
+        }
+        if (gone) {
+            op.deleteObject(e);
+            out.dropped++;
+        } else {
+            out.kept++;
+        }
+    }
+    return out;
+};
+
+/**
  * Writes the sheet's border into the drawing's page settings: paper
  * size and orientation, the print scale, and the offset that puts the
  * paper's corner on the border's. Glue margins are zeroed -- QCAD
@@ -1324,14 +1700,20 @@ SheetSetup.exportPdf = function() {
     var done = [];
     var made = [];
     var problems = [];
-    for (var i = 0; i < paths.length; i++) {
-        var pdf = CsSheetSetup.pdfPathFor(paths[i]);
-        var back = SheetSetup.plotOne(paths[i], pdf);
+    // A GRID OF PLAN SHEETS IS ONE PDF, a page per sheet in grid order;
+    // a lone sheet and the profile keep their own.
+    var jobs = CsSheetSetup.pdfJobs(paths);
+    for (var i = 0; i < jobs.length; i++) {
+        var job = jobs[i];
+        var back = job.paths.length > 1 ?
+            SheetSetup.plotSet(job.paths, job.pdf) :
+            SheetSetup.plotOne(job.paths[0], job.pdf);
         if (back.ok === true) {
-            done.push(CsShelf.basename(pdf));
-            made.push(pdf);
+            done.push(CsShelf.basename(job.pdf) + (job.paths.length > 1 ?
+                " (" + job.paths.length + " pages)" : ""));
+            made.push(job.pdf);
         } else {
-            problems.push(CsShelf.basename(paths[i]) + ": " + back.why);
+            problems.push(CsShelf.basename(job.pdf) + ": " + back.why);
         }
     }
     // A PDF THAT WAS MADE IS SHOWN, in the system's own reader: the
@@ -1352,6 +1734,98 @@ SheetSetup.exportPdf = function() {
     }
     SheetSetup.tell(qsTr("Plotted ") + done.join(" and ") +
         qsTr(", beside the sheet file."), SheetSetup.DONE);
+};
+
+/**
+ * Plots several sheet files into ONE multi-page PDF, a page per sheet in
+ * the order given.
+ *
+ * One printer and one painter are kept open across every sheet: each
+ * sheet is brought up in its own tab (a plot needs the sheet's view),
+ * handed to QCAD's own Print for its page, and the printer is told to
+ * start a new page before the next. The paper comes from the first
+ * sheet -- the tiles of one plan are all the same size and way up.
+ *
+ * \return { ok, why }
+ */
+SheetSetup.plotSet = function(sheetPaths, pdf) {
+    for (var e = 0; e < sheetPaths.length; e++) {
+        if (!(new QFileInfo(sheetPaths[e])).exists()) {
+            return { ok: false, why: qsTr("%1 is gone")
+                .arg(CsShelf.basename(sheetPaths[e])) };
+        }
+    }
+    if ((new QFileInfo(pdf)).exists() &&
+            QMessageBox.question(getMainWindow(), "Sheet Setup",
+                qsTr("%1 already exists. Replace it?")
+                    .arg(CsShelf.basename(pdf)),
+                QMessageBox.Yes | QMessageBox.No) !== QMessageBox.Yes) {
+        return { ok: false, why: qsTr("left as it was") };
+    }
+    var printer = null, painter = null;
+    try {
+        var wanted = null;
+        for (var i = 0; i < sheetPaths.length; i++) {
+            openFiles([sheetPaths[i]], false);
+            var child = EAction.getMdiChild();
+            var doc = EAction.getDocument();
+            if (isNull(child) || isNull(doc) ||
+                    (new QFileInfo(String(doc.getFileName())))
+                        .absoluteFilePath() !==
+                    (new QFileInfo(sheetPaths[i])).absoluteFilePath()) {
+                return { ok: false, why: qsTr("could not bring %1 up")
+                    .arg(CsShelf.basename(sheetPaths[i])) };
+            }
+            var view = child.getLastKnownViewWithFocus();
+            var plotter = new Print(undefined, doc, view);
+            if (i === 0) {
+                var paper = Print.getPaperSizeMM(doc);
+                wanted = { w: paper.width() / 25.4, h: paper.height() / 25.4 };
+                printer = plotter.createPrinter(pdf);
+                if (isNull(printer)) {
+                    return { ok: false, why: qsTr("could not start the PDF") };
+                }
+                painter = new QPainter();
+                if (!painter.begin(printer)) {
+                    return { ok: false, why: qsTr("could not write the PDF") };
+                }
+            } else {
+                printer.newPage();
+            }
+            plotter.printCurrentBlock(printer, painter);
+        }
+        painter.end();
+        painter = null;
+        try {
+            destr(printer);
+        } catch (eDestr) {
+        }
+        printer = null;
+        var file = new QFile(pdf);
+        if (!file.open(QIODevice.ReadOnly)) {
+            return { ok: false, why: qsTr("the PDF was not written") };
+        }
+        var bytes = file.readAll();
+        file.close();
+        var total = bytes.length();
+        var tail = "";
+        for (var b = Math.max(0, total - 20000); b < total; b++) {
+            tail += String.fromCharCode(bytes.at(b) & 255);
+        }
+        var page = CsSheetSetup.mediaBoxInches(tail);
+        if (page !== null && !CsSheetSetup.pageMatches(page, wanted)) {
+            return { ok: false, why: qsTr("the PDF pages are %1 x %2 in, " +
+                "not the sheets' paper").arg(page.w.toFixed(1))
+                .arg(page.h.toFixed(1)) };
+        }
+        return { ok: true, why: "" };
+    } catch (ePlot) {
+        try {
+            if (painter !== null) { painter.end(); }
+        } catch (eEnd) {
+        }
+        return { ok: false, why: String(ePlot) };
+    }
 };
 
 /**
@@ -1449,9 +1923,23 @@ SheetSetup.draw = function(doc, di, opts) {
     var titleValues = SheetSetup.titleValues(doc, filled);
     var titleLines = (wants.title === true) ?
         CsSheetSetup.titleLines(titleValues) : [];
-    var footerInches = Math.max(
-        CsSheetSetup.linesHeight(titleLines) + 0.4,
-        CsSheetSetup.BAR.height + CsSheetSetup.TEXT.body * 4);
+    // The furniture's own layout decides how tall the band under the map
+    // must be -- the same function the preview used, so the two cannot
+    // disagree about where a piece is.
+    var turnedPaper = (!isNull(opts.tile) && !elevationSheet) ?
+        opts.turned === true : fit.turned === true;
+    var sheetReading = CsSheetSetup.latestDeclination(read.survey);
+    // Only the TITLE sheet of a tiled plan (A1) carries the title block;
+    // every other sheet has just the scale bar and the north arrow.
+    var titleHere = wants.title === true &&
+        (isNull(opts.tile) || elevationSheet || opts.tile.title === true);
+    var fur = CsSheetSetup.furniture({
+        widthInches: turnedPaper ? sheet.h : sheet.w,
+        wants: { title: titleHere, bar: wants.bar === true,
+            north: wants.north === true && !elevationSheet },
+        titleHeight: CsSheetSetup.linesHeight(titleLines) + 0.2,
+        reading: sheetReading });
+    var footerInches = fur.footer;
     // HAND-ARRANGED MOVES, in inches of paper. The cave's own is the
     // odd one: a caver dragging the cave across the preview is asking
     // for the map to sit elsewhere on the PAGE, and survey coordinates
@@ -1459,8 +1947,12 @@ SheetSetup.draw = function(doc, di, opts) {
     // instead, which is what the negation is.
     var offsets = isNull(opts.offsets) ? {} : opts.offsets;
     var caveOff = CsSheetSetup.offsetOf(offsets, "cave");
-    var box = CsSheetSetup.borderBox(caveBox, sheet, scale, fit.turned,
-        footerInches, { x: -caveOff.x, y: -caveOff.y });
+    // A TILE IS A SHEET WITH ITS OWN PLACE ON THE GRID: the paper box
+    // CsSheetTile worked out, not one centred on the cave.
+    var tile = (isNull(opts.tile) || elevationSheet) ? null : opts.tile;
+    var box = tile !== null ? tile.paper :
+        CsSheetSetup.borderBox(caveBox, sheet, scale, fit.turned,
+            footerInches, { x: -caveOff.x, y: -caveOff.y });
     // THE PAPER IS TOLD WHAT THE SHEET IS, so File > Print and Export
     // PDF plot it to scale without a trip through Page Setup.
     SheetSetup.writePageSettings(doc, box, sheet, fit.turned);
@@ -1577,12 +2069,85 @@ SheetSetup.draw = function(doc, di, opts) {
     // demolition date on it.
     CsSheetFile.mark(doc, di);
 
+    // ---- WHAT SHOWS ON THE SHEET ------------------------------------
+    // The sheet's own elements (title block, scale bar, north arrow) are
+    // BACKED WHITE: wherever the viewport has been slid over one, the map
+    // underneath is cut away so the element reads clean (Nathan,
+    // 2026-10-05: overlap is fine, give the elements a white background).
+    // And on a tiled plan only THIS sheet's map area shows, so what
+    // belongs to a neighbour does not print in the margin.
+    //
+    // CUT AWAY, not painted over: a CAD plot prints a white fill as black
+    // (white is assumed to be the paper), which turned a margin solid
+    // black when tried.
+    var holes = [];
+    var padH = unit(0.08);
+    for (var hk in fur.pieces) {
+        if (!fur.pieces.hasOwnProperty(hk)) { continue; }
+        var hp = fur.pieces[hk];
+        var hoff = CsSheetSetup.offsetOf(offsets, hk);
+        var hx = box.minX + box.margin + unit(hp.x + hoff.x);
+        var hy = box.minY + box.margin + unit(hp.y + hoff.y);
+        holes.push({ minX: hx - padH, minY: hy - padH,
+            maxX: hx + unit(hp.w) + padH, maxY: hy + unit(hp.h) + padH });
+    }
+    var clipped = SheetSetup.clipToMap(doc, op,
+        tile !== null ? tile.map : null, holes);
+    if (tile !== null && clipped.trimmed + clipped.dropped > 0) {
+        drew.push("only its own part of the map (" + clipped.trimmed +
+            " cut at the edge or round a title block, bar or arrow, " +
+            clipped.dropped + " left out)");
+    }
+
     if (wants.border === true) {
         line(box.minX, box.minY, box.maxX, box.minY, CsLayers.BORDER);
         line(box.maxX, box.minY, box.maxX, box.maxY, CsLayers.BORDER);
         line(box.maxX, box.maxY, box.minX, box.maxY, CsLayers.BORDER);
         line(box.minX, box.maxY, box.minX, box.minY, CsLayers.BORDER);
         drew.push("a border");
+    }
+
+    // ---- TILED: this sheet's name, and where each edge continues ----
+    if (tile !== null) {
+        // The match lines. Both sheets of a pair draw the SAME line (the
+        // shared edge of their cores), dashed, in the border's colour.
+        for (var mi = 0; mi < tile.matches.length; mi++) {
+            var m = tile.matches[mi];
+            var ml = line(m.x1, m.y1, m.x2, m.y2, CsLayers.BORDER,
+                "matchline");
+            try {
+                ml.setLinetypeId(doc.getLinetypeId("DASHED"));
+            } catch (eDash) {
+            }
+            // THE WORDS, along the line and on this sheet's own side of
+            // it: "MATCH LINE - SEE SHEET B3". A vertical line is read
+            // turned a quarter, bottom to top.
+            var gap = unit(CsSheetSetup.TEXT.body * 1.2);
+            var mx = (m.x1 + m.x2) / 2, my = (m.y1 + m.y2) / 2;
+            var vertical = (m.edge === "E" || m.edge === "W");
+            var tx = mx, ty = my, angle = 0;
+            if (m.edge === "E") { tx = m.x1 - gap; angle = Math.PI / 2; }
+            else if (m.edge === "W") { tx = m.x1 + gap; angle = Math.PI / 2; }
+            else if (m.edge === "S") { ty = m.y1 + gap; }
+            else { ty = m.y1 - gap; }
+            var words = new RTextEntity(doc, new RTextData(
+                new RVector(tx, ty), new RVector(tx, ty),
+                unit(CsSheetSetup.TEXT.body),
+                unit(CsSheetSetup.TITLE_INCHES * 4),
+                RS.VAlignMiddle, RS.HAlignCenter, RS.LeftToRight, RS.Exact,
+                1.0, CsDraw.caps(CsSheetTile.matchText(m.to)),
+                "standard", false, false, angle, false));
+            words.setLayerId(doc.getLayerId(CsLayers.BORDER));
+            CsTags.set(words, SS_TAG, "matchline");
+            op.addObject(words, false);
+        }
+        // This sheet's name, large, inside the border's top left corner.
+        text(box.minX + box.margin * 1.2,
+            box.maxY - box.margin * 1.5, CsSheetSetup.TEXT.caveName * 0.8,
+            "SHEET " + tile.id, CsLayers.BORDER, "sheetid", false);
+        drew.push("sheet " + tile.id + (tile.matches.length > 0 ?
+            " with " + tile.matches.length + " match line" +
+            (tile.matches.length === 1 ? "" : "s") : ""));
     }
 
     // The furniture sits inside the bottom margin, left to right:
@@ -1595,7 +2160,7 @@ SheetSetup.draw = function(doc, di, opts) {
     var barOff = CsSheetSetup.offsetOf(offsets, "bar");
     var northOff = CsSheetSetup.offsetOf(offsets, "north");
 
-    if (wants.title === true) {
+    if (titleHere) {
         // What each field will say: whatever the drawing already holds,
         // and the computed value only where the drawing holds nothing.
         //
@@ -1611,8 +2176,8 @@ SheetSetup.draw = function(doc, di, opts) {
         // first live run.
         var values = titleValues;
         var lines = titleLines;
-        var titleX = leftX + unit(titleOff.x);
-        var y = box.minY + box.margin +
+        var titleX = leftX + unit(fur.pieces.title.x) + unit(titleOff.x);
+        var y = box.minY + box.margin + unit(fur.pieces.title.y) +
             unit(CsSheetSetup.linesHeight(lines)) + unit(titleOff.y);
         for (var n = 0; n < lines.length; n++) {
             var t = text(titleX, y, lines[n].inches, lines[n].text,
@@ -1639,8 +2204,11 @@ SheetSetup.draw = function(doc, di, opts) {
 
     if (wants.bar === true) {
         var bar = CsSheetSetup.barFor(scale);
-        var barX = box.minX + box.width * 0.45 + unit(barOff.x);
-        var barY = footY + unit(barOff.y);
+        var barX = leftX + unit(fur.pieces.bar.x) + unit(barOff.x);
+        // lifted so its numbers, which hang below the line, stay above
+        // the bottom margin
+        var barY = footY + unit(fur.pieces.bar.y + CsSheetSetup.BAR_LIFT) +
+            unit(barOff.y);
         // The bar's LENGTH comes from its own feet, not from three
         // inches of paper: a metric bar is a round number of METRES,
         // which is very nearly three inches and not exactly. One block
@@ -1675,8 +2243,12 @@ SheetSetup.draw = function(doc, di, opts) {
     // question the drawing cannot be asked.
     if (wants.north === true && !elevationSheet) {
         var arrow = CsSheetSetup.NORTH;
-        var nx = box.maxX - box.margin + unit(northOff.x);
-        var ny = footY + unit(northOff.y);
+        // THE PIN IS PLACED BY THE PIECE'S REAL REACH, captions and
+        // magnetic arm included, so the whole arrow sits inside the
+        // margin -- see CsSheetSetup.northExtent.
+        var np = fur.pieces.north;
+        var nx = leftX + unit(np.x + np.pinX) + unit(northOff.x);
+        var ny = footY + unit(np.y + np.pinY) + unit(northOff.y);
         var nh = unit(arrow.height);
         line(nx, ny, nx, ny + nh, CsLayers.NORTH_ARROW);
         line(nx, ny + nh, nx - unit(arrow.headHalf),

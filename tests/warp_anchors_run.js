@@ -249,6 +249,64 @@ ok(JSON.stringify(noteRun.unmoved).indexOf("suite-note") < 0,
     "a Notebook station note is redrawn by Draw, so it is not reported " +
     "as an unmoved callout (" + JSON.stringify(noteRun.unmoved) + ")");
 
+
+// -- cross sections and elevation labels are cut on a LEG ------------------
+// They say which in their own tags, and follow that leg's stations
+// exactly -- a sketch's block follows its station, and its leader (which
+// CalloutWrite.refreshSections has already re-aimed there) is not
+// carried a second time.
+CsLayers.ensure(doc, di, CsLayers.NOTES_ANNOTATION);
+var opS = new RAddObjectsOperation();
+function member(entity, id, role, kind, extra) {
+    entity.setLayerId(doc.getLayerId(CsLayers.NOTES_ANNOTATION));
+    CsTags.set(entity, CsCallout.KEY.ID, id);
+    CsTags.set(entity, CsCallout.KEY.ROLE, role);
+    if (kind !== "") { CsTags.set(entity, CsCallout.KEY.KIND, kind); }
+    for (var k in extra) { if (extra.hasOwnProperty(k)) { CsTags.set(entity, k, extra[k]); } }
+    opS.addObject(entity, false);
+    return entity;
+}
+function leaderOf(x1, y1, x2, y2) {
+    var q = new RPolyline(); q.appendVertex(new RVector(x1, y1)); q.appendVertex(new RVector(x2, y2));
+    return new RLeaderEntity(doc, new RLeaderData(q, true));
+}
+function blockAt(x, y) {
+    return new RBlockReferenceEntity(doc, new RBlockReferenceData(block.getId(),
+        new RVector(x, y), new RVector(1, 1), 0, 1, 1, 1, 1));
+}
+// computed section: cut half way along B-C
+var secBlock = member(blockAt(75, 40), "sec1", CsCallout.ROLE_BLOCK, CsCallout.KIND_SECTION,
+    { SectionFrom: "B", SectionTo: "C", SectionFraction: "0.5" });
+var secLead = member(leaderOf(75, 0, 75, 40), "sec1", CsCallout.ROLE_LEADER, "", {});
+// traced section: leadered to station C; its leader tip ALREADY re-aimed at C's new place
+var skBlock = member(blockAt(100, 60), "sec2", CsCallout.ROLE_BLOCK, CsCallout.KIND_SECTION,
+    { SectionStationRef: "C", SectionSource: CsCallout.SOURCE_SKETCH });
+var skLead = member(leaderOf(100, 30, 100, 60), "sec2", CsCallout.ROLE_LEADER, "", {});
+// elevation label sampled a quarter of the way along C-D
+var elText = member(new RTextEntity(doc, new RTextData(new RVector(112.5, 20),
+    new RVector(112.5, 20), 3, 50, RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight,
+    RS.Exact, 1.0, "+4 FT", "standard", false, false, 0.0, false)),
+    "elev1", CsCallout.ROLE_TEXT, CsCallout.KIND_ELEV,
+    { ElevFrom: "C", ElevTo: "D", ElevFraction: "0.25" });
+var elLead = member(leaderOf(112.5, 0, 112.5, 18), "elev1", CsCallout.ROLE_LEADER, "", {});
+di.applyOperation(opS);
+var legRun = CsRevise.moveLinework(doc, di, oldPos, newPos, {}, 150);
+eqs(legRun.moved >= 3, true, "the three leg-cut callouts all moved (" + JSON.stringify(legRun) + ")");
+function at(e) { return doc.queryEntity(e.getId()).getPosition(); }
+function tipOf(e) { return doc.queryEntity(e.getId()).getData().getVertexAt(0); }
+// computed section: lerp(B,C,.5) went (75,0) -> (75,21)
+near(at(secBlock).x, 75, 1e-9, "section: block x is the cut point's");
+near(at(secBlock).y, 40 + 21, 1e-9, "section: block slid exactly as far as the cut point (21)");
+near(tipOf(secLead).y, 21, 1e-9, "section: its leader tip is on the new cut point");
+// traced section: C moved (100,0) -> (100,30), so the block goes up 30; the leader stays
+near(at(skBlock).y, 60 + 30, 1e-9, "traced section: the block follows its station (30)");
+near(tipOf(skLead).y, 30, 1e-9,
+    "traced section: its leader is NOT carried a second time (refreshSections owns it)");
+// elevation label: lerp(C,D,.25) went (112.5,0) -> (112.5,28.75)
+near(at(elText).y, 20 + 28.75, 1e-9, "elevation label: slid with its leg (28.75)");
+near(tipOf(elLead).y, 28.75, 1e-9, "elevation label: and its leader tip with it");
+near(doc.queryEntity(elText.getId()).getAngle(), 0, 1e-12, "elevation label: upright");
+
 if (failures.length === 0) {
     print("### WARP ANCHORS OK");
 } else {

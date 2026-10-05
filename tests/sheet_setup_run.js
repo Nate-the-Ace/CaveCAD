@@ -417,6 +417,184 @@ eqs(String((new QFileInfo(recordPath)).lastModified().toString()),
     beforeStamp,
     "and was not written to at all");
 
+// =======================================================================
+// TILING: a cave bigger than one sheet becomes a grid of them.
+// =======================================================================
+(function() {
+    var wideBox = { minX: 0, minY: 0, maxX: 3500, maxY: 300 };
+    var layout = CsSheetTile.layout({ caveBox: wideBox, sheet: sheet,
+        scale: 50, turned: false });
+    eqs(layout.tiled, true, "tiling: 3500 ft at 1\" = 50 ft needs more than one sheet");
+    eqs(layout.tiles.length, 3, "tiling: three sheets across");
+
+    // THE PANEL'S OWN PATH to a layout (a footer that is a function of the
+    // paper's way up) must reserve the band under the map
+    var panelState = { caveBox: wideBox, titleHeight: 3.0, footerInches: 3.4,
+        declination: null, declinationDate: "", occupied: null };
+    var panelLayout = SheetSetup.tileLayoutFor(panelState, sheet, 50, {},
+        { title: true, bar: true, north: true });
+    ok(panelLayout !== null && panelLayout.tiles[0].paper.footer === 0 &&
+        Math.abs((panelLayout.tiles[0].map.maxY - panelLayout.tiles[0].map.minY) - 23 * 50) < 1e-6,
+        "tiling: the panel's layout reserves no band -- every sheet is map out to the margin (" +
+        (panelLayout === null ? "no layout" : panelLayout.tiles[0].paper.footer) + ")");
+    // A RECORD WITH GEOMETRY ACROSS THE SHEET EDGES: a long wall as a line,
+    // a bulged polyline and a spline, each running the whole width, plus a
+    // note that lives in the third sheet only
+    var tileFolder = QDir.tempPath() + "/CaveCADSheetTest/TILE CAVE";
+    (new QDir("/")).mkpath(tileFolder);
+    var tileRecord = tileFolder + "/Tile Cave.dxf";
+    var tdiSrc = new RDocumentInterface(new RDocument(new RMemoryStorage(), createSpatialIndex()));
+    tdiSrc.importFile(recordPath, "", false);
+    var tsrc = tdiSrc.getDocument();
+    CsLayers.ensure(tsrc, tdiSrc, CsLayers.WALLS_SURVEYED);
+    var wallId = tsrc.getLayerId(CsLayers.WALLS_SURVEYED);
+    var addOp = new RAddObjectsOperation();
+    var longLine = new RLineEntity(tsrc, new RLineData(new RVector(0, 100), new RVector(3500, 100)));
+    longLine.setLayerId(wallId); addOp.addObject(longLine, false);
+    var pdat = new RPolylineData();
+    pdat.appendVertex(new RVector(0, 150), 0.0); pdat.appendVertex(new RVector(1000, 150), 0.5);
+    pdat.appendVertex(new RVector(2000, 150), 0.0); pdat.appendVertex(new RVector(3500, 200), 0.0);
+    var longPoly = new RPolylineEntity(tsrc, pdat);
+    longPoly.setLayerId(wallId); addOp.addObject(longPoly, false);
+    var sdat = new RSplineData();
+    [[0, 220], [900, 260], [1800, 180], [2700, 250], [3500, 220]].forEach(function(p) { sdat.appendControlPoint(new RVector(p[0], p[1])); });
+    sdat.setDegree(3); sdat.update();
+    var longSpline = new RSplineEntity(tsrc, sdat);
+    longSpline.setLayerId(wallId); addOp.addObject(longSpline, false);
+    // a wall running low across the sheets, where the title block, bar and
+    // arrow stand on the first one
+    var lowWall = new RLineEntity(tsrc, new RLineData(new RVector(0, -410), new RVector(3500, -410)));
+    lowWall.setLayerId(wallId); addOp.addObject(lowWall, false);
+    var farNote = new RTextEntity(tsrc, new RTextData(new RVector(3300, 120), new RVector(3300, 120), 4, 100,
+        RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact, 1.0, "FAR END", "standard", false, false, 0.0, false));
+    farNote.setLayerId(wallId); addOp.addObject(farNote, false);
+    tdiSrc.applyOperation(addOp);
+    ok(tdiSrc.exportFile(tileRecord, CsSanitize.dxfFilter()), "tiling: wrote a record with a wall across every sheet");
+    // the PANEL'S path never turns the paper by itself
+    var tallState = { caveBox: { minX: 0, minY: 0, maxX: 700, maxY: 1700 }, titleHeight: 3.0, footerInches: 3.4,
+        declination: null, declinationDate: "", occupied: null };
+    var tallLandscape = SheetSetup.tileLayoutFor(tallState, sheet, 50, {}, { title: true, bar: true, north: true }, false);
+    ok(tallLandscape !== null && tallLandscape.turned === false,
+        "tiling: the panel lays a tall cave out on landscape paper when that is what was set");
+    var tallPortrait = SheetSetup.tileLayoutFor(tallState, sheet, 50, {}, { title: true, bar: true, north: true }, true);
+    ok(tallPortrait === null || tallPortrait.turned === true, "tiling: and on portrait only when asked");
+    var said = SheetSetup.intoCopy(tileRecord, {
+        caveBox: wideBox, sheet: sheet, scale: 50, tiles: layout,
+        turned: layout.turned,
+        wants: { border: true, bar: true, north: true, title: true },
+        filled: { caveName: "Tile Cave" }, survey: null, elevation: false
+    });
+    ok(String(said).indexOf("3 sheets") >= 0, "tiling: the report says how many (" + said + ")");
+    ok(String(said).indexOf("3 sheets") === String(said).lastIndexOf("3 sheets"), "tiling: and says it once");
+    eqs(SheetSetup.lastWritten.length, 3, "tiling: one file per sheet");
+
+    var names = ["A1", "A2", "A3"];
+    var texts = {};
+    for (var n = 0; n < names.length; n++) {
+        var path = CsSheetSetup.sheetPathFor(tileFolder, "Tile Cave",
+            CsSheetSetup.PLAN_SHEET, names[n]);
+        ok((new QFileInfo(path)).exists(), "tiling: " + path.split("/").pop() + " was written");
+        var tdi = new RDocumentInterface(
+            new RDocument(new RMemoryStorage(), createSpatialIndex()));
+        tdi.importFile(path, "", false);
+        var tdoc = tdi.getDocument();
+        var strings = [], matchLines = 0, borderMinX = null, borderMaxX = null;
+        var tids = tdoc.queryAllEntities(false, false);
+        for (var q = 0; q < tids.length; q++) {
+            var te = tdoc.queryEntity(tids[q]);
+            if (isNull(te)) { continue; }
+            var kind = CsTags.get(te, "SheetPiece");
+            if (kind === "matchline" && te instanceof RLineEntity) { matchLines++; }
+            if ((kind === "matchline" || kind === "sheetid") && te instanceof RTextEntity) {
+                strings.push(String(te.getPlainText()));
+            }
+            if (kind === "BORDER" && te instanceof RLineEntity) {
+                var bb = te.getBoundingBox();
+                borderMinX = borderMinX === null ? bb.getMinimum().x : Math.min(borderMinX, bb.getMinimum().x);
+                borderMaxX = borderMaxX === null ? bb.getMaximum().x : Math.max(borderMaxX, bb.getMaximum().x);
+            }
+        }
+        texts[names[n]] = strings;
+        // a neighbour's share of the cave must not print in this sheet's margin or footer
+        var outside = 0, crossed = 0, kept = 0;
+        for (q = 0; q < tids.length; q++) {
+            var ce = tdoc.queryEntity(tids[q]);
+            if (isNull(ce) || CsTags.get(ce, "SheetPiece") !== "" || CsTags.get(ce, "SheetFile") !== "") { continue; }
+            var cb = ce.getBoundingBox();
+            var m = layout.tiles[n].map, tol = 1e-4;
+            if (cb.getMaximum().x < m.minX - tol || cb.getMinimum().x > m.maxX + tol ||
+                    cb.getMaximum().y < m.minY - tol || cb.getMinimum().y > m.maxY + tol) { outside++; }
+            else if (cb.getMinimum().x < m.minX - tol || cb.getMaximum().x > m.maxX + tol ||
+                    cb.getMinimum().y < m.minY - tol || cb.getMaximum().y > m.maxY + tol) { crossed++; }
+            else { kept++; }
+        }
+        eqs(outside, 0, "tiling: " + names[n] + " holds nothing that lies wholly outside its own map area");
+        eqs(crossed, 0, "tiling: and nothing that runs across its edge (everything is cut AT it) -- " + kept + " pieces inside");
+        var want = layout.tiles[n];
+        near(borderMinX, want.paper.minX, 1e-6, "tiling: " + names[n] + "'s border sits on its own place in the grid (left)");
+        near(borderMaxX, want.paper.maxX, 1e-6, "tiling: and (right)");
+        eqs(matchLines, want.matches.length, "tiling: " + names[n] + " draws a match line for each neighbour");
+        ok(strings.indexOf("SHEET " + names[n]) >= 0, "tiling: " + names[n] + " says which sheet it is (" + strings.join(" | ") + ")");
+        // page settings put THIS sheet's border on the paper
+        var pw = Print.getPaperSizeMM(tdoc);
+        near(Math.max(pw.width(), pw.height()), 36 * 25.4, 0.01, "tiling: " + names[n] + " prints on ARCH D");
+        near(Print.getOffset(tdoc).x, want.paper.minX, 1e-6,
+            "tiling: " + names[n] + "'s print offset is its own corner of the grid");
+        tdi.destroy ? 0 : 0;
+    }
+    // the long wall is CUT at the match line: A1 ends exactly there, A2 starts there
+    var edgeOf = function(id, which) {
+        var path = CsSheetSetup.sheetPathFor(tileFolder, "Tile Cave", CsSheetSetup.PLAN_SHEET, id);
+        var edi = new RDocumentInterface(new RDocument(new RMemoryStorage(), createSpatialIndex()));
+        edi.importFile(path, "", false);
+        var ed = edi.getDocument(), reach = null;
+        var eids = ed.queryAllEntities(false, false);
+        for (var z = 0; z < eids.length; z++) {
+            var ee = ed.queryEntity(eids[z]);
+            if (isNull(ee) || CsTags.get(ee, "SheetPiece") !== "" || !(ee instanceof RLineEntity || ee instanceof RPolylineEntity)) { continue; }
+            var eb = ee.getBoundingBox();
+            if (Math.abs(eb.getMinimum().y - 100) > 1e-6 && Math.abs(eb.getMaximum().y - 100) > 1e-6) { continue; }
+            reach = which === "max" ? (reach === null ? eb.getMaximum().x : Math.max(reach, eb.getMaximum().x)) :
+                (reach === null ? eb.getMinimum().x : Math.min(reach, eb.getMinimum().x));
+        }
+        return reach;
+    };
+    near(edgeOf("A1", "max"), layout.tiles[0].map.maxX, 1e-6, "tiling: the long wall on A1 stops exactly at A1's map edge");
+    near(edgeOf("A2", "min"), layout.tiles[1].map.minX, 1e-6, "tiling: and on A2 starts exactly at A2's map edge");
+    near(edgeOf("A2", "max"), layout.tiles[1].map.maxX, 1e-6, "tiling: and A2's ends at its east edge, to carry on to A3");
+    // THE ELEMENTS ARE BACKED WHITE: the low wall is cut away behind A1's title
+    // block, scale bar and north arrow, and runs unbroken behind A2's bar/arrow gap-free
+    var lowPieces = function(id) {
+        var path = CsSheetSetup.sheetPathFor(tileFolder, "Tile Cave", CsSheetSetup.PLAN_SHEET, id);
+        var ldi = new RDocumentInterface(new RDocument(new RMemoryStorage(), createSpatialIndex()));
+        ldi.importFile(path, "", false);
+        var ld = ldi.getDocument(), found = [];
+        var lids = ld.queryAllEntities(false, false);
+        for (var z = 0; z < lids.length; z++) {
+            var le = ld.queryEntity(lids[z]);
+            if (isNull(le) || CsTags.get(le, "SheetPiece") !== "" || !(le instanceof RLineEntity || le instanceof RPolylineEntity)) { continue; }
+            var lb = le.getBoundingBox();
+            if (Math.abs(lb.getMinimum().y + 410) < 1e-6 && Math.abs(lb.getMaximum().y + 410) < 1e-6) {
+                found.push({ a: lb.getMinimum().x, b: lb.getMaximum().x });
+            }
+        }
+        found.sort(function(p, q) { return p.a - q.a; });
+        return found;
+    };
+    var a1Pieces = lowPieces("A1"), a2Pieces = lowPieces("A2");
+    ok(a1Pieces.length >= 2, "tiling: the wall behind A1's title block is cut away -- it is in " + a1Pieces.length + " pieces");
+    var gapSize = 0;
+    for (var g = 1; g < a1Pieces.length; g++) { gapSize = Math.max(gapSize, a1Pieces[g].a - a1Pieces[g - 1].b); }
+    ok(gapSize > 100, "tiling: with a gap as wide as the elements that stand there (" + gapSize + " units)");
+    ok(a2Pieces.length >= 1, "tiling: A2 still carries its stretch of that wall");
+    ok(texts.A1.indexOf("MATCH LINE - SEE SHEET A2") >= 0, "tiling: A1 points east at A2");
+    ok(texts.A2.indexOf("MATCH LINE - SEE SHEET A1") >= 0 && texts.A2.indexOf("MATCH LINE - SEE SHEET A3") >= 0,
+        "tiling: A2 points at both its neighbours");
+    ok(texts.A3.indexOf("MATCH LINE - SEE SHEET A2") >= 0, "tiling: A3 points back at A2");
+    ok(texts.A3.indexOf("MATCH LINE - SEE SHEET A4") < 0, "tiling: and at nothing that was not built");
+})();
+
+
 // The record still has no sheet in it; the copy does.
 var backDi = new RDocumentInterface(
     new RDocument(new RMemoryStorage(), createSpatialIndex()));
@@ -930,6 +1108,7 @@ try {
     (new QDir(QDir.tempPath() + "/CaveCADSheetTest")).removeRecursively();
 } catch (eClean) {
 }
+
 
 if (failures.length === 0) {
     print("### SHEET SETUP OK " + drawn.length + " pieces");
