@@ -39,7 +39,7 @@ CsFormatRegistry.FORMATS = [
         label: "Therion (.th)",
         extensions: ["th"],
         fileFilter: "Therion Files (*.th)",
-        parse: function(c) { return CsFormatTherion.parse(c); },
+        parse: function(c, opts) { return CsFormatTherion.parse(c, opts); },
         write: function(s) { return CsFormatTherion.write(s); }
     },
     {
@@ -51,6 +51,31 @@ CsFormatRegistry.FORMATS = [
         write: function(s) { return CsFormatCsv.write(s); }
     }
 ];
+
+/**
+ * What a reader needs to follow a file's own references (Therion's
+ * `input`): where the file is and a way to read a sibling. QCAD only --
+ * a caller with no file system passes nothing and the readers behave as
+ * they always did. Formats that have no use for it ignore it.
+ */
+CsFormatRegistry.optionsFor = function(path) {
+    if (path === undefined || path === null || String(path) === "" ||
+            typeof QFile === "undefined") {
+        return undefined;
+    }
+    return {
+        path: String(path),
+        readFile: function(p) {
+            var f = new QFile(p);
+            if (!f.exists() || !f.open(QIODevice.ReadOnly | QIODevice.Text)) {
+                return null;
+            }
+            var text = new QTextStream(f).readAll();
+            f.close();
+            return String(text);
+        }
+    };
+};
 
 CsFormatRegistry.byId = function(id) {
     for (var i = 0; i < CsFormatRegistry.FORMATS.length; i++) {

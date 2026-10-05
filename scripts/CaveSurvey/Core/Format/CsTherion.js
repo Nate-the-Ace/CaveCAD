@@ -25,12 +25,19 @@
 // splay/duplicate/surface/approximate with "not", fix (standard
 // errors read past), # comments, and backslash line continuation.
 //
+// INPUT and EQUATE are followed (0.9.209.0). A Therion project is
+// routinely split across files, and a cave silently missing half its
+// passages is the worst failure this reader could have -- so `input`
+// is spliced in as text, exactly where Therion includes it, before
+// anything is parsed (expandInputs); and `equate` joins stations by
+// renaming every member of a class to one canonical name once the whole
+// file has been read, which is all it takes for the loop closure to see
+// the join. Both need a file to start from: parse(content) alone cannot
+// follow an input, and says so exactly as before.
+//
 // Not supported, and SAID SO rather than passed over in silence
 // (CsModel.addParseFinding, which every report already prints):
-// input (a Therion project is routinely split across files, and a
-// cave silently missing half its passages is the worst failure this
-// reader could have), equate (station equivalence), and the diving /
-// cartesian / cylpolar / nosurvey data styles. Also ignored, but
+// the diving / cartesian / cylpolar / nosurvey data styles. Also ignored, but
 // harmlessly: scrap/endscrap and map/endmap drawing data, extend,
 // station comments, mark, break, group, cs, sd, grade, calibrate.
 //
@@ -249,9 +256,117 @@ CsFormatTherion.topLevelSurveys = function(lines) {
     return count;
 };
 
-CsFormatTherion.parse = function(content) {
+/** The directory part of a path, "." when it has none. */
+CsFormatTherion.dirOf = function(path) {
+    var p = String(path);
+    var cut = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+    return cut < 0 ? "." : (cut === 0 ? "/" : p.substring(0, cut));
+};
+
+/** Is this path absolute (posix or a Windows drive)? */
+CsFormatTherion.isAbsolute = function(path) {
+    return /^([\/\\]|[A-Za-z]:[\/\\])/.test(String(path));
+};
+
+/**
+ * Splices every `input` line into the text, so the file is read as
+ * Therion reads it: one stream, the included text standing exactly
+ * where the line stood. That is what keeps nesting, units, declination
+ * and the "is this the file's only top-level survey" decision identical
+ * to Therion's -- a reader that parsed each file alone and merged the
+ * results would get each of those wrong.
+ *
+ * Pure: the file system comes in as `readFile(path)`, which answers the
+ * text or null. Paths are relative to the file doing the including, and
+ * `name` is tried as written and then with .th added, which is how
+ * Therion resolves it.
+ *
+ * `input` of a .th2 is dropped and NOT followed: a .th2 is the drawing
+ * half, which Import Cave Survey offers separately and which
+ * the parser would skip as scrap data anyway.
+ *
+ * \param content  the including file's text
+ * \param path     where that text came from (for relative inputs)
+ * \param readFile function(path) -> text | null
+ * \return {content, findings:[{level, code, text}], files:[paths read]}
+ */
+CsFormatTherion.expandInputs = function(content, path, readFile) {
+    var findings = [];
+    var files = [];
+    var MAX_DEPTH = 20;
+    var walk = function(text, here, stack) {
+        var lines = String(text).split(/\r\n|\r|\n/);
+        var out = [];
+        for (var i = 0; i < lines.length; i++) {
+            var m = /^\s*input\s+(?:"([^"]+)"|(\S+))/i.exec(lines[i]);
+            if (m === null) {
+                out.push(lines[i]);
+                continue;
+            }
+            var name = m[1] !== undefined ? m[1] : m[2];
+            if (/\.th2$/i.test(name)) {
+                out.push("# input " + name + " (a sketch page: offered separately)");
+                continue;
+            }
+            var base = CsFormatTherion.isAbsolute(name) ? name :
+                CsFormatTherion.dirOf(here) + "/" + name;
+            var candidates = /\.[A-Za-z0-9]+$/.test(name) ?
+                [base] : [base, base + ".th"];
+            var got = null;
+            var gotPath = "";
+            for (var c = 0; c < candidates.length && got === null; c++) {
+                got = readFile(candidates[c]);
+                gotPath = candidates[c];
+            }
+            if (got === null || got === undefined) {
+                findings.push({ level: "warning", code: "therion-input-missing",
+                    text: "This file pulls in \"" + name + "\" with " +
+                        "\"input\", and it could not be read -- every " +
+                        "passage in it is missing from this import." });
+                out.push("# input " + name + " (not found)");
+                continue;
+            }
+            if (stack.indexOf(gotPath) >= 0 || stack.length >= MAX_DEPTH) {
+                findings.push({ level: "warning", code: "therion-input-loop",
+                    text: "\"" + name + "\" is pulled in by itself, directly " +
+                        "or through other files, so it was read once and " +
+                        "not again." });
+                out.push("# input " + name + " (already read)");
+                continue;
+            }
+            files.push(gotPath);
+            out.push("# ---- input " + name + " ----");
+            out.push(walk(got, gotPath, stack.concat([gotPath])));
+            out.push("# ---- end input " + name + " ----");
+        }
+        return out.join("\n");
+    };
+    var start = (path === undefined || path === null) ? "" : String(path);
+    return { content: walk(content, start, [start]), findings: findings,
+        files: files };
+};
+
+/**
+ * \param content the file's text
+ * \param opts     optional {path, readFile}. With both, `input` lines are
+ *                 followed (see expandInputs); without, they are warned
+ *                 about, as before.
+ */
+CsFormatTherion.parse = function(content, opts) {
+    var inputFindings = [];
+    if (opts && typeof opts.readFile === "function" && opts.path) {
+        var expanded = CsFormatTherion.expandInputs(content, opts.path,
+            opts.readFile);
+        content = expanded.content;
+        inputFindings = expanded.findings;
+    }
     var survey = CsModel.newSurvey();
+    for (var ifi = 0; ifi < inputFindings.length; ifi++) {
+        CsModel.addParseFinding(survey, inputFindings[ifi].level,
+            inputFindings[ifi].code, inputFindings[ifi].text);
+    }
     var stationLrud = {};   // full station name -> {left,right,up,down}
+    var equates = [];       // [{refs, scope}] resolved after the last line
 
     var lines = CsFormatTherion.logicalLines(content);
     var prefixStack = [];
@@ -276,7 +391,6 @@ CsFormatTherion.parse = function(content) {
     var curDate = "";
     var curTeam = "";
     var reportedInput = false;
-    var reportedEquate = false;
     var reportedStyle = {};
     survey.distanceUnit = null;
 
@@ -306,12 +420,15 @@ CsFormatTherion.parse = function(content) {
     // See the header: the outermost survey name is dropped when it is
     // the file's only one, and kept when it is not.
     var dropOutermost = (CsFormatTherion.topLevelSurveys(lines) === 1);
-    var fullName = function(name) {
-        var parts = dropOutermost ? prefixStack.slice(1) : prefixStack;
+    var nameIn = function(scope, name) {
+        var parts = dropOutermost ? scope.slice(1) : scope;
         if (parts.length === 0) {
             return name;
         }
         return parts.join(".") + "." + name;
+    };
+    var fullName = function(name) {
+        return nameIn(prefixStack, name);
     };
     var isAnonymous = function(name) {
         return name === "-" || name === "." || name === ".." || name === "...";
@@ -409,6 +526,20 @@ CsFormatTherion.parse = function(content) {
             continue;
         }
 
+        // equate is a centreline command in Therion, but a file that
+        // writes it at survey level means the same thing and is read
+        // the same way rather than ignored in silence.
+        if (cmd === "equate") {
+            // Resolved after the last line: an equate may name a survey
+            // that is opened further down, and whether a name means
+            // "inside the current survey" or "from the root" can only
+            // be told against the stations that really exist.
+            if (tokens.length > 2) {
+                equates.push({ refs: tokens.slice(1),
+                    scope: prefixStack.slice(0) });
+            }
+            continue;
+        }
         // Everything below is survey data, and only a centreline holds
         // any. A .th's top level is otherwise declarations and drawing.
         if (!inCentreline) {
@@ -596,16 +727,6 @@ CsFormatTherion.parse = function(content) {
             }
             continue;
         }
-        if (cmd === "equate") {
-            if (!reportedEquate) {
-                reportedEquate = true;
-                CsModel.addParseFinding(survey, "warning", "therion-equate",
-                    "This file joins stations with \"equate\", which this " +
-                    "reader does not apply -- those stations stay separate, " +
-                    "so loops through them will not close.");
-            }
-            continue;
-        }
         // extend, station, mark, break, group, endgroup, cs, sd, grade,
         // calibrate, infer, copyright, instrument: no effect on the
         // shots this suite draws.
@@ -739,6 +860,118 @@ CsFormatTherion.parse = function(content) {
                 left: num(prec.left), right: num(prec.right),
                 up: num(prec.up), down: num(prec.down)
             };
+        }
+    }
+
+    // ---- equate: one name per joined station ---------------------------
+    //
+    // "equate 5@b 12@a" says those are the same place. The network is
+    // built from station NAMES, so renaming every member of a class to
+    // one name is the whole implementation -- loops through the join
+    // close, and Loop Errors and the adjustment see them. Applied to the
+    // shots, the per-station LRUD and the fixed points alike, before any
+    // of them is read for anything else.
+    if (equates.length > 0) {
+        var known = {};
+        for (var ki = 0; ki < survey.shots.length; ki++) {
+            known[survey.shots[ki].from] = true;
+            if (survey.shots[ki].to !== "") { known[survey.shots[ki].to] = true; }
+        }
+        var parent = {};
+        var order = [];
+        var find = function(n) {
+            while (parent[n] !== n) {
+                parent[n] = parent[parent[n]];
+                n = parent[n];
+            }
+            return n;
+        };
+        var resolveRef = function(token, scope) {
+            var at = token.indexOf("@");
+            if (at < 0) {
+                return nameIn(scope, token);
+            }
+            var st = token.substring(0, at);
+            var path = token.substring(at + 1).split(".").reverse();
+            var rel = nameIn(scope.concat(path), st);
+            if (known[rel]) { return rel; }
+            var abs = nameIn(path, st);
+            return known[abs] ? abs : rel;
+        };
+        var unknownNames = [];
+        for (var ei = 0; ei < equates.length; ei++) {
+            var first = null;
+            for (var ri = 0; ri < equates[ei].refs.length; ri++) {
+                if (isAnonymous(equates[ei].refs[ri])) { continue; }
+                var nm = resolveRef(equates[ei].refs[ri], equates[ei].scope);
+                if (!known[nm] && !survey.fixed.hasOwnProperty(nm)) {
+                    if (unknownNames.indexOf(nm) < 0) { unknownNames.push(nm); }
+                }
+                if (!parent.hasOwnProperty(nm)) {
+                    parent[nm] = nm;
+                    order.push(nm);
+                }
+                if (first === null) {
+                    first = nm;
+                } else {
+                    var ra = find(first), rb = find(nm);
+                    if (ra !== rb) { parent[rb] = ra; }
+                }
+            }
+        }
+        // The canonical name of a class is its first member that any
+        // shot uses -- so the name on the map is one a survey really
+        // has -- falling back to the first listed.
+        var canon = {};
+        for (var oi = 0; oi < order.length; oi++) {
+            var root = find(order[oi]);
+            if (!canon.hasOwnProperty(root) ||
+                    (!known[canon[root]] && known[order[oi]])) {
+                canon[root] = order[oi];
+            }
+        }
+        var rename = {};
+        for (var qi = 0; qi < order.length; qi++) {
+            var target = canon[find(order[qi])];
+            if (target !== order[qi]) {
+                rename[order[qi]] = target;
+            }
+        }
+        var re = function(n) { return rename.hasOwnProperty(n) ? rename[n] : n; };
+        for (var xi = 0; xi < survey.shots.length; xi++) {
+            survey.shots[xi].from = re(survey.shots[xi].from);
+            if (survey.shots[xi].to !== "") {
+                survey.shots[xi].to = re(survey.shots[xi].to);
+            }
+        }
+        var lrudJoined = {};
+        for (var ln in stationLrud) {
+            if (stationLrud.hasOwnProperty(ln)) {
+                var tn = re(ln);
+                if (!lrudJoined.hasOwnProperty(tn) || tn === ln) {
+                    lrudJoined[tn] = stationLrud[ln];
+                }
+            }
+        }
+        stationLrud = lrudJoined;
+        var fixedJoined = {};
+        for (var fn in survey.fixed) {
+            if (survey.fixed.hasOwnProperty(fn)) {
+                var tf = re(fn);
+                if (!fixedJoined.hasOwnProperty(tf) || tf === fn) {
+                    fixedJoined[tf] = survey.fixed[fn];
+                }
+            }
+        }
+        survey.fixed = fixedJoined;
+        if (unknownNames.length > 0) {
+            CsModel.addParseFinding(survey, "warning",
+                "therion-equate-unknown", "\"equate\" names " +
+                unknownNames.length + " station" +
+                (unknownNames.length === 1 ? "" : "s") + " no shot uses (" +
+                unknownNames.slice(0, 5).join(", ") +
+                (unknownNames.length > 5 ? ", ..." : "") + ") -- a name " +
+                "misspelt, or a survey this import did not include.");
         }
     }
 

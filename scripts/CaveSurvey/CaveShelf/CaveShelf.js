@@ -2180,7 +2180,7 @@ CaveShelf.importSurveyFile = function(parent, path) {
 
     var survey;
     try {
-        survey = format.parse(content);
+        survey = format.parse(content, CsFormatRegistry.optionsFor(path));
     } catch (eParse) {
         EAction.handleUserWarning(qsTr("Could not read this as %1: ")
             .arg(format.label) + eParse);

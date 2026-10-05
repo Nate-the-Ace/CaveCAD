@@ -91,7 +91,7 @@ function importCaveSurvey() {
     }
 
     // -- parse ----------------------------------------------------------
-    var survey = format.parse(content);
+    var survey = format.parse(content, CsFormatRegistry.optionsFor(fileName));
     if (survey.shots.length === 0) {
         CsTell.warn("Import Cave Survey: no shots were parsed from this file.\n" +
             "Format tried: " + format.label);
