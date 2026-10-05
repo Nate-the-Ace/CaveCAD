@@ -34,6 +34,7 @@
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
+include("scripts/File/Print/Print.js");
 include(includeBasePath + "/../Core/CsAll.js");
 
 /** The tag every generated sheet entity carries, so a re-run replaces
@@ -625,6 +626,10 @@ SheetSetup.buildDock = function(appWin) {
     w.buildButton.toolTip = qsTr("Writes the sheet as its own file " +
         "beside the cave and opens it. Your drawing is not touched.");
     row.addWidget(w.buildButton, 1, 0);
+    w.pdfButton = new QPushButton(qsTr("Export PDF"));
+    w.pdfButton.toolTip = qsTr("Plots each sheet you just built to a " +
+        "PDF beside its DXF, at the sheet's paper size and scale.");
+    row.addWidget(w.pdfButton, 0, 0);
     w.refreshButton = new QPushButton(qsTr("Re-read Drawing"));
     w.refreshButton.toolTip = qsTr("Measure the cave again -- after " +
         "another trip, or after tracing more of it.");
@@ -658,6 +663,7 @@ SheetSetup.buildDock = function(appWin) {
     w.cbTitle.toggled.connect(changed);
     w.cbElevation.toggled.connect(changed);
     w.buildButton.clicked.connect(function() { SheetSetup.build(); });
+    w.pdfButton.clicked.connect(function() { SheetSetup.exportPdf(); });
     w.refreshButton.clicked.connect(function() { SheetSetup.refresh(); });
     w.resetButton.clicked.connect(function() { SheetSetup.resetLayout(); });
 
@@ -1255,6 +1261,165 @@ SheetSetup.openPending = function() {
 };
 
 /**
+ * Writes the sheet's border into the drawing's page settings: paper
+ * size and orientation, the print scale, and the offset that puts the
+ * paper's corner on the border's. Glue margins are zeroed -- QCAD
+ * otherwise defaults them to the default printer's unprintable edge and
+ * crops the border off the page.
+ *
+ * Returns the settings it wrote (null when it could not), so the build
+ * and the tests can read back what the paper was told.
+ */
+SheetSetup.writePageSettings = function(doc, box, sheet, turned) {
+    try {
+        var unitMM = RUnit.convert(1.0, doc.getUnit(), RS.Millimeter);
+        var page = CsSheetSetup.pageSettings(box, sheet, turned, unitMM);
+        doc.setVariable("UnitSettings/PaperUnit", RS.Millimeter);
+        doc.setVariable("PageSettings/PaperWidth", page.paperWidthMM);
+        doc.setVariable("PageSettings/PaperHeight", page.paperHeightMM);
+        doc.setVariable("PageSettings/PageOrientation", page.orientation);
+        doc.setVariable("PageSettings/Scale", page.scale);
+        doc.setVariable("PageSettings/OffsetX", page.offsetX);
+        doc.setVariable("PageSettings/OffsetY", page.offsetY);
+        doc.setVariable("MultiPageSettings/Columns", 1);
+        doc.setVariable("MultiPageSettings/Rows", 1);
+        doc.setVariable("MultiPageSettings/GlueMarginsLeft", 0);
+        doc.setVariable("MultiPageSettings/GlueMarginsRight", 0);
+        doc.setVariable("MultiPageSettings/GlueMarginsTop", 0);
+        doc.setVariable("MultiPageSettings/GlueMarginsBottom", 0);
+        return page;
+    } catch (eSettings) {
+        return null;
+    }
+};
+
+/**
+ * Plots the sheets to PDF, one file per sheet, beside each DXF.
+ *
+ * Goes through QCAD's own Print.print -- the path File > Export to PDF
+ * takes -- so what comes out is what the page settings Build Sheet
+ * wrote say it is. Then it reads the PDF's /MediaBox back and compares
+ * it to the paper the sheet asked for: a page that came out at the
+ * wrong size is reported, not shipped quietly.
+ *
+ * Sheets are the ones the last Build Sheet wrote; with none, the sheet
+ * on screen (a sheet opened from disk is plotted just as well).
+ */
+SheetSetup.exportPdf = function() {
+    var paths = SheetSetup.lastWritten.slice(0);
+    if (paths.length === 0) {
+        try {
+            var here = String(EAction.getDocument().getFileName());
+            if (here !== "" && CsSheetFile.isSheet(EAction.getDocument())) {
+                paths.push(here);
+            }
+        } catch (eHere) {
+        }
+    }
+    if (paths.length === 0) {
+        SheetSetup.tell(qsTr("Nothing to plot yet. Build Sheet first, " +
+            "or open a sheet file."), SheetSetup.WARNING);
+        return;
+    }
+    var done = [];
+    var made = [];
+    var problems = [];
+    for (var i = 0; i < paths.length; i++) {
+        var pdf = CsSheetSetup.pdfPathFor(paths[i]);
+        var back = SheetSetup.plotOne(paths[i], pdf);
+        if (back.ok === true) {
+            done.push(CsShelf.basename(pdf));
+            made.push(pdf);
+        } else {
+            problems.push(CsShelf.basename(paths[i]) + ": " + back.why);
+        }
+    }
+    // A PDF THAT WAS MADE IS SHOWN, in the system's own reader: the
+    // point of plotting is to look at the page, and a failed sheet
+    // does not stop the good ones from opening.
+    for (var m = 0; m < made.length; m++) {
+        try {
+            QDesktopServices.openUrl(QUrl.fromLocalFile(made[m]));
+        } catch (eOpen) {
+        }
+    }
+    if (problems.length > 0) {
+        SheetSetup.tell(qsTr("PDF export had problems -- ") +
+            problems.join("; ") + (done.length > 0 ?
+            qsTr(". Written: ") + done.join(", ") : ""),
+            SheetSetup.ERROR);
+        return;
+    }
+    SheetSetup.tell(qsTr("Plotted ") + done.join(" and ") +
+        qsTr(", beside the sheet file."), SheetSetup.DONE);
+};
+
+/**
+ * Plots one open (or openable) sheet to `pdf`.
+ * \return { ok, why } -- why is a sentence when ok is false.
+ */
+SheetSetup.plotOne = function(sheetPath, pdf) {
+    if (!(new QFileInfo(sheetPath)).exists()) {
+        return { ok: false, why: qsTr("the sheet file is gone") };
+    }
+    if ((new QFileInfo(pdf)).exists() &&
+            QMessageBox.question(getMainWindow(), "Sheet Setup",
+                qsTr("%1 already exists. Replace it?")
+                    .arg(CsShelf.basename(pdf)),
+                QMessageBox.Yes | QMessageBox.No) !== QMessageBox.Yes) {
+        return { ok: false, why: qsTr("left as it was") };
+    }
+    try {
+        // openFiles activates a tab already showing this file rather
+        // than re-reading it, which is what we want: the sheet as the
+        // caver sees it is the sheet that is plotted.
+        openFiles([sheetPath], false);
+        var child = EAction.getMdiChild();
+        var doc = EAction.getDocument();
+        if (isNull(child) || isNull(doc) ||
+                (new QFileInfo(String(doc.getFileName()))).absoluteFilePath()
+                !== (new QFileInfo(sheetPath)).absoluteFilePath()) {
+            return { ok: false, why: qsTr("could not bring the sheet up") };
+        }
+        var view = child.getLastKnownViewWithFocus();
+        var paper = Print.getPaperSizeMM(doc);
+        var wanted = { w: paper.width() / 25.4, h: paper.height() / 25.4 };
+        if (!(new Print(undefined, doc, view)).print(pdf)) {
+            return { ok: false, why: qsTr("could not write the PDF") };
+        }
+        var file = new QFile(pdf);
+        if (!file.open(QIODevice.ReadOnly)) {
+            return { ok: false, why: qsTr("the PDF was not written") };
+        }
+        var bytes = file.readAll();
+        file.close();
+        // QByteArray reaches script as a bare wrapper (no indexOf, no
+        // mid, no usable toString), so the tail is read a byte at a
+        // time. Qt writes the page dictionary AFTER the page's content
+        // stream, so the tail is where /MediaBox lives however big the
+        // plot is.
+        var total = bytes.length();
+        var from = Math.max(0, total - 20000);
+        var tail = "";
+        for (var b = from; b < total; b++) {
+            tail += String.fromCharCode(bytes.at(b) & 255);
+        }
+        if (tail.indexOf("/MediaBox") < 0) {
+            return { ok: true, why: "" };
+        }
+        var page = CsSheetSetup.mediaBoxInches(tail);
+        if (page !== null && !CsSheetSetup.pageMatches(page, wanted)) {
+            return { ok: false, why: qsTr("the PDF page is %1 x %2 in, " +
+                "not the sheet's paper").arg(page.w.toFixed(1))
+                .arg(page.h.toFixed(1)) };
+        }
+        return { ok: true, why: "" };
+    } catch (ePlot) {
+        return { ok: false, why: String(ePlot) };
+    }
+};
+
+/**
  * Draws the sheet. Separated from the dialog ON PURPOSE: everything
  * above this line asks a human questions, and everything below it is
  * geometry that has to be testable without one. tests/sheet_setup_run.js
@@ -1296,6 +1461,9 @@ SheetSetup.draw = function(doc, di, opts) {
     var caveOff = CsSheetSetup.offsetOf(offsets, "cave");
     var box = CsSheetSetup.borderBox(caveBox, sheet, scale, fit.turned,
         footerInches, { x: -caveOff.x, y: -caveOff.y });
+    // THE PAPER IS TOLD WHAT THE SHEET IS, so File > Print and Export
+    // PDF plot it to scale without a trip through Page Setup.
+    SheetSetup.writePageSettings(doc, box, sheet, fit.turned);
     var layers = [CsLayers.BORDER, CsLayers.SCALE_BAR,
         CsLayers.NORTH_ARROW, CsLayers.TITLE_BLOCK];
     for (var L = 0; L < layers.length; L++) {

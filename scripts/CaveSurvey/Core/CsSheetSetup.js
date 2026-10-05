@@ -516,6 +516,50 @@ CsSheetSetup.borderBox = function(caveBox, sheet, scale, turned,
     };
 };
 
+/**
+ * The page settings QCAD's File > Print / Export to PDF reads, worked
+ * out so the sheet's border lands exactly on the paper.
+ *
+ * WHY THIS EXISTS. The border is drawn in model space at plot scale,
+ * and nothing told QCAD that: its page settings stayed at whatever the
+ * template carried (A4, a 1:1 scale, the default printer's margins), so
+ * a sheet printed as a postage stamp in the corner of the wrong paper.
+ * These are the numbers that make "Print" mean "plot this sheet".
+ *
+ * Derived from the border's own geometry rather than from the nominal
+ * scale, so the paper and the border can never disagree about what a
+ * drawing unit is -- the print scale is whatever maps the border's
+ * width onto the paper's width.
+ *
+ * \param box        a borderBox() result, in drawing units
+ * \param sheet      the sheet (inches)
+ * \param turned     the paper is turned (portrait)
+ * \param unitMM     millimetres in one drawing unit
+ * \return { paperWidthMM, paperHeightMM (UNORIENTED, portrait: width <
+ *           height), orientation "Landscape"|"Portrait", scale (QCAD's
+ *           own string, "1:N"), scaleRatio (the N), offsetX,
+ *           offsetY (drawing units: where the paper's lower left sits) }
+ */
+CsSheetSetup.pageSettings = function(box, sheet, turned, unitMM) {
+    var wIn = (turned === true ? sheet.h : sheet.w);
+    var hIn = (turned === true ? sheet.w : sheet.h);
+    var wMM = wIn * 25.4;
+    var hMM = hIn * 25.4;
+    var landscape = wMM >= hMM;
+    return {
+        paperWidthMM: landscape ? hMM : wMM,
+        paperHeightMM: landscape ? wMM : hMM,
+        orientation: landscape ? "Landscape" : "Portrait",
+        // QCAD's print scale is PAPER per DRAWING ("1:480" is 1/480),
+        // the inverse of the plot scale's feet-per-inch habit. Getting
+        // it the other way up plots the whole cave as a dot.
+        scaleRatio: (box.width * unitMM) / wMM,
+        scale: "1:" + ((box.width * unitMM) / wMM),
+        offsetX: box.minX,
+        offsetY: box.minY
+    };
+};
+
 // ---------------------------------------------------------------------
 // MAGNETIC NORTH, BESIDE THE TRUE ONE.
 //
@@ -1261,6 +1305,40 @@ CsSheetSetup.autoFill = function(survey, stats, grade) {
 
 /** Where a cave's sheet drawings live, under the cave's own folder. */
 CsSheetSetup.SHEETS_FOLDER = "sheets";
+
+/** The PDF that goes beside a sheet's DXF: same folder, same name. */
+CsSheetSetup.pdfPathFor = function(sheetPath) {
+    var p = String(sheetPath);
+    return /\.dxf$/i.test(p) ? p.replace(/\.dxf$/i, ".pdf") : p + ".pdf";
+};
+
+/**
+ * The page size a PDF declares, in inches, read from its own text; null
+ * when it carries no /MediaBox. A PDF point is 1/72 inch. This is how
+ * an export proves the paper it asked for is the paper it got.
+ */
+CsSheetSetup.mediaBoxInches = function(pdfText) {
+    var m = /\/MediaBox\s*\[\s*([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s*\]/
+        .exec(String(pdfText));
+    if (m === null) {
+        return null;
+    }
+    return { w: (parseFloat(m[3]) - parseFloat(m[1])) / 72,
+        h: (parseFloat(m[4]) - parseFloat(m[2])) / 72 };
+};
+
+/** Does a declared page match the sheet (either way up)? */
+CsSheetSetup.pageMatches = function(page, sheet, tolInches) {
+    if (isNull(page) || isNull(sheet)) {
+        return false;
+    }
+    var tol = isNull(tolInches) ? 0.05 : tolInches;
+    var straight = Math.abs(page.w - sheet.w) <= tol &&
+        Math.abs(page.h - sheet.h) <= tol;
+    var turned = Math.abs(page.w - sheet.h) <= tol &&
+        Math.abs(page.h - sheet.w) <= tol;
+    return straight || turned;
+};
 
 /**
  * The file a cave's sheet is written to.

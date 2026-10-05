@@ -43,6 +43,7 @@ var repoRoot = args[args.length - 1];
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
+include("scripts/File/Print/Print.js");
 includeBasePath = repoRoot + "/scripts/CaveSurvey/Core";
 include(includeBasePath + "/CsAll.js");
 
@@ -448,6 +449,24 @@ for (i = 0; i < copyIds.length; i++) {
 ok(inCopy > 0, "the copy carries the sheet");
 ok(wallsInCopy > 0,
     "and the cave itself -- a sheet with no map on it is a border");
+
+// THE PAPER KNOWS WHAT THE SHEET IS. Read back through QCAD's own Print
+// accessors after a DXF round trip -- the same numbers File > Export to
+// PDF will use. Border width in mm on the page = border / scale / unit.
+var paperMM = Print.getPaperSizeMM(copyDoc);
+near(Math.min(paperMM.width(), paperMM.height()), 24 * 25.4, 0.01,
+    "the page settings carry ARCH D's short side after a round trip");
+near(Math.max(paperMM.width(), paperMM.height()), 36 * 25.4, 0.01,
+    "and its long side");
+eqs(Print.getPageOrientationString(copyDoc), "Landscape",
+    "and print it landscape");
+var printScale = Print.getScale(copyDoc);
+var borderMM = 36 * 50 * Print.getUnitScale(copyDoc) * printScale;
+near(borderMM, 36 * 25.4, 0.05,
+    "and the print scale maps the border exactly onto the paper");
+ok(Print.getGlueMarginLeft(copyDoc) === 0 &&
+    Print.getGlueMarginBottom(copyDoc) === 0,
+    "and no printer margin is cropped off the page");
 
 // EACH FILE KEEPS ONE VIEW. A plan sheet quietly carrying the elevation
 // off the paper would plot it; a profile sheet carrying the plan would

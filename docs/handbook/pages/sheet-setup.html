@@ -23,6 +23,11 @@
 <p>The dashed rectangle is the <b>margin</b>: half an inch of paper at every edge, kept clear so the sheet can be bound, trimmed and held — about as wide as a plotter's own unprintable border. It is a guide and is never drawn on the sheet itself. The furniture sits on that line.</p>
 <h2>Scanned sketches never reach a sheet</h2>
 <p>Not a checkbox, a rule. A scanned page is a tracing reference; everything worth keeping off it has already been traced. On a plotted sheet it is a photograph of somebody's handwriting printed under the map. The rule is the entity, not the layer, so a sheet carries no raster at all — the aerial photograph included.</p>
+<h2>Plot it to PDF</h2>
+<p><b>Export PDF</b> plots every sheet the last Build Sheet wrote, one file each, beside its DXF: <code>&lt;Cave&gt; Plan Sheet.pdf</code> and, with the elevation ticked, <code>&lt;Cave&gt; Profile Sheet.pdf</code>. Open a sheet file yourself and press it with nothing built, and it plots that one.</p>
+<p>Each PDF opens in your system's default PDF reader as soon as it is made.</p>
+<p>The page is the sheet's paper at the sheet's scale. Build Sheet writes the paper size, orientation, print scale and offset into the file, so <b>File &gt; Print</b> plots it correctly too, with no trip through Page Setup. The PDF's own page size is read back and compared to the paper you chose; a mismatch is reported rather than shipped. If the PDF already exists you are asked before it is replaced.</p>
+<p>One PDF per sheet. A cave too big for one sheet still needs a larger paper or a smaller scale; splitting a sheet across pages is not done.</p>
 <h2>When it refuses</h2>
 <ul>
 <li>It says plainly when something is off the paper, and <i>which</i> thing.</li>
