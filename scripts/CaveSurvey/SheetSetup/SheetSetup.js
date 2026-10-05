@@ -669,14 +669,25 @@ SheetSetup.buildDock = function(appWin) {
     layout.addWidget(w.cbTitle, 0, 0);
     layout.addWidget(w.cbElevation, 0, 0);
 
+    w.whereCombo = new QComboBox();
+    w.whereCombo.addItem(qsTr("All sheets in this file"));
+    w.whereCombo.addItem(qsTr("All sheets in a new file"));
+    w.whereCombo.addItem(qsTr("A new file for each sheet"));
+    w.whereCombo.currentIndex = CsLayoutGen.WHERE_THIS;
+    w.whereCombo.toolTip = qsTr("Where Build Sheet puts the sheets. A new " +
+        "file is a copy of the drawing with the sheets in it; this drawing " +
+        "is left as it was.");
+    layout.addWidget(new QLabel(qsTr("Put the sheets in:")), 0, 0);
+    layout.addWidget(w.whereCombo, 0, 0);
+
     w.note = new QLabel("");
     w.note.wordWrap = true;
     layout.addWidget(w.note, 0, 0);
 
     var row = new QHBoxLayout();
     w.buildButton = new QPushButton(qsTr("Build Sheet"));
-    w.buildButton.toolTip = qsTr("Writes the sheet as its own file " +
-        "beside the cave and opens it. Your drawing is not touched.");
+    w.buildButton.toolTip = qsTr("Builds the sheets as tabs under the " +
+        "drawing, or in new files, as chosen above.");
     row.addWidget(w.buildButton, 1, 0);
     w.pdfButton = new QPushButton(qsTr("Export PDF"));
     w.pdfButton.toolTip = qsTr("Plots each sheet you just built to a " +
@@ -1036,6 +1047,15 @@ SheetSetup.build = function() {
     if (w.state.chunked === true && elevBox !== null) {
         said += " " + qsTr("A chunked elevation is shown as drawn; its arrangement offsets are not part of sheets yet.");
     }
+    var where = w.whereCombo.currentIndex;
+    if (where !== CsLayoutGen.WHERE_THIS && res.made.length + res.rewritten.length > 0) {
+        var back = SheetSetup.deliver(doc, di, res, where);
+        if (back !== "") {
+            said += " " + back;
+        }
+        SheetSetup.tell(said, SheetSetup.DONE);
+        return;
+    }
     // show the first sheet that was written
     var first = res.made.length > 0 ? res.made[0] : (res.rewritten.length > 0 ? res.rewritten[0] : "");
     if (first !== "") {
@@ -1045,6 +1065,61 @@ SheetSetup.build = function() {
         }
     }
     SheetSetup.tell(said, attention ? SheetSetup.WARNING : SheetSetup.DONE);
+};
+
+/**
+ * Writes the sheets into new files (see CsLayoutGen.writeCopies), then takes
+ * the layouts this build made back out of the open drawing.
+ *
+ * \return a sentence for the panel
+ */
+SheetSetup.deliver = function(doc, di, res, where) {
+    var names = [];
+    var all = Layouts.list(doc);
+    for (var i = 0; i < all.length; i++) {
+        names.push(all[i].name);
+    }
+    var here = "";
+    try {
+        here = String(doc.getFileName());
+    } catch (eName) {
+        here = "";
+    }
+    var folder = CsCave.folderOf(here);
+    var caveName = CsCave.nameOf(here);
+    var base = "";
+    if (folder !== null && caveName !== null) {
+        var dest = folder + "/Sheets";
+        try {
+            (new QDir("/")).mkpath(dest);
+        } catch (eDir) {
+        }
+        base = dest + "/" + caveName;
+    } else {
+        var picked = CsFiles.saveFile(getMainWindow(), qsTr("Save the sheets as"),
+            QDir.homePath() + "/Sheets.dxf", "DXF (*.dxf)");
+        if (picked === "") {
+            return qsTr("Nothing was written: no file was chosen, so the sheets stay in this file.");
+        }
+        base = picked.replace(/\.dxf$/i, "");
+    }
+    var back = CsLayoutGen.writeCopies(di, CsLayoutGen.jobsFor(where, names, base));
+    if (back.ok !== true) {
+        SheetSetup.tell(qsTr("Sheet Setup: ") + back.error + qsTr(" The sheets stay in this file."), SheetSetup.ERROR);
+        return qsTr("The sheets stay in this file.");
+    }
+    // leave this drawing as it was
+    for (var m = 0; m < res.made.length; m++) {
+        Layouts.remove(di, res.made[m]);
+    }
+    if (where === CsLayoutGen.WHERE_ONE) {
+        try {
+            openFiles([back.paths[0]], false);
+        } catch (eOpen) {
+        }
+        return qsTr("Wrote ") + CsShelf.basename(back.paths[0]) + ".";
+    }
+    return qsTr("Wrote ") + back.paths.length + qsTr(" files to ") + CsShelf.basename(base.replace(/\/[^\/]*$/, "")) + qsTr("/.");
 };
 
 /**

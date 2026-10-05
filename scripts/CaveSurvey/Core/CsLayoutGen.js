@@ -675,3 +675,91 @@ if (typeof Layouts !== "undefined") {
     Layouts.canRevertOf = CsLayoutGen.canRevert;
     Layouts.revertOf = CsLayoutGen.revert;
 }
+
+
+// ---------------------------------------------------------------------------
+// Where the sheets go: this file, one new file, or a new file per sheet.
+//
+// The sheets are always BUILT in the open drawing (that is where the model
+// they look at lives). The two new-file choices then write copies of the
+// drawing -- model space and all, because a viewport needs the cave to look
+// at -- keeping only the wanted layouts in each, and take the freshly made
+// layouts back out of the open drawing so it is left as it was.
+// ---------------------------------------------------------------------------
+
+CsLayoutGen.WHERE_THIS = 0;
+CsLayoutGen.WHERE_ONE = 1;
+CsLayoutGen.WHERE_EACH = 2;
+
+/** A sheet name as part of a file name. */
+CsLayoutGen.fileSafe = function(name) {
+    var t = String(name).replace(/[\\\/:*?"<>|]+/g, "-").replace(/^\s+|\s+$/g, "");
+    return t === "" ? "Sheet" : t;
+};
+
+/**
+ * Writes copies of the drawing in `di`, each keeping only the layouts named
+ * in its entry of `jobs` ([{path, keep: [names]}]).
+ *
+ * \return {ok, paths, error}
+ */
+CsLayoutGen.writeCopies = function(di, jobs) {
+    var out = { ok: false, paths: [], error: "" };
+    var filter = CsSanitize.dxfFilter();
+    var tmp = QDir.tempPath() + "/cavecad-sheets-" + (new Date()).getTime() + ".dxf";
+    if (di.exportFile(tmp, filter) !== true) {
+        out.error = "Could not write a working copy of the drawing.";
+        return out;
+    }
+    try {
+        for (var j = 0; j < jobs.length; j++) {
+            var sdi = new RDocumentInterface(
+                new RDocument(new RMemoryStorage(), createSpatialIndex()));
+            try {
+                if (sdi.importFile(tmp, "", false) !== RDocumentInterface.IoErrorNoError) {
+                    out.error = "Could not read the working copy back.";
+                    return out;
+                }
+                var all = Layouts.list(sdi.getDocument());
+                for (var i = 0; i < all.length; i++) {
+                    if (jobs[j].keep.indexOf(all[i].name) < 0) {
+                        Layouts.remove(sdi, all[i].name);
+                    }
+                }
+                if (sdi.exportFile(jobs[j].path, filter) !== true) {
+                    out.error = "Could not write " + jobs[j].path + ".";
+                    return out;
+                }
+                out.paths.push(jobs[j].path);
+            } finally {
+                try {
+                    destr(sdi);
+                } catch (eD) {
+                }
+            }
+        }
+        out.ok = true;
+    } finally {
+        try {
+            (new QFile(tmp)).remove();
+        } catch (eR) {
+        }
+    }
+    return out;
+};
+
+/**
+ * The jobs for a destination choice: every sheet in one file, or one file
+ * per sheet. `base` is "<folder>/<cave>".
+ */
+CsLayoutGen.jobsFor = function(where, names, base) {
+    if (where === CsLayoutGen.WHERE_ONE) {
+        return [{ path: base + " Sheets.dxf", keep: names.slice(0) }];
+    }
+    var jobs = [];
+    for (var i = 0; i < names.length; i++) {
+        jobs.push({ path: base + " - " + CsLayoutGen.fileSafe(names[i]) + ".dxf",
+                    keep: [names[i]] });
+    }
+    return jobs;
+};

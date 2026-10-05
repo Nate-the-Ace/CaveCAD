@@ -232,6 +232,28 @@ function main() {
     check(CsLayoutGen.canRevert(back, bInfo), "and can still be reverted (the job survived: it is a long string)");
     check(CsLayoutGen.revert(back, bdi, "A1") && CsLayoutGen.state(back, Layouts.get(back, "A1")) === "auto", "revert works on the reloaded drawing");
 
+    // ---- where the sheets go: one new file, or a file each --------------------------------------
+    var names = Layouts.list(doc).map(function(l) { return l.name; });
+    check(names.length >= 2, "there are several sheets to deliver: " + names.length);
+    var base = QDir.tempPath() + "/cs_where_" + (new Date()).getTime();
+    var one = CsLayoutGen.writeCopies(di, CsLayoutGen.jobsFor(CsLayoutGen.WHERE_ONE, names, base));
+    check(one.ok && one.paths.length === 1, "one file for all sheets: " + one.error);
+    var d1 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i1 = new RDocumentInterface(d1);
+    i1.importFile(one.paths[0], "", false);
+    check(Layouts.list(d1).length === names.length, "it holds every sheet");
+    check(d1.queryBlockEntities(d1.getModelSpaceBlockId()).length >= model0, "and the model they look at");
+    var each = CsLayoutGen.writeCopies(di, CsLayoutGen.jobsFor(CsLayoutGen.WHERE_EACH, names, base));
+    check(each.ok && each.paths.length === names.length, "a file per sheet: " + each.error);
+    var d2 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i2 = new RDocumentInterface(d2);
+    i2.importFile(each.paths[0], "", false);
+    var kept = Layouts.list(d2);
+    check(kept.length === 1 && kept[0].name === names[0], "each file holds only its own sheet: " + kept.map(function(l) { return l.name; }));
+    check(d2.queryBlockEntities(d2.getModelSpaceBlockId()).length >= model0, "and still the model");
+    check(Layouts.list(doc).length === names.length, "the open drawing is untouched by copying");
+    check(CsLayoutGen.fileSafe("A/1: x") === "A-1- x", "sheet names make safe file names: " + CsLayoutGen.fileSafe("A/1: x"));
+
     if (fails === 0) print("### LAYOUT GEN OK");
     QCoreApplication.exit(fails === 0 ? 0 : 1);
 }
