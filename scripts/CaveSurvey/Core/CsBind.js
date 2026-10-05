@@ -604,6 +604,19 @@ CsBind.SUITE_TAGS = ["Station", "StationLabel", "Shot", "LRUDName",
     "NoteLabel", "NoteLeader", "WallRun", "WallRunStations",
     "BoundaryId", "LegendRow", "AerialBasemap"];
 
+/**
+ * Is this a shaped line's ornament or an area's tile -- regenerated from
+ * the spine or boundary it belongs to, so never claimed for a station
+ * of its own? (One already carrying a tag keeps it and keeps moving: if
+ * the regeneration did not run, following its stations is the fallback.)
+ */
+CsBind.isDerived = function(entity) {
+    return (typeof CsShapeLine !== "undefined" &&
+            CsTags.get(entity, CsShapeLine.KEY.DECOR) !== "") ||
+        (typeof CsArea !== "undefined" &&
+            CsTags.get(entity, CsArea.OWNER_KEY) !== "");
+};
+
 /** True when the entity carries any suite-generated tag. QCAD only. */
 CsBind.isSuiteGeometry = function(entity) {
     for (var i = 0; i < CsBind.SUITE_TAGS.length; i++) {
@@ -817,6 +830,63 @@ CsBind.pointsOf = function(entity) {
  * bounding box where the bridge offers one and from its points
  * otherwise. null when neither is available. QCAD only.
  */
+/**
+ * How far past the proximity margin a drawn item may sit and still be
+ * tied to the survey, in multiples of that margin; and how many of the
+ * nearest stations it is tied to.
+ *
+ * WHY THIS TIER EXISTS (found on Truitt Cave, 2026-10). The proximity
+ * margin is the median station spacing, which is right for a wall and
+ * wrong for a symbol in the middle of a room: Truitt's floor-slope
+ * symbols sit 20 to 37 ft from the nearest station against a 15.6 ft
+ * margin, its section blocks 25 to 135 ft, a sump outline 58 ft. Each
+ * bound to NOTHING, was "not ours to claim", and then sat still through
+ * every revision with no word said about it. A wide room is not a
+ * reason for a symbol to stop following the cave.
+ *
+ * The answer is the stations NEAREST to it. CsWarp weights every
+ * control by inverse square distance anyway, so a far item simply
+ * follows its nearest stations most -- which is the honest guess for an
+ * item that has none closer. Past FAR_FACTOR margins an item is more
+ * likely something the cave does not own (a note parked in the sheet
+ * margin, an imported drawing) and stays unbound, where the revision
+ * report now names it.
+ */
+CsBind.FAR_FACTOR = 10;
+CsBind.FAR_COUNT = 3;
+
+/**
+ * The names of the `count` stations nearest the middle of `box`, none
+ * farther than `limit`. Pure.
+ */
+CsBind.nearestStations = function(box, stationIndex, count, limit) {
+    var out = [];
+    if (box === undefined || box === null || stationIndex === undefined ||
+            stationIndex === null || !(limit > 0) || !(count > 0)) {
+        return out;
+    }
+    var cx = (box.minX + box.maxX) / 2, cy = (box.minY + box.maxY) / 2;
+    var best = {};
+    for (var i = 0; i < stationIndex.length; i++) {
+        var st = stationIndex[i];
+        if (st === undefined || st === null || !st.name) {
+            continue;
+        }
+        var d = Math.sqrt((st.x - cx) * (st.x - cx) + (st.y - cy) * (st.y - cy));
+        if (d <= limit && (!best.hasOwnProperty(st.name) || d < best[st.name])) {
+            best[st.name] = d;
+        }
+    }
+    var names = [];
+    for (var n in best) {
+        if (best.hasOwnProperty(n)) {
+            names.push(n);
+        }
+    }
+    names.sort(function(a, b) { return best[a] - best[b]; });
+    return names.slice(0, count);
+};
+
 CsBind.boxOf = function(entity, points) {
     try {
         if (typeof entity.getBoundingBox === "function") {
@@ -850,7 +920,10 @@ CsBind.boxOf = function(entity, points) {
  *   2 "proximity"  nothing coincided: the stations inside the
  *                  entity's box grown by the drawing's own feature
  *                  spacing. For freehand that snapped to nothing.
- *   3 "trip"       nothing found: no station list, and the entity
+ *   3 "far"        nothing inside the margin: the few NEAREST
+ *                  stations, within FAR_FACTOR margins. A symbol in the
+ *                  middle of a wide room.
+ *   4 "trip"       nothing found: no station list, and the entity
  *                  follows its trip as a whole.
  *
  * The TRIP comes from the stations wherever it can (tripForStations),
@@ -904,6 +977,15 @@ CsBind.bindEntity = function(doc, entity, tripId, index, epsilon,
         if (near.length > 0) {
             return { stations: near, source: "proximity",
                 trip: tripFor(near) };
+        }
+    }
+    // Nothing inside the margin. A wide room is not a reason to stop
+    // following the cave: take the nearest few -- see FAR_FACTOR.
+    if (box !== null) {
+        var far = CsBind.nearestStations(box, idx, CsBind.FAR_COUNT,
+            CsBind.FAR_FACTOR * CsBind.marginFor(idx));
+        if (far.length > 0) {
+            return { stations: far, source: "far", trip: tripFor(far) };
         }
     }
     // Nothing found: there is no geometry to infer a trip from, so the
@@ -1040,7 +1122,8 @@ CsBind.adoptable = function(doc, tripId, tripStations) {
         if (CsLayers.frameOf(layer) !== "plan") {
             continue;
         }
-        if (CsBind.hasLineworkTags(e) || CsBind.isSuiteGeometry(e)) {
+        if (CsBind.hasLineworkTags(e) || CsBind.isSuiteGeometry(e) ||
+                CsBind.isDerived(e)) {
             continue;
         }
         var bound = CsBind.bindEntity(doc, e, tripId, idx, eps, tripStations);
@@ -1051,9 +1134,9 @@ CsBind.adoptable = function(doc, tripId, tripStations) {
 };
 
 /** Counts an adoptable list by binding source, for the preview:
- *  {total, snap, proximity, trip}. Pure over the list. */
+ *  {total, snap, proximity, far, trip}. Pure over the list. */
 CsBind.countBySource = function(items) {
-    var out = { total: 0, snap: 0, proximity: 0, trip: 0 };
+    var out = { total: 0, snap: 0, proximity: 0, far: 0, trip: 0 };
     if (items === undefined || items === null) {
         return out;
     }
@@ -1202,7 +1285,8 @@ CsBind.planAutoBind = function(doc, tripStations) {
         // Already claimed stays claimed: a deliberate adoption -- or a
         // correction the user made by hand -- outranks anything this
         // pass would work out for itself.
-        if (CsBind.hasLineworkTags(e) || CsBind.isSuiteGeometry(e)) {
+        if (CsBind.hasLineworkTags(e) || CsBind.isSuiteGeometry(e) ||
+                CsBind.isDerived(e)) {
             continue;
         }
         var bound = CsBind.bindEntity(doc, e, null, idx, eps, tripStations);
@@ -1584,7 +1668,8 @@ CsBind.onTransactionInner = function(document, transaction, di) {
         // already claimed, or ours: the layer gate misses our own
         // output on plain feature layers (note leaders on TEXT-NOTES,
         // wall runs on WALLS-*), which the suite tags catch
-        if (CsBind.hasLineworkTags(e) || CsBind.isSuiteGeometry(e)) {
+        if (CsBind.hasLineworkTags(e) || CsBind.isSuiteGeometry(e) ||
+                CsBind.isDerived(e)) {
             continue;
         }
         if (idx === null) {

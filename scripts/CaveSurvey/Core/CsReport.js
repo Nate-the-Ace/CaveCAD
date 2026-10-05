@@ -387,7 +387,7 @@ CsReport.revisionSummary = function(report) {
         // "nothing bound" -- so hand them over as they are.
         var linework = CsRevise.lineworkSummary(report.lineworkMoved,
             report.lineworkUnmoved, report.lineworkBound, undefined,
-            report.lineworkWarped);
+            report.lineworkWarped, report.lineworkUntied);
         for (i = 0; i < linework.length; i++) {
             lines.push(linework[i]);
         }

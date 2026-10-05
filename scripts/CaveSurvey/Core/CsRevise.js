@@ -905,10 +905,10 @@ CsRevise.isWorldFixedLayer = function(layerName) {
 // metres must decide identically).
 //
 // SCOPE, NARROWED: this only gates the entity types that have no
-// per-vertex structure to warp -- block references, text, anything
-// else CsBind.isLineworkLayer/hasLineworkTags accepts that is not a
-// polyline, line, arc, circle or spline. Those five types are warped
-// per-vertex/per-center by CsWarp.mlsSimilarity instead (see
+// per-vertex structure to warp AND have no single anchor point --
+// hatches, images and the like. Polylines, lines, arcs, circles and
+// splines warp per-vertex/per-center, and block references, text and
+// callouts warp at their one anchor, all by CsWarp.mlsSimilarity (see
 // moveLinework below), which always has a locally sensible answer and
 // never refuses. For the remaining types, a residual of a tenth of a
 // percent of the drawing diagonal is 0.5 mm on a 1:200 sheet of a
@@ -923,6 +923,15 @@ CsRevise.isWorldFixedLayer = function(layerName) {
 // With two, the pair IS the definition of the rigid piece and the
 // honest answer is to follow them.
 CsRevise.LINEWORK_RESIDUAL_FRACTION = 1e-3;
+
+/**
+ * Is this entity DERIVED -- a shaped line's ornament or an area's tile,
+ * regenerated from the spine or boundary it belongs to? Those follow
+ * their parent and are never tied to a station of their own.
+ */
+CsRevise.isDerivedGeometry = function(entity) {
+    return CsBind.isDerived(entity);
+};
 
 /**
  * Moves hand-traced linework so it follows the stations it was traced
@@ -962,14 +971,40 @@ CsRevise.LINEWORK_RESIDUAL_FRACTION = 1e-3;
  *                        they were snapped to. (A circle is
  *                        rotationally symmetric, so the rotation is a
  *                        no-op for it -- this matters to arcs.)
- *   anything else         (block references, text, ...) keeps the
- *                        ORIGINAL whole-entity rigid similarity fit,
- *                        residual-checked against
- *                        CsRevise.LINEWORK_RESIDUAL_FRACTION exactly as
- *                        before -- the approved design for this feature
- *                        covers the five types above explicitly and
- *                        does not extend to these, so their behavior is
- *                        unchanged rather than guessed at.
+ *   Block reference /    SYMBOLS AND NOTES. Anchored at one point -- the
+ *   Text                  insertion point -- which warps through
+ *                         CsWarp.mlsSimilarity like any vertex. A SYMBOL
+ *                         is turned by that call's local `angle` about
+ *                         its own position; TEXT only SLIDES and stays
+ *                         upright, so a note is always read the right
+ *                         way up. NEVER SCALED: a
+ *                         symbol's size and a note's height are
+ *                         plotting conventions, not survey data, and a
+ *                         local `factor` of 1.04 must not make one
+ *                         stalactite 4% fatter than its neighbour. The
+ *                         old whole-entity rigid fit refused these the
+ *                         moment three or more bound stations stopped
+ *                         agreeing -- i.e. on every real adjustment --
+ *                         so symbols and notes sat where they were
+ *                         while the walls moved off them.
+ *   Callout               A LINKED PAIR (text + leader[s], see
+ *                         CsCallout), so it moves as ONE rigid unit: the
+ *                         leader's tip (vertex 0, the arrow end) is the
+ *                         anchor that warps, and every member -- text,
+ *                         every leader -- takes that anchor's
+ *                         translation (no turn: a callout is writing).
+ *                         The tip stays on the feature
+ *                         it points at, and the note keeps exactly the
+ *                         layout it was given, rather than each member
+ *                         warping separately and the leader tearing
+ *                         away from its text.
+ *   anything else         (hatches, images, ...) keeps the ORIGINAL
+ *                         whole-entity rigid similarity fit,
+ *                         residual-checked against
+ *                         CsRevise.LINEWORK_RESIDUAL_FRACTION exactly as
+ *                         before: a large entity has no single anchor
+ *                         that describes it, so it is left and REPORTED
+ *                         rather than guessed at.
  *
  * Its control-point set, in order of preference, per the original
  * binding spec:
@@ -1007,7 +1042,7 @@ CsRevise.LINEWORK_RESIDUAL_FRACTION = 1e-3;
  */
 CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
         extent) {
-    var result = { moved: 0, warped: 0, unmoved: [] };
+    var result = { moved: 0, warped: 0, unmoved: [], untied: [] };
     // Soft dependency, the mirror of CsBind's on this module: nothing
     // else in CsRevise needs CsBind, and a caller that loaded only
     // half the Core should get "no linework" rather than a throw.
@@ -1078,9 +1113,144 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
     // every op.addObject(ent, false) below: false keeps its own layer
     var anyMoved = false;
     var ids = doc.queryAllEntities(false, false);
+
+    /** Turns an entity by `angle` about `about` and slides it by
+     *  (dx, dy): a rotation-and-translation with no scale, which is what
+     *  a symbol or a note is owed. */
+    var carry = function(entity, about, angle, dx, dy) {
+        if (Math.abs(angle) > 1e-12) {
+            entity.rotate(angle, about);
+        }
+        entity.move(new RVector(dx, dy));
+    };
+
+    // ---- CALLOUTS, as units ---------------------------------------
+    // A callout is a text and one or more leaders joined by a shared
+    // CalloutId. They are bound one by one like anything else, but they
+    // must MOVE together: see the docblock. Grouped first so the main
+    // loop can leave their members alone.
+    var handled = {};
+    if (typeof CsCallout !== "undefined" && typeof CsTags !== "undefined") {
+        var groups = {};
+        var groupOrder = [];
+        for (var gi = 0; gi < ids.length; gi++) {
+            var ge = doc.queryEntity(ids[gi]);
+            if (isNull(ge)) {
+                continue;
+            }
+            var gid = CsTags.get(ge, CsCallout.KEY.ID);
+            if (gid === "") {
+                continue;
+            }
+            // A station note the Notebook drew (NoteLeader / NoteLabel)
+            // is the suite's own output: Draw erases and redraws it at
+            // the revised station, so it is not moved here.
+            if (CsBind.isSuiteGeometry(ge)) {
+                continue;
+            }
+            var glayer = CsBind.layerNameOf(doc, ge);
+            if (!CsBind.isLineworkLayer(glayer)) {
+                continue;
+            }
+            if (!groups.hasOwnProperty(gid)) {
+                groups[gid] = [];
+                groupOrder.push(gid);
+            }
+            groups[gid].push({ entity: ge, layer: glayer });
+        }
+        for (var go = 0; go < groupOrder.length; go++) {
+            var members = groups[groupOrder[go]];
+            // The anchor: the first leader's tip (vertex 0 is the arrow
+            // end); with no leader, the text's own position.
+            var anchor = null;
+            var pairsForGroup = [];
+            var tipOwner = -1;
+            for (var mi = 0; mi < members.length && anchor === null; mi++) {
+                if (members[mi].entity instanceof RLeaderEntity) {
+                    var ld = members[mi].entity.getData();
+                    if (ld.countVertices() > 0) {
+                        var tp = ld.getVertexAt(0);
+                        anchor = { x: tp.x, y: tp.y };
+                        tipOwner = mi;
+                    }
+                }
+            }
+            if (anchor === null) {
+                for (var ti2 = 0; ti2 < members.length && anchor === null;
+                        ti2++) {
+                    if (members[ti2].entity instanceof RTextEntity) {
+                        var tpos = members[ti2].entity.getPosition();
+                        anchor = { x: tpos.x, y: tpos.y };
+                        tipOwner = ti2;
+                    }
+                }
+            }
+            if (anchor === null) {
+                continue;
+            }
+            // The control stations: the tip's own member first, then
+            // any other member's list, then the trip fallback.
+            var tryOrder = [tipOwner];
+            for (var oi = 0; oi < members.length; oi++) {
+                if (oi !== tipOwner) { tryOrder.push(oi); }
+            }
+            for (var qi = 0; qi < tryOrder.length && pairsForGroup.length === 0;
+                    qi++) {
+                var qe = members[tryOrder[qi]].entity;
+                pairsForGroup = pairsFor(CsBind.decodeStations(
+                    CsTags.get(qe, CsBind.STATIONS_TAG)));
+            }
+            if (pairsForGroup.length === 0) {
+                for (var ri = 0; ri < members.length &&
+                        pairsForGroup.length === 0; ri++) {
+                    var rt = CsTags.getNumber(members[ri].entity,
+                        CsBind.TRIP_TAG);
+                    if (rt !== null && tripStations !== undefined &&
+                            tripStations !== null &&
+                            tripStations.hasOwnProperty(rt)) {
+                        pairsForGroup = pairsFor(tripStations[rt]);
+                    }
+                }
+            }
+            for (var hi = 0; hi < members.length; hi++) {
+                handled[members[hi].entity.getId()] = true;
+            }
+            var glabel = members[0].layer + " callout #" +
+                CsTags.get(members[0].entity, CsCallout.KEY.ID);
+            if (pairsForGroup.length === 0) {
+                result.unmoved.push(glabel);
+                continue;
+            }
+            var gw = CsWarp.mlsSimilarity(anchor, pairsForGroup);
+            if (!isFinite(gw.x) || !isFinite(gw.y) || !isFinite(gw.angle)) {
+                result.unmoved.push(glabel);
+                continue;
+            }
+            var about = new RVector(anchor.x, anchor.y);
+            for (var ci = 0; ci < members.length; ci++) {
+                var cm = members[ci].entity;
+                // A world-fixed member stays; nothing about a callout
+                // makes its sheet furniture part of the cave.
+                if (CsRevise.isWorldFixedLayer(members[ci].layer)) {
+                    continue;
+                }
+                // SLIDES, NEVER TURNS (Nathan, 2026-10-04: "keep notes
+                // upright and only slide"). Writing is read the right
+                // way up whatever the ground under it did.
+                carry(cm, about, 0, gw.x - anchor.x, gw.y - anchor.y);
+                op.addObject(cm, false);
+            }
+            anyMoved = true;
+            result.moved++;
+        }
+    }
+
     for (var i = 0; i < ids.length; i++) {
         var ent = doc.queryEntity(ids[i]);
         if (isNull(ent)) {
+            continue;
+        }
+        if (handled[ent.getId()] === true) {
             continue;
         }
         var layer = CsBind.layerNameOf(doc, ent);
@@ -1092,6 +1262,18 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
         // LineworkTrip. Keying on LineworkStations alone would skip
         // exactly the entities that need the trip fallback.
         if (!CsBind.hasLineworkTags(ent)) {
+            // Drawn on a plan feature layer and tied to NO station: it
+            // cannot follow anything, and a revision that says nothing
+            // about it leaves a surveyor to find out from the printout.
+            // Counted here, named in the summary. Not our own output
+            // (survey marks, ornaments, tiles), not a scan or the
+            // aerial (they have their own anchoring), not the elevation.
+            if (CsLayers.frameOf(layer) === "plan" &&
+                    !CsBind.isSuiteGeometry(ent) &&
+                    !(ent instanceof RImageEntity) &&
+                    !CsRevise.isDerivedGeometry(ent)) {
+                result.untied.push(layer + " #" + ent.getId());
+            }
             continue;
         }
         // our own output, should it ever have picked up a linework tag:
@@ -1255,6 +1437,37 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
             } else {
                 result.moved++;
             }
+            continue;
+        }
+
+        // SYMBOLS AND NOTES: one anchor, warped like any vertex, turned
+        // by the local rotation and never scaled -- see the docblock.
+        //
+        // NOT THE DERIVED ONES. A shaped line's ornament and an area's
+        // tiles are block references too, but they are regenerated from
+        // their spine or boundary -- which this very pass has just
+        // warped -- and warping each glyph on its own as well would
+        // fight the regeneration. They keep the path they always had.
+        var derived = CsRevise.isDerivedGeometry(ent);
+        var anchored = !derived && ((ent instanceof RBlockReferenceEntity) ||
+            (ent instanceof RTextEntity) ||
+            (typeof RLeaderEntity !== "undefined" &&
+                ent instanceof RLeaderEntity));
+        if (anchored) {
+            var apos = (ent instanceof RLeaderEntity) ?
+                ent.getData().getVertexAt(0) : ent.getPosition();
+            var aw = CsWarp.mlsSimilarity({ x: apos.x, y: apos.y }, pairs);
+            if (!isFinite(aw.x) || !isFinite(aw.y) || !isFinite(aw.angle)) {
+                result.unmoved.push(label);
+                continue;
+            }
+            // A symbol turns with the ground under it; writing does not.
+            var turns = (ent instanceof RBlockReferenceEntity) ? aw.angle : 0;
+            carry(ent, new RVector(apos.x, apos.y), turns,
+                aw.x - apos.x, aw.y - apos.y);
+            op.addObject(ent, false);
+            anyMoved = true;
+            result.moved++;
             continue;
         }
 
@@ -1513,7 +1726,7 @@ CsRevise.lineworkClaimLine = function(bound) {
  * \return array of lines
  */
 CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved,
-        warped) {
+        warped, untied) {
     var n = (moved === undefined || moved === null) ? 0 : moved;
     var w = (warped === undefined || warped === null) ? 0 : warped;
     var list = (unmoved === undefined || unmoved === null) ? [] : unmoved;
@@ -1554,6 +1767,37 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved,
         if (list.length > cap) {
             lines.push("  ... and " + (list.length - cap) + " more");
         }
+    }
+    var loose = (untied === undefined || untied === null) ? [] : untied;
+    if (loose.length > 0) {
+        // Named by layer, with a count: a surveyor needs to know WHAT
+        // was left behind (and so where to look), not a hundred ids.
+        var byLayer = {};
+        var order = [];
+        for (var li = 0; li < loose.length; li++) {
+            var ln = String(loose[li]).replace(/ #.*$/, "");
+            if (!byLayer.hasOwnProperty(ln)) {
+                byLayer[ln] = 0;
+                order.push(ln);
+            }
+            byLayer[ln]++;
+        }
+        lines.push("");
+        lines.push("WARNING -- " + loose.length + " drawn item" +
+            (loose.length === 1 ? "" : "s") + " sit" +
+            (loose.length === 1 ? "s" : "") + " too far from any " +
+            "station to be tied to the survey, so " +
+            (loose.length === 1 ? "it" : "they") + " did NOT move:");
+        var shownLayers = Math.min(order.length, 8);
+        for (var oi = 0; oi < shownLayers; oi++) {
+            lines.push("  " + order[oi] + " x" + byLayer[order[oi]]);
+        }
+        if (order.length > shownLayers) {
+            lines.push("  ... and " + (order.length - shownLayers) +
+                " more layers");
+        }
+        lines.push("Move them near the survey or redraw them there, then " +
+            "revise again.");
     }
     if (n === 0 && w === 0 && didStationsMove) {
         // Nothing was bound, so nothing could follow -- and an unbound
@@ -1847,6 +2091,9 @@ CsRevise.adjustTagsOn = function(entity) {
  *                   per-vertex rather than moving as one rigid piece --
  *                   disjoint from lineworkMoved, never both. Always 0
  *                   on the rigid path
+ *   lineworkUntied  ["LAYER #id"] drawn plan items tied to no station
+ *                   (too far from every one), which therefore cannot
+ *                   follow a revision. Named in the report.
  *   lineworkUnmoved ["LAYER #id"] the traced entities that had no
  *                   surviving station to follow, or whose stations
  *                   moved too incoherently for one rigid move to
@@ -2089,6 +2336,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     var lineworkMoved = 0;
     var lineworkWarped = 0;
     var lineworkUnmoved = [];
+    var lineworkUntied = [];
     var lineworkBound = 0;
 
     // The profile pass's own outcome (CsDraw.survey's return value has
@@ -2408,6 +2656,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
             lineworkMoved = lw.moved;
             lineworkWarped = lw.warped;
             lineworkUnmoved = lw.unmoved;
+            lineworkUntied = lw.untied;
         });
     }
 
@@ -2436,6 +2685,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         lineworkMoved: lineworkMoved,
         lineworkWarped: lineworkWarped,
         lineworkUnmoved: lineworkUnmoved,
+        lineworkUntied: lineworkUntied,
         lineworkBound: lineworkBound
     };
     if (geoAnchorLost !== null) {

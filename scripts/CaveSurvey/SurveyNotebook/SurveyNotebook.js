@@ -2052,7 +2052,7 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
     }
     var lwLine = lw === null ? "" :
         ("\n\n" + CsRevise.lineworkSummary(lw.moved, lw.unmoved,
-            lwBound, true, lw.warped).join("\n"));
+            lwBound, true, lw.warped, lw.untied).join("\n"));
 
     // -- the georeference survives the redraw --------------------------
     // Recommitted onto whichever point now carries the anchored station
@@ -2165,7 +2165,7 @@ SurveyNotebook.importFile = function(w) {
             "Couldn't detect the format of that file.");
         return;
     }
-    var survey = format.parse(content);
+    var survey = format.parse(content, CsFormatRegistry.optionsFor(fileName));
     if (survey.shots.length === 0) {
         QMessageBox.warning(null, "Survey Notebook",
             "No shots parsed (format tried: " + format.label + ").");
@@ -3150,13 +3150,14 @@ SurveyNotebook.adoptLinework = function(w) {
             "own geometry.");
         return;
     }
-    var bound = c.snap + c.proximity;
+    var bound = c.snap + c.proximity + c.far;
     var answer = QMessageBox.question(null, "Survey Notebook",
         "Bind " + c.total + " untagged entit" +
         (c.total === 1 ? "y" : "ies") + "?\n\n" +
         bound + " will bind to stations (" + c.snap +
         " snapped exactly to station, LRUD or splay points, " +
-        c.proximity + " by proximity), each to the trip those stations " +
+        c.proximity + " by proximity, " + c.far + " far from every " +
+        "station and tied to the nearest few), each to the trip those stations " +
         "belong to\n" +
         c.trip + " found no station and will follow " + pt.label +
         " as a whole -- only this action will claim those; a revision " +

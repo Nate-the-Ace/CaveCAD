@@ -2025,9 +2025,11 @@ var ABANDONED_TRACING_WARNING =
 //    half of the contract: proving the warning still fires when
 //    something genuinely does NOT follow. A polyline can no longer
 //    reach that outcome (moved 0 there now means "bent", not
-//    "refused"), so this fixture traces an RTextEntity instead -- a
+//    "refused"), so this fixture traces an REllipseEntity instead -- a
 //    type moveLinework's docblock explicitly keeps on the old
-//    rigid-fit-with-refusal path -- tagged directly with the same
+//    rigid-fit-with-refusal path (it used to be an RTextEntity, but
+//    text now warps at its anchor like a symbol -- see
+//    tests/warp_anchors_run.js) -- tagged directly with the same
 //    incoherent A1/A3/A5 station set fixture 9 uses, bypassing
 //    CsProfileBind.claim's proximity search (a single text anchor
 //    point cannot bind to three stations by distance the way a
@@ -2061,10 +2063,8 @@ var ABANDONED_TRACING_WARNING =
         CsLayers.ensure(dI, iI, "PROFILE-CEILING");
         var opI = new RAddObjectsOperation();
         var at = new RVector(i3.x, i3.y);
-        var tdI = new RTextData(at, at, 2.0, 100.0,
-            RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact,
-            1.0, "trace note", "standard", false, false, 0.0, false);
-        var tracedI = new RTextEntity(dI, tdI);
+        var tracedI = new REllipseEntity(dI, new REllipseData(at,
+            new RVector(5, 0), 0.5, 0.0, 2.0 * Math.PI, false));
         tracedI.setLayerId(dI.getLayerId("PROFILE-CEILING"));
         CsTags.set(tracedI, CsBind.STATIONS_TAG,
             CsBind.encodeStations(["A1", "A3", "A5"]));
@@ -2080,11 +2080,11 @@ var ABANDONED_TRACING_WARNING =
             "sanity: the incoherent sketch is refused (moved 0), same as " +
             "fixture 9 above");
         eqs(countsI.linework.warped, 0,
-            "sanity: a text entity has no per-vertex structure to warp " +
+            "sanity: an ellipse has no per-vertex structure to warp " +
             "-- it is refused outright, not bent, got " +
             JSON.stringify(countsI.linework));
         eqs(countsI.linework.unmoved.length, 1,
-            "sanity: the text entity itself is the one refusal, got " +
+            "sanity: the ellipse itself is the one refusal, got " +
             JSON.stringify(countsI.linework));
         ok(countsI.stationsMoved === true,
             "sanity: render() recognises that stations DID genuinely " +
@@ -2592,17 +2592,15 @@ var ABANDONED_TRACING_WARNING =
         CsBind.encodeStations(["P1", "P3", "P5"]));
     op.addObject(circ16, false);
 
-    // -- the entity that is REFUSED: a text entity, the same "no
-    // per-vertex structure" type fixture 11c already proves goes
-    // through the OLD rigid-fit-with-refusal path -- this station
+    // -- the entity that is REFUSED: an ellipse, the same "no
+    // per-vertex structure, no single anchor" type fixture 11c already
+    // proves goes through the OLD rigid-fit-with-refusal path -- this station
     // shape's residual is far past CsRevise.LINEWORK_RESIDUAL_FRACTION,
     // and that refusal depends only on the station pairs, not on where
     // this text happens to sit --------------------------------------------
     var textAt16 = new RVector(20, 8);
-    var td16 = new RTextData(textAt16, textAt16, 2.0, 100.0,
-        RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact,
-        1.0, "trace note", "standard", false, false, 0.0, false);
-    var text16 = new RTextEntity(d16, td16);
+    var text16 = new REllipseEntity(d16, new REllipseData(textAt16,
+        new RVector(5, 0), 0.5, 0.0, 2.0 * Math.PI, false));
     text16.setLayerId(d16.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(text16, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["P1", "P3", "P5"]));
@@ -2619,10 +2617,10 @@ var ABANDONED_TRACING_WARNING =
         JSON.stringify(counts16) + ")");
     eqs(counts16.moved, 1, "16: exactly the circle moves rigidly (" +
         JSON.stringify(counts16) + ")");
-    eqs(counts16.unmoved.length, 1, "16: exactly the text is refused (" +
+    eqs(counts16.unmoved.length, 1, "16: exactly the ellipse is refused (" +
         JSON.stringify(counts16) + ")");
     ok(counts16.unmoved[0].indexOf("#" + textId16) >= 0,
-        "16: the refused entity is the text entity, got " +
+        "16: the refused entity is the ellipse, got " +
         counts16.unmoved[0]);
 
     var afterPoly16 = d16.queryEntity(polyId16);
@@ -2637,10 +2635,10 @@ var ABANDONED_TRACING_WARNING =
             afterCirc16.getRadius());
     }
     if (!isNull(afterText16)) {
-        var tp16 = afterText16.getPosition();
-        eqs(tp16.x, textAt16.x, "16: the refused text's position is " +
+        var tp16 = afterText16.getCenter();
+        eqs(tp16.x, textAt16.x, "16: the refused ellipse's position is " +
             "UNTOUCHED (x)");
-        eqs(tp16.y, textAt16.y, "16: the refused text's position is " +
+        eqs(tp16.y, textAt16.y, "16: the refused ellipse's position is " +
             "UNTOUCHED (y)");
     }
 
