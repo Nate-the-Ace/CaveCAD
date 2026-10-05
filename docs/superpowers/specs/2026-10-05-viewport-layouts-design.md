@@ -242,6 +242,40 @@ The tools the caver already trusts run unchanged. The cost is that paper
 furniture is not drawn while editing (the layout is one click away).
 
 
+## As built (2026-10-05) — read this before the stages above
+
+Everything below was built and verified on branch `viewport`; the stage list
+above is the plan it grew from, kept for the reasoning.
+
+| Stage | Built | Where |
+|---|---|---|
+| V0 spike | render, clip, twist, per-viewport layer freeze, Print.js plot, perf, DXF baseline | `probe/viewport/` |
+| V1 persistence | VIEWPORT in dxflib (frozen layers by name, display lock flag), layouts as XRecords through `RLayout.toStorageMap`, wipeouts as marked polylines, overall viewport draws nothing | `cavecad-src` `dl_dxf`, `RDxfImporter/Exporter`, `RLayout`, `RViewport*` |
+| V2 layout UI | tab strip (Model / sheets / +), paper canvas, page setup dialog, per-sheet print settings on the block, New Viewport tool, scale dropdown with standard + custom scales, lock, per-viewport hidden layers, edit through a viewport (pixel-exact, pan/zoom writes view, lock honoured) | `scripts/Widgets/LayoutTabs`, `scripts/Layouts` |
+| V3 plot | all sheets to one PDF, mixed paper sizes; File > Print / Preview on a sheet | `scripts/Layouts/LayoutPlot.js` |
+| V4 cave generators | `CsLayoutGen` (viewport + furniture, tiles, elevation, white backing as wipeouts, no raster), auto / edited / manual by signature, revert, linked scale bar (`CsScaleBar` + `SheetScaleBarListener`), Sheet Setup builds layouts live | `Core/CsLayoutGen.js`, `Core/CsScaleBar.js`, `SheetSetup/` |
+| Retired | `CsSheetFile`, `SheetSetup.draw/intoCopy/plotSet/...`, `sheet_setup_run.js`, sheet path helpers, tile clip helpers, `CsProfileDraw` sheet anchoring | deleted |
+| V5 | not built: annotation scale, viewport clip to polygon, sheet index table, section sheets, chunked-elevation arrangement offsets on sheets | open |
+
+Decisions taken while building that the text above does not say:
+- **Paper coordinates are drawing units** (measured; see Units decision).
+- **Click-through editing is the composed model view**, not a paper-space
+  pass-through (see that section).
+- **Auto/edited/manual is a signature, not a flag a listener flips.** Undo
+  restores "auto" by itself; a hand-made layout never had a signature.
+- **A linked scale bar is not a hand edit**: its scale follows the viewport;
+  only where it sits counts toward the signature.
+- **Strings in a DXF are kept to ~1000 characters** by dxflib's reader; the
+  generator job is stored in 700-character pieces.
+- **Privacy**: viewports drop raster images (`CaveCAD/NoRaster`); proven with a
+  control in `tests/layout_raster_run.js`.
+- **Perf**: viewport export queries the spatial index (100k entities: 790 to
+  220 ms per viewport).
+
+Verification: stages 56-64 of `tests/run_all.sh` plus 55 older stages against
+the dev engine; GUI flows checked live through the MCP bridge (tabs, paper,
+edit through a viewport, scale list, lock, listener, undo/redo).
+
 ## Risks and open traps
 
 - **DXF fidelity** (V1) is the largest unknown; the fallback is a blob.
