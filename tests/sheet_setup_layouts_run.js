@@ -103,7 +103,35 @@ if (!isNull(loc)) {
 // tile layout uses drawing units per inch (metric drawings)
 var st = { caveBox: { minX: 0, minY: 0, maxX: 3000, maxY: 1000 }, perFoot: 0.3048, occupied: null };
 var tl = SheetSetup.tileLayoutFor(st, sheet, 20, {}, { title: true, bar: true, north: true }, false);
-check(tl === null || tl.tiles.length >= 1, "tileLayoutFor answers for a metric drawing without throwing");
+check(tl === null || tl.tooMany === true || tl.tiles.length >= 1, "tileLayoutFor answers for a metric drawing without throwing");
 
 if (fails === 0) print("### SHEET SETUP LAYOUTS OK");
+// ---- the default layout becomes the default sheet ------------------------------------------------
+(function() {
+    var d2 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    d2.setUnit(RS.Foot);
+    var di2 = new RDocumentInterface(d2);
+    getDocument = function() { return d2; };
+    getDocumentInterface = function() { return di2; };
+    CsLayers.ensure(d2, di2, CsLayers.WALLS_SURVEYED);
+    var e = new RLineEntity(d2, new RLineData(new RVector(500000, 3900000), new RVector(500100, 3900060)));
+    e.setLayerId(d2.getLayerId(CsLayers.WALLS_SURVEYED));
+    var op = new RAddObjectsOperation(); op.addObject(e, false); di2.applyOperation(op);
+    var mk = Layouts.create(di2, { name: "Layout", paper: "Letter" });
+    check(!isNull(mk), "default layout created: " + JSON.stringify(Layouts.list(d2).map(function(l) { return [l.name, l.mode]; })));
+    check(!isNull(CsLayoutGen.pristine(d2)), "an empty default Layout is pristine");
+    var made = SheetSetup.starter(d2, di2);
+    check(made !== "", "the default sheet is built when the default layout is opened: " + made);
+    var names = Layouts.list(d2).map(function(l) { return l.name; });
+    check(names.length === 1 && names[0] === made, "the empty Layout became the sheet, no stray tab: " + names);
+    check(CsLayoutGen.state(d2, Layouts.get(d2, made)) === "auto", "and it is an automatic sheet Sheet Setup can rewrite");
+    check(Layouts.viewports(d2, Layouts.get(d2, made)).length >= 1, "with a viewport on the cave");
+    check(CsLayoutGen.pristine(d2) === undefined, "nothing pristine is left to adopt");
+    // a hand-made layout is never adopted
+    var d3 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var di3 = new RDocumentInterface(d3);
+    Layouts.create(di3, { name: "Mine", paper: "Letter" });
+    check(CsLayoutGen.pristine(d3) === undefined, "only the default 'Layout' is adopted, never a layout of the caver's");
+})();
+
 QCoreApplication.exit(fails === 0 ? 0 : 1);

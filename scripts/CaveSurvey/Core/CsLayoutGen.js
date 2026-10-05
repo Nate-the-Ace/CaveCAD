@@ -623,6 +623,33 @@ CsLayoutGen.derived = function(doc, blockId) {
  *
  * \return { made: [names], rewritten: [names], skipped: [names], said }
  */
+/**
+ * The empty layout every drawing starts with ("Layout", QCAD's own paper
+ * space), if nothing has been put on it and nothing generated it. Sheet
+ * Setup ADOPTS it as its first sheet rather than leaving it as a stray empty
+ * tab beside the sheets it makes.
+ *
+ * \return its info, or undefined
+ */
+CsLayoutGen.pristine = function(doc) {
+    var info = Layouts.get(doc, "Layout");
+    if (isNull(info) || CsLayoutGen.canRevert(doc, info)) {
+        return undefined;
+    }
+    var ids = doc.queryBlockEntities(info.blockId);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || e.isUndone()) {
+            continue;
+        }
+        if (isFunction(e.isOverall) && e.isOverall()) {
+            continue;
+        }
+        return undefined;
+    }
+    return info;
+};
+
 CsLayoutGen.generate = function(doc, di, o) {
     var jobs = CsLayoutGen.plan(o);
     var res = { made: [], rewritten: [], skipped: [], jobs: jobs, said: "" };
@@ -634,6 +661,22 @@ CsLayoutGen.generate = function(doc, di, o) {
             // manual, or generated and edited since: the person's now
             res.skipped.push(job.name);
             continue;
+        }
+        if (isNull(info) && j === 0) {
+            // the empty default layout becomes the first sheet
+            var blank = CsLayoutGen.pristine(doc);
+            if (!isNull(blank) && !isNull(Layouts.rename(di, blank.name, job.name))) {
+                Layouts.setMode(di, job.name, "auto");
+                info = Layouts.get(doc, job.name);
+                res.made.push(job.name);
+                info = Layouts.pageSetup(di, job.name, {
+                    paper: { w: job.paperInches.w * 25.4, h: job.paperInches.h * 25.4 },
+                    landscape: job.paperInches.w >= job.paperInches.h,
+                    margins: job.marginInches * 25.4 });
+                CsLayoutGen.draw(doc, di, job, info, o.extra);
+                CsLayoutGen.stamp(doc, di, job, job.name);
+                continue;
+            }
         }
         if (isNull(info)) {
             info = Layouts.create(di, {
@@ -667,6 +710,11 @@ CsLayoutGen.generate = function(doc, di, o) {
     return res;
 };
 
+
+/** The engine asks, when a pristine "Layout" tab is picked: fill it. */
+if (typeof Layouts !== "undefined") {
+    Layouts.pristineOf = CsLayoutGen.pristine;
+}
 
 // The engine's layout tabs ask "is this sheet automatic?" and offer Revert
 // through these hooks (the engine knows nothing of the cave suite).

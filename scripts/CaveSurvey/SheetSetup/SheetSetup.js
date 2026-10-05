@@ -966,6 +966,43 @@ SheetSetup.repaint = function() {
         "of this drawing. A sheet you have changed by hand is left alone.");
 };
 
+/**
+ * The DEFAULT SHEET: what the empty "Layout" tab becomes when it is first
+ * opened in a cave drawing -- the panel's own defaults (Letter, the most
+ * detailed scale that fits, every piece of furniture), built by the same
+ * generator, so Sheet Setup later rewrites it like any other automatic sheet.
+ *
+ * \return the new sheet's name, or "" when there is nothing to show yet
+ */
+SheetSetup.starter = function(doc, di) {
+    var state = SheetSetup.readState(doc);
+    if (isNull(state) || state.ok !== true || CsLayoutGen.pristine(doc) === undefined) {
+        return "";
+    }
+    var sheet = CsSheetSetup.sheetByName("ANSI A -- 11 x 8.5");
+    var wants = { title: true, bar: true, north: true };
+    var fit = CsSheetSetup.fit(state.caveW, state.caveH, sheet,
+        SheetSetup.footerFn(state, sheet, wants), false);
+    var scale = fit.fits ? fit.scale : CsSheetSetup.SCALES[CsSheetSetup.SCALES.length - 1];
+    var tiles = SheetSetup.tileLayoutFor(state, sheet, scale, {}, wants, fit.turned);
+    if (tiles !== null) {
+        return "";     // a cave that needs several sheets is Sheet Setup's job
+    }
+    var res = CsLayoutGen.generate(doc, di, {
+        caveBox: state.caveBox, elevBox: null, sheet: sheet, turned: fit.turned,
+        scale: scale, perFoot: CsShapeLine.perFoot(doc),
+        wants: { border: true, bar: true, north: true, title: true },
+        titleValues: SheetSetup.titleValues(doc, state.filled),
+        reading: CsSheetSetup.latestDeclination(state.survey),
+        tiles: null, elevation: false, shiftInches: { x: 0, y: 0 },
+        extra: { offsets: {}, titleValues: SheetSetup.titleValues(doc, state.filled) } });
+    return res.made.length > 0 ? res.made[0] : "";
+};
+
+if (typeof Layouts !== "undefined") {
+    Layouts.starterOf = function(doc, di) { return SheetSetup.starter(doc, di); };
+}
+
 /** The panel's words when the scale asks for more sheets than a cave ever needs. */
 SheetSetup.tooManyText = function(state, scale, tiles) {
     return qsTr("The plan measures %1 x %2 ft: at 1\" = %3 ft that is %4 sheets. Pick a smaller scale (a larger number of feet per inch).")
