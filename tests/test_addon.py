@@ -1839,6 +1839,8 @@ MENU = {
     "LayoutBorder/LayoutBorder.js":       (454, 65, ["addborder", "abrd"]),
     "LayoutLegend/LayoutLegend.js":       (454, 66, ["addlegend", "alg"]),
     "LayoutPlot/LayoutPlot.js":           (454, 67, ["plotlayout", "plot"]),
+    "LayoutZoomViewport/LayoutZoomViewport.js": (454, 68, ["zoomviewport", "zvp"]),
+    "LayoutMatchViewport/LayoutMatchViewport.js": (454, 69, ["matchviewport", "mvp"]),
     # 455 -- fix and share
     "CheckMap/CheckMap.js":               (455, 5, ["checkmap", "chk"]),
     "RepairDrawing/RepairDrawing.js":     (455, 10, ["repairdrawing", "rep"]),
@@ -2092,6 +2094,8 @@ class TestSheetGuard(unittest.TestCase):
         "CheckMap": "reads the drawing and reports; changes nothing",
         "LayoutNorthArrow": "draws on a LAYOUT only (refuses the model); never touches model space",
         "LayoutScaleBar": "draws on a LAYOUT only (refuses the model); never touches model space",
+        "LayoutZoomViewport": "changes a viewport's view on a LAYOUT; never touches model space",
+        "LayoutMatchViewport": "changes viewports on a LAYOUT; never touches model space",
         "LayoutBorder": "draws on a LAYOUT only (refuses the model); never touches model space",
         "LayoutLegend": "makes a viewport on a LAYOUT; never edits model space (Build Legend does that)",
         "LayoutPlot": "writes a PDF; the only edit is leaving rasters out of viewports on layouts",

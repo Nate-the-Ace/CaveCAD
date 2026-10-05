@@ -95,5 +95,25 @@ check(CsLayoutPlot.pathFor(doc, "A/B") === "", "a drawing with no folder yet ask
 var out = QDir.tempPath() + "/cs_extras_" + (new Date()).getTime() + ".pdf";
 var back = LayoutPlot.exportPdf(di, ["S1", "WithLegend"], out);
 check(back.ok === true && back.pages === 2, "two layouts plot to one PDF: " + (back.error || back.pages));
+// ---- zoom and match
+var zi = Layouts.get(doc, "S1");
+var zmap = Layouts.viewports(doc, zi).filter(function(v) { return !v.isOverall() && !CsLayoutFurniture.isLegendViewport(v); })[0];
+check(CsLayoutFurniture.viewOf(doc, zmap) === "cave", "a plan viewport's subject is the cave");
+var zf = doc.queryEntity(zmap.getId()); zf.setScale(0.00001); zf.setViewCenter(new RVector(1, 1));
+di.applyOperation(new RModifyObjectOperation(zf));
+zmap = doc.queryEntity(zmap.getId());
+check(CsLayoutFurniture.zoomViewport(doc, di, zmap), "zoom re-frames it");
+zmap = doc.queryEntity(zmap.getId());
+check(near(Layouts.paperToModel(zmap, zmap.getCenter().x, zmap.getCenter().y).x, ox + 200, 1e-3), "centred on the cave");
+check(near(Layouts.feetPerInch(doc, zmap), NewViewport.fitScale(doc, zmap.getWidth(), zmap.getHeight(), SheetSetup.caveBox(doc))), "at the standard scale that fits");
+var other = Layouts.viewports(doc, Layouts.get(doc, "WithLegend")).filter(function(v) { return !v.isOverall() && !CsLayoutFurniture.isLegendViewport(v); })[0];
+var of = doc.queryEntity(other.getId()); of.setScale(0.0005); of.setRotation(0.5);
+di.applyOperation(new RModifyObjectOperation(of));
+check(CsLayoutFurniture.matchViewport(doc, di, doc.queryEntity(other.getId()), zmap), "match copies one viewport's settings to another");
+zmap = doc.queryEntity(zmap.getId());
+check(near(zmap.getScale(), 0.0005) && near(zmap.getRotation(), 0.5), "scale and rotation");
+check(CsLayoutFurniture.matchViewport(doc, di, zmap, zmap) === false, "a viewport is not matched to itself");
+Layouts.setLocked(di, zmap, true);
+check(CsLayoutFurniture.matchViewport(doc, di, other, doc.queryEntity(zmap.getId())) === false && CsLayoutFurniture.zoomViewport(doc, di, doc.queryEntity(zmap.getId())) === false, "a locked viewport is left alone");
 if (fails === 0) print("### LAYOUT EXTRAS OK");
 QCoreApplication.exit(fails === 0 ? 0 : 1);

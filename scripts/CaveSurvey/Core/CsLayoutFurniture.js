@@ -297,3 +297,84 @@ CsLayoutFurniture.addBorderTool = function(di) {
     }
     return CsLayoutFurniture.addBorder(doc, di, info, 0.2);
 };
+
+
+/** The viewport on the layout under paper (x, y), else undefined (not the overall one). */
+CsLayoutFurniture.viewportAtPoint = function(doc, info, x, y) {
+    var vp = Layouts.viewportAt(doc, info, x, y);
+    return (isNull(vp) || vp.isOverall()) ? undefined : vp;
+};
+
+/** What a viewport is looking at: "legend", "profile" or "cave" (read from what it hides). */
+CsLayoutFurniture.viewOf = function(doc, vp) {
+    if (CsLayoutFurniture.isLegendViewport(vp)) {
+        return "legend";
+    }
+    var plan = false, profile = false, fz = vp.getFrozenLayerIds();
+    for (var i = 0; i < fz.length; i++) {
+        var fr = CsLayers.frameOf(String(doc.getLayerName(fz[i])));
+        if (fr === "plan") { plan = true; }
+        if (fr === "profile") { profile = true; }
+    }
+    return plan && !profile ? "profile" : "cave";
+};
+
+/**
+ * Re-frames a viewport on what it is for: the whole cave (or the elevation, or
+ * the legend), at the first standard scale at which that fits its box.
+ *
+ * \return true when it changed
+ */
+CsLayoutFurniture.zoomViewport = function(doc, di, vp) {
+    if (Layouts.isLocked(vp)) {
+        CsTell.warn(qsTr("Zoom Viewport: this viewport is locked; unlock it to re-frame it."));
+        return false;
+    }
+    var ext = CsLayoutTemplate.extentsOf(doc, CsLayoutFurniture.viewOf(doc, vp));
+    if (isNull(ext)) {
+        CsTell.warn(qsTr("Zoom Viewport: there is nothing in the drawing for this viewport to show yet."));
+        return false;
+    }
+    var fresh = doc.queryEntity(vp.getId());
+    var fpi = NewViewport.fitScale(doc, fresh.getWidth(), fresh.getHeight(), ext);
+    fresh.setScale(Layouts.scaleFor(doc, fpi));
+    fresh.setViewCenter(new RVector((ext.minX + ext.maxX) / 2 - fresh.getViewTarget().x, (ext.minY + ext.maxY) / 2 - fresh.getViewTarget().y));
+    var op = new RModifyObjectOperation(fresh);
+    op.setText(qsTr("Zoom viewport"));
+    di.applyOperation(op);
+    return true;
+};
+
+/** Gives `dst` the scale and rotation of `src`. \return true when it changed */
+CsLayoutFurniture.matchViewport = function(doc, di, src, dst) {
+    if (src.getId() === dst.getId()) {
+        return false;
+    }
+    if (Layouts.isLocked(dst)) {
+        CsTell.warn(qsTr("Match Viewport: the viewport you picked is locked; unlock it first."));
+        return false;
+    }
+    var fresh = doc.queryEntity(dst.getId());
+    fresh.setScale(src.getScale());
+    fresh.setRotation(src.getRotation());
+    var op = new RModifyObjectOperation(fresh);
+    op.setText(qsTr("Match viewport"));
+    di.applyOperation(op);
+    return true;
+};
+
+/** The one selected viewport on the current layout, or undefined. */
+CsLayoutFurniture.selectedViewport = function(doc, info) {
+    var ids = doc.querySelectedEntities();
+    var found;
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (!isNull(e) && e.getType() === RS.EntityViewport && !e.isOverall() && e.getBlockId() === info.blockId) {
+            if (!isNull(found)) {
+                return undefined;
+            }
+            found = e;
+        }
+    }
+    return found;
+};

@@ -779,6 +779,28 @@
     "LayoutPlot"
    ],
    "shots": []
+  },
+  {
+   "id": "layout-zoom-viewport",
+   "title": "Zoom Viewport To Cave",
+   "class": "tool",
+   "file": "layout-zoom-viewport.html",
+   "stage": 454,
+   "tools": [
+    "LayoutZoomViewport"
+   ],
+   "shots": []
+  },
+  {
+   "id": "layout-match-viewport",
+   "title": "Match Viewport",
+   "class": "tool",
+   "file": "layout-match-viewport.html",
+   "stage": 454,
+   "tools": [
+    "LayoutMatchViewport"
+   ],
+   "shots": []
   }
  ]
 }
