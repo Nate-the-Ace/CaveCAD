@@ -1834,6 +1834,8 @@ MENU = {
     "LayoutNorthArrow/LayoutNorthArrow.js": (454, 60, ["northarrow", "nar"]),
     "LayoutScaleBar/LayoutScaleBar.js":   (454, 61, ["scalebar", "sbar"]),
     "LayoutTitleBlock/LayoutTitleBlock.js": (454, 62, ["titleblock", "tblock"]),
+    "LayoutNew/LayoutNew.js":             (454, 63, ["newlayout", "nlay"]),
+    "LayoutSaveTemplate/LayoutSaveTemplate.js": (454, 64, ["savelayout", "slay"]),
     # 455 -- fix and share
     "CheckMap/CheckMap.js":               (455, 5, ["checkmap", "chk"]),
     "RepairDrawing/RepairDrawing.js":     (455, 10, ["repairdrawing", "rep"]),
@@ -2087,6 +2089,8 @@ class TestSheetGuard(unittest.TestCase):
         "CheckMap": "reads the drawing and reports; changes nothing",
         "LayoutNorthArrow": "draws on a LAYOUT only (refuses the model); never touches model space",
         "LayoutScaleBar": "draws on a LAYOUT only (refuses the model); never touches model space",
+        "LayoutNew": "makes a new LAYOUT (paper space) from a template; never touches model space",
+        "LayoutSaveTemplate": "reads a layout and writes a template file; never edits the drawing",
         "LayoutTitleBlock": "draws on a LAYOUT only (refuses the model); never touches model space",
         "SurveyStats": "computes length, depth and grade",
         "ExportCaveSurvey": "writes a survey file, never the drawing",

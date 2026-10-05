@@ -54,8 +54,8 @@ CsLayoutFurniture.inches = function(doc, v) {
  *
  * \return true when it was added (false: no viewport to point north for)
  */
-CsLayoutFurniture.addNorth = function(doc, di, info, x, y) {
-    var vp = CsLayoutFurniture.viewportFor(doc, info, x, y);
+CsLayoutFurniture.addNorth = function(doc, di, info, x, y, vpOverride) {
+    var vp = isNull(vpOverride) ? CsLayoutFurniture.viewportFor(doc, info, x, y) : vpOverride;
     if (isNull(vp)) {
         CsTell.warn(qsTr("Add North Arrow: there is no viewport on this layout to point north for."));
         return false;
@@ -97,13 +97,14 @@ CsLayoutFurniture.addTitle = function(doc, di, info, x, y) {
 };
 
 /** A scale bar for the viewport under (x, y), starting at paper (x, y). */
-CsLayoutFurniture.addScaleBar = function(doc, di, info, x, y) {
-    var vp = CsLayoutFurniture.viewportFor(doc, info, x, y);
+CsLayoutFurniture.addScaleBar = function(doc, di, info, x, y, vpOverride, quiet) {
+    var vp = isNull(vpOverride) ? CsLayoutFurniture.viewportFor(doc, info, x, y) : vpOverride;
     if (isNull(vp)) {
-        CsTell.warn(qsTr("Add Scale Bar: there is no viewport on this layout to measure."));
+        if (quiet !== true) { CsTell.warn(qsTr("Add Scale Bar: there is no viewport on this layout to measure.")); }
         return false;
     }
     if (CsScaleBar.hasBar(doc, vp)) {
+        if (quiet === true) { return false; }
         CsTell.warn(qsTr("Add Scale Bar: this viewport already has one (a viewport has one bar; delete it to place another)."));
         return false;
     }
@@ -130,5 +131,20 @@ CsLayoutFurniture.beginPlacing = function(tool, name, prompt) {
     tool.setCommandPrompt(prompt);
     tool.setLeftMouseTip(prompt);
     tool.setRightMouseTip(EAction.trCancel);
+    return true;
+};
+
+
+/** A border `inset` inches inside the paper's edge, on the BORDER layer. */
+CsLayoutFurniture.addBorder = function(doc, di, info, inset) {
+    var ps = Layouts.paperSize(doc, info);
+    var inch = Layouts.toPaper(doc, 25.4);
+    var env = CsLayoutGen.envFor(doc, di, info.blockId, qsTr("Add border"), "");
+    var W = ps.w / inch, H = ps.h / inch, b = inset;
+    env.line(b, b, W - b, b, CsLayers.BORDER);
+    env.line(W - b, b, W - b, H - b, CsLayers.BORDER);
+    env.line(W - b, H - b, b, H - b, CsLayers.BORDER);
+    env.line(b, H - b, b, b, CsLayers.BORDER);
+    di.applyOperation(env.op);
     return true;
 };

@@ -724,6 +724,28 @@
     "LayoutTitleBlock"
    ],
    "shots": []
+  },
+  {
+   "id": "layout-new",
+   "title": "New Layout From Template",
+   "class": "tool",
+   "file": "layout-new.html",
+   "stage": 454,
+   "tools": [
+    "LayoutNew"
+   ],
+   "shots": []
+  },
+  {
+   "id": "layout-save-template",
+   "title": "Save Layout As Template",
+   "class": "tool",
+   "file": "layout-save-template.html",
+   "stage": 454,
+   "tools": [
+    "LayoutSaveTemplate"
+   ],
+   "shots": []
   }
  ]
 }
