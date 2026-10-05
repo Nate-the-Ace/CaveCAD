@@ -159,6 +159,182 @@ CsHelp.SYMBOL = {
     "SYM_JOINT_TICK": {
         means: "A fracture in the bedrock that the passage follows.",
         rule: "Draw it along the joint's own direction. It is the answer to why the cave goes where it goes."
+    },
+    "SYM_BAT": {
+        means: "Bats roosting or flying in the cave.",
+        rule: "Mark the roost, not every animal, and never put a roost on a map that leaves the group -- a published bat roost is a disturbed one."
+    },
+    "SYM_ROOT": {
+        means: "A plant root coming through the ceiling or wall.",
+        rule: "Roots mean the surface is close. Note the depth of cover in a callout if you know it."
+    },
+    "SYM_TREE_TRUNK": {
+        means: "A tree trunk or log washed or fallen into the cave.",
+        rule: "It is evidence of flooding or an open sinkhole upstream; say which in a note."
+    },
+    "SYM_VEGETABLE_DEBRIS": {
+        means: "Sticks, leaves and plant litter on the floor.",
+        rule: "Washed-in litter marks how far floodwater or surface input reaches."
+    },
+    "SYM_SEED_GERMINATION": {
+        means: "A seed sprouting inside the cave.",
+        rule: "Rare and worth a photo. A sprout means light or surface air is reaching this spot."
+    },
+    "SYM_ARCHEO_EXCAVATION": {
+        means: "A dug or disturbed area with archaeological interest.",
+        rule: "Draw it at the size of the trench. Do not dig, move or collect anything to improve a map."
+    },
+    "SYM_ARCHEO_MATERIAL": {
+        means: "Worked material left by people: pottery, tools, charcoal.",
+        rule: "Leave it where it lies and mark it. Location is the evidence."
+    },
+    "SYM_PALEO_MATERIAL": {
+        means: "Fossils or ancient natural remains.",
+        rule: "Mark, photograph and report; do not collect."
+    },
+    "SYM_BONES": {
+        means: "Animal bones on the floor.",
+        rule: "One symbol per find spot, not per bone."
+    },
+    "SYM_HUMAN_BONES": {
+        means: "Human remains.",
+        rule: "Treat as a burial: mark it, leave it, and report it to the landowner and the authorities rather than publicising it."
+    },
+    "SYM_MASONRY": {
+        means: "A wall or structure built by people.",
+        rule: "Draw the line of the wall; the symbol is for the courses seen in plan."
+    },
+    "SYM_ALTAR": {
+        means: "A built or placed altar or shrine.",
+        rule: ""
+    },
+    "SYM_EX_VOTO": {
+        means: "An offering left in the cave.",
+        rule: "Mark where it sits and leave it there."
+    },
+    "SYM_DANGER": {
+        means: "A hazard: loose rock, a bad drop, bad air, anything the next party must not walk into.",
+        rule: "Say WHAT the danger is in a callout beside it. A bare triangle tells a reader nothing they can act on."
+    },
+    "SYM_DIG": {
+        means: "A place where digging would continue the cave.",
+        rule: "Say what is in the way: clay, gravel, rock. That decides what tools the next trip brings."
+    },
+    "SYM_AIR_DRAUGHT": {
+        means: "Moving air, with the arrow along the way it blows.",
+        rule: "Moving air is the strongest clue to unexplored cave. Note the season: it often reverses."
+    },
+    "SYM_CONTINUATION": {
+        means: "Passage that goes on and has not been surveyed.",
+        rule: "This is a lead. Add a note saying why it stopped: time, water, tight, or no light."
+    },
+    "SYM_LOW_END": {
+        means: "A passage that ends because the ceiling comes down to the floor.",
+        rule: "Different from a NARROW end: a low end might be dug or crawled under."
+    },
+    "SYM_NARROW_END": {
+        means: "A passage that ends because the walls close in.",
+        rule: "Say whether it was tried and by whom. A tight squeeze to one caver is a way on to another."
+    },
+    "SYM_BREAKDOWN_CHOKE": {
+        means: "A passage that ends in a pile of collapsed rock.",
+        rule: "Draw the choke where the passage stops being passable, not where the rubble starts."
+    },
+    "SYM_CLAY_CHOKE": {
+        means: "A passage that ends where clay fills it to the roof.",
+        rule: ""
+    },
+    "SYM_FLOWSTONE_CHOKE": {
+        means: "A passage that ends where flowstone has sealed it.",
+        rule: "A flowstone choke is rarely worth digging. Say if you heard anything beyond it."
+    },
+    "SYM_HELICTITE": {
+        means: "A twisting stone that grows in any direction, not down.",
+        rule: "Fragile. Mark it so the next party keeps clear of it."
+    },
+    "SYM_SODA_STRAW": {
+        means: "A thin hollow tube of calcite hanging from the ceiling.",
+        rule: "The most breakable thing in a cave. Mark the field, and route the trail away from it."
+    },
+    "SYM_PENDANT": {
+        means: "A short rounded knob of rock hanging from the ceiling, shaped by water.",
+        rule: "A pendant is carved rock, a stalactite is deposited stone."
+    },
+    "SYM_CAVE_PEARL": {
+        means: "Smooth rounded stones grown in a shallow pool.",
+        rule: "Never move them: a pearl turned over stops growing."
+    },
+    "SYM_CRYSTAL": {
+        means: "Faceted crystals: calcite, quartz or similar.",
+        rule: ""
+    },
+    "SYM_ARAGONITE": {
+        means: "Needle crystals radiating out from a point.",
+        rule: "Fragile enough to be destroyed by a breath on it."
+    },
+    "SYM_GYPSUM": {
+        means: "A crust or blades of gypsum on the wall.",
+        rule: ""
+    },
+    "SYM_GYPSUM_FLOWER": {
+        means: "A curling growth of gypsum pushed out of the wall.",
+        rule: ""
+    },
+    "SYM_VOLCANO": {
+        means: "A stalagmite with a crater on top, built by a drip that falls hard.",
+        rule: ""
+    },
+    "SYM_CLAY_TREE": {
+        means: "A clay column capped by a stone, left standing as the surrounding clay eroded.",
+        rule: ""
+    },
+    "SYM_SCALLOP": {
+        means: "Overlapping cup-shaped hollows cut into a wall by flowing water.",
+        rule: "Small scallops mean fast water, big ones slow. The steep side faces upstream."
+    },
+    "SYM_FLUTE": {
+        means: "Vertical channels worn down a wall by water running over it.",
+        rule: ""
+    },
+    "SYM_KARREN": {
+        means: "Rock dissolved into sharp ridges and runnels.",
+        rule: "Mark where the floor or wall is hard to walk or crawl on."
+    },
+    "SYM_ANASTOMOSIS": {
+        means: "A pattern of channels in the ceiling that split and rejoin.",
+        rule: ""
+    },
+    "SYM_BRIDGE": {
+        means: "A built bridge or planks across a gap.",
+        rule: ""
+    },
+    "SYM_WALKWAY": {
+        means: "A built path or boardwalk.",
+        rule: ""
+    },
+    "SYM_HANDRAIL": {
+        means: "A fixed handrail or cable on posts.",
+        rule: ""
+    },
+    "SYM_STEPS": {
+        means: "Steps cut or built into a slope.",
+        rule: "Draw the rise upward. The steps point the way up."
+    },
+    "SYM_FIXED_LADDER": {
+        means: "A rigid ladder bolted to the rock.",
+        rule: "A fixed ladder has straight rails; a hanging cable ladder is drawn wavy."
+    },
+    "SYM_GATE": {
+        means: "A gate or door across the passage.",
+        rule: "Note who holds the key."
+    },
+    "SYM_CAMP": {
+        means: "An underground camp site.",
+        rule: ""
+    },
+    "SYM_NAMEPLATE": {
+        means: "A plate or tag fixed to the wall with the station or cave name.",
+        rule: ""
     }
 };
 

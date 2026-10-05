@@ -131,7 +131,7 @@ CsSketch.LINES = {
 // reference to another scrap.
 CsSketch.POINTS = {
     "stalactite": { kind: "symbol", block: "SYM_STALACTITE" },
-    "soda-straw": { kind: "symbol", block: "SYM_STALACTITE" },
+    "soda-straw": { kind: "symbol", block: "SYM_SODA_STRAW" },
     "disc-stalactite": { kind: "symbol", block: "SYM_STALACTITE" },
     "ice-stalactite": { kind: "symbol", block: "SYM_STALACTITE" },
     "stalagmite": { kind: "symbol", block: "SYM_STALAGMITE" },
@@ -144,20 +144,20 @@ CsSketch.POINTS = {
     "pillar-with-curtains": { kind: "symbol", block: "SYM_COLUMN" },
     "curtain": { kind: "symbol", block: "SYM_DRAPERY" },
     "flowstone": { kind: "symbol", block: "SYM_FLOWSTONE" },
-    "flowstone-choke": { kind: "symbol", block: "SYM_FLOWSTONE" },
+    "flowstone-choke": { kind: "symbol", block: "SYM_FLOWSTONE_CHOKE" },
     "wall-calcite": { kind: "symbol", block: "SYM_FLOWSTONE" },
     "gours": { kind: "symbol", block: "SYM_RIMSTONE_DAM" },
     "moonmilk": { kind: "symbol", block: "SYM_MOONMILK_POPCORN" },
     "popcorn": { kind: "symbol", block: "SYM_MOONMILK_POPCORN" },
-    "helictite": { kind: "symbol", block: "SYM_FLOWSTONE" },
-    "crystal": { kind: "symbol", block: "SYM_FLOWSTONE" },
-    "gypsum": { kind: "symbol", block: "SYM_FLOWSTONE" },
+    "helictite": { kind: "symbol", block: "SYM_HELICTITE" },
+    "crystal": { kind: "symbol", block: "SYM_CRYSTAL" },
+    "gypsum": { kind: "symbol", block: "SYM_GYPSUM" },
 
     "blocks": { kind: "symbol", block: "SYM_BREAKDOWN" },
-    "breakdown-choke": { kind: "symbol", block: "SYM_BREAKDOWN" },
+    "breakdown-choke": { kind: "symbol", block: "SYM_BREAKDOWN_CHOKE" },
     "debris": { kind: "symbol", block: "SYM_BREAKDOWN" },
     "clay": { kind: "symbol", block: "SYM_CLAY_MUD_TICK" },
-    "clay-choke": { kind: "symbol", block: "SYM_CLAY_MUD_TICK" },
+    "clay-choke": { kind: "symbol", block: "SYM_CLAY_CHOKE" },
     "mudcrack": { kind: "symbol", block: "SYM_CLAY_MUD_TICK" },
     "sand": { kind: "symbol", block: "SYM_SAND_GRAVEL_DOT" },
     "pebbles": { kind: "symbol", block: "SYM_SAND_GRAVEL_DOT" },
@@ -170,7 +170,7 @@ CsSketch.POINTS = {
     "water-drip": { kind: "symbol", block: "SYM_DRIP_SEEP" },
     "water": { kind: "symbol", block: "SYM_DRIP_SEEP" },
     "gradient": { kind: "symbol", block: "SYM_SLOPE_TICK" },
-    "steps": { kind: "symbol", block: "SYM_SLOPE_TICK" },
+    "steps": { kind: "symbol", block: "SYM_STEPS" },
     "passage-height": { kind: "symbol", block: "SYM_CEILING_HEIGHT" },
 
     // An altitude is a measured floor elevation with a number attached,
@@ -184,28 +184,28 @@ CsSketch.POINTS = {
     "remark": { kind: "text", layer: CsLayers.NOTES_ANNOTATION },
     "date": { kind: "text", layer: CsLayers.NOTES_ANNOTATION },
 
-    "dig": { kind: "layer", layer: CsLayers.NOTES_DIG },
-    "danger": { kind: "layer", layer: CsLayers.NOTES_HAZARD },
-    "narrow-end": { kind: "layer", layer: CsLayers.NOTES_ANNOTATION },
-    "low-end": { kind: "layer", layer: CsLayers.NOTES_ANNOTATION },
+    "dig": { kind: "symbol", block: "SYM_DIG" },
+    "danger": { kind: "symbol", block: "SYM_DANGER" },
+    "narrow-end": { kind: "symbol", block: "SYM_NARROW_END" },
+    "low-end": { kind: "symbol", block: "SYM_LOW_END" },
 
     // A CONTINUATION IS A LEAD -- unsurveyed passage somebody stood in
     // front of and wrote down. The suite has no lead of its own yet, so
     // it lands on NOTES-DIG (the nearest thing: a place worth coming
     // back to) and CsSketch.resolvePoint reports it by name. When leads
     // get a tool, this row is the first thing that changes.
-    "continuation": { kind: "layer", layer: CsLayers.NOTES_DIG },
+    "continuation": { kind: "symbol", block: "SYM_CONTINUATION" },
 
-    "anchor": { kind: "layer", layer: CsLayers.ANCHORS_BOLTS },
-    "rope": { kind: "layer", layer: CsLayers.ANCHORS_BOLTS },
-    "rope-ladder": { kind: "layer", layer: CsLayers.ANCHORS_BOLTS },
-    "fixed-ladder": { kind: "layer", layer: CsLayers.ANCHORS_BOLTS },
-    "masonry": { kind: "layer", layer: CsLayers.ARCHAEOLOGY },
-    "archeo-material": { kind: "layer", layer: CsLayers.ARCHAEOLOGY },
-    "paleo-material": { kind: "layer", layer: CsLayers.ARCHAEOLOGY },
-    "bones": { kind: "layer", layer: CsLayers.ARCHAEOLOGY },
-    "root": { kind: "layer", layer: CsLayers.BIOLOGY },
-    "vegetable-debris": { kind: "layer", layer: CsLayers.BIOLOGY },
+    "anchor": { kind: "symbol", block: "SYM_BOLT" },
+    "rope": { kind: "symbol", block: "SYM_ROPE_DROP" },
+    "rope-ladder": { kind: "symbol", block: "SYM_CABLE_LADDER" },
+    "fixed-ladder": { kind: "symbol", block: "SYM_FIXED_LADDER" },
+    "masonry": { kind: "symbol", block: "SYM_MASONRY" },
+    "archeo-material": { kind: "symbol", block: "SYM_ARCHEO_MATERIAL" },
+    "paleo-material": { kind: "symbol", block: "SYM_PALEO_MATERIAL" },
+    "bones": { kind: "symbol", block: "SYM_BONES" },
+    "root": { kind: "symbol", block: "SYM_ROOT" },
+    "vegetable-debris": { kind: "symbol", block: "SYM_VEGETABLE_DEBRIS" },
     "seed-germ": { kind: "layer", layer: CsLayers.BIOLOGY },
     "ice": { kind: "layer", layer: CsLayers.ICE_SNOW },
     "snow": { kind: "layer", layer: CsLayers.ICE_SNOW },
@@ -216,8 +216,76 @@ CsSketch.POINTS = {
     // an "extra" marker that means nothing outside the editor.
     "dimensions": { kind: "skip", why: "editor" },
     "extra": { kind: "skip", why: "editor" },
-    "air-draught": { kind: "layer", layer: CsLayers.NOTES_ANNOTATION },
+    "air-draught": { kind: "symbol", block: "SYM_AIR_DRAUGHT" },
     "no-equipment": { kind: "skip", why: "editor" },
+
+    "bat": { kind: "symbol", block: "SYM_BAT" },
+
+    "tree-trunk": { kind: "symbol", block: "SYM_TREE_TRUNK" },
+
+    "seed-germination": { kind: "symbol", block: "SYM_SEED_GERMINATION" },
+
+    "archeo-excavation": { kind: "symbol", block: "SYM_ARCHEO_EXCAVATION" },
+
+    "human-bones": { kind: "symbol", block: "SYM_HUMAN_BONES" },
+
+    "altar": { kind: "symbol", block: "SYM_ALTAR" },
+
+    "ex-voto": { kind: "symbol", block: "SYM_EX_VOTO" },
+
+    "helictites": { kind: "symbol", block: "SYM_HELICTITE" },
+
+    "pendant": { kind: "symbol", block: "SYM_PENDANT" },
+
+    "cave-pearl": { kind: "symbol", block: "SYM_CAVE_PEARL" },
+
+    "aragonite-crystal": { kind: "symbol", block: "SYM_CRYSTAL" },
+
+    "aragonite": { kind: "symbol", block: "SYM_ARAGONITE" },
+
+    "gypsum-flower": { kind: "symbol", block: "SYM_GYPSUM_FLOWER" },
+
+    "volcano": { kind: "symbol", block: "SYM_VOLCANO" },
+
+    "raft-cone": { kind: "symbol", block: "SYM_VOLCANO" },
+
+    "clay-tree": { kind: "symbol", block: "SYM_CLAY_TREE" },
+
+    "scallop": { kind: "symbol", block: "SYM_SCALLOP" },
+
+    "flute": { kind: "symbol", block: "SYM_FLUTE" },
+
+    "karren": { kind: "symbol", block: "SYM_KARREN" },
+
+    "anastomosis": { kind: "symbol", block: "SYM_ANASTOMOSIS" },
+
+    "bridge": { kind: "symbol", block: "SYM_BRIDGE" },
+
+    "walkway": { kind: "symbol", block: "SYM_WALKWAY" },
+
+    "handrail": { kind: "symbol", block: "SYM_HANDRAIL" },
+
+    "gate": { kind: "symbol", block: "SYM_GATE" },
+
+    "camp": { kind: "symbol", block: "SYM_CAMP" },
+
+    "nameplate": { kind: "symbol", block: "SYM_NAMEPLATE" },
+
+    // Plural and spelling forms Therion accepts for the same glyph, found
+    // by the 2026-10 coverage audit: they placed nothing before.
+    "stalactites": { kind: "symbol", block: "SYM_STALACTITE" },
+    "disc-stalactites": { kind: "symbol", block: "SYM_STALACTITE" },
+    "stalagmites": { kind: "symbol", block: "SYM_STALAGMITE" },
+    "disc-stalagmites": { kind: "symbol", block: "SYM_STALAGMITE" },
+    "stalactites-stalagmites": { kind: "symbol", block: "SYM_COLUMN" },
+    "disc-pillars": { kind: "symbol", block: "SYM_COLUMN" },
+    "pillars-with-curtains": { kind: "symbol", block: "SYM_COLUMN" },
+    "curtains": { kind: "symbol", block: "SYM_DRAPERY" },
+    "rimstone-dam": { kind: "symbol", block: "SYM_RIMSTONE_DAM" },
+    "rimstone-pool": { kind: "symbol", block: "SYM_RIMSTONE_DAM" },
+    "traverse": { kind: "symbol", block: "SYM_TRAVERSE_LINE" },
+    "mud": { kind: "symbol", block: "SYM_CLAY_MUD_TICK" },
+    "height": { kind: "callout" },
 
     "u": { kind: "unknown", layer: CsSketch.FALLBACK_LAYER }
 };

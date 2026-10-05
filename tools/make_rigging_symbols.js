@@ -191,6 +191,19 @@ var RIGGING = {
     ]
 };
 
+// THE COVERAGE-AUDIT SET (2026-10): biology, archaeology, hazards,
+// passage ends, the lesser formations, dissolution features and the
+// rest of the equipment. Plain data in its own file so a contact sheet
+// can be drawn from it under node (tools/preview_symbols.js); merged in
+// here so there is still exactly one tool that writes shipped geometry
+// into the template, and every block still has to have a CATALOG row.
+include(repoRoot + "/tools/coverage_symbols_data.js");
+for (var coverageName in COVERAGE) {
+    if (COVERAGE.hasOwnProperty(coverageName)) {
+        RIGGING[coverageName] = COVERAGE[coverageName];
+    }
+}
+
 // ---------------------------------------------------------------------
 
 /** The DXF writer that persists custom properties -- see

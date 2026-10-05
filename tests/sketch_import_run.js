@@ -66,7 +66,7 @@ var templatePath = repoRoot + "/templates/NSS_Cave_Template_PLAN.dxf";
 // The symbol blocks live in the template, not in a blank document.
 // Pulled through the real import path, as tests/area_fill_run.js does.
 var blocksNeeded = ["SYM_STALACTITE", "SYM_STALAGMITE", "SYM_ENTRANCE",
-    "AREA_STIPPLE"];
+    "SYM_CONTINUATION", "AREA_STIPPLE"];
 for (var bi = 0; bi < blocksNeeded.length; bi++) {
     var brought = CsSymbolStore.ensureBlock(doc, di, blocksNeeded[bi],
         templatePath);
@@ -225,8 +225,8 @@ eqs(ours(CsLayers.CTRL_AREA_BOUNDARY).length, 0,
     "the border line an area claims is not ALSO drawn on its own");
 
 // -- symbols -------------------------------------------------------------
-eqs(report.symbols, 3,
-    "the stalactite, stalagmite and entrance are placed");
+eqs(report.symbols, 4,
+    "the stalactite, stalagmite, entrance and continuation are placed");
 eqs(ours("FORMATIONS-DRIP").length, 2,
     "the two drip formations are real block references on the " +
     "catalogue's own layer");
@@ -253,10 +253,9 @@ eqs(String(label.getPlainText()), "THE PINCH",
 eqs(report.callouts, 1,
     "an altitude arrives as a callout, so its note stays text-editable");
 
-ok(report.marks >= 1,
-    "a continuation -- a lead -- is marked rather than dropped");
 eqs(ours(CsLayers.NOTES_DIG).length, 1,
-    "on NOTES-DIG, the nearest thing this suite has to a lead today");
+    "a continuation -- a lead -- lands as the Continuation symbol on " +
+    "NOTES-DIG rather than being dropped");
 
 // -- unknown types -------------------------------------------------------
 ok(report.unknown.length >= 2,

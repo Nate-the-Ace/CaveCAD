@@ -149,10 +149,10 @@ CsSymbolStore.templatePath = function() {
     var e2 = new RArcEntity(doc, new RArcData(
         new RVector(0, 0), 0.4, 0.0, Math.PI, false));
 
-    var meta = { nss: "Gypsum flower", uis: "Gypsum",
+    var meta = { nss: "Glow worm", uis: "Gypsum",
         category: "Formations", layer: CsLayers.FORMATIONS_DRIP };
     var blockName = CsSymbolStore.blockNameFor(meta.nss);
-    eqs(blockName, "SYM_GYPSUM_FLOWER", "the block name derived from " +
+    eqs(blockName, "SYM_GLOW_WORM", "the block name derived from " +
         "the display name");
 
     var res = CsSymbolStore.saveBlock(templatePath, blockName, doc,
@@ -178,7 +178,7 @@ CsSymbolStore.templatePath = function() {
     }
     ok(found !== null, "the custom symbol is in the listing");
     if (found !== null) {
-        eqs(found.nss, "Gypsum flower", "its name survived the file");
+        eqs(found.nss, "Glow worm", "its name survived the file");
         eqs(found.uis, "Gypsum", "its UIS alias survived the file");
         eqs(found.category, "Formations", "its category survived the file");
         eqs(found.layer, CsLayers.FORMATIONS_DRIP,
@@ -201,7 +201,7 @@ CsSymbolStore.templatePath = function() {
     var e3 = new RLineEntity(doc2, new RLineData(
         new RVector(-0.2, 0), new RVector(0.2, 0)));
     var again = CsSymbolStore.saveBlock(templatePath, blockName, doc2,
-        [e3], { nss: "Gypsum flower", uis: "", category: "Formations",
+        [e3], { nss: "Glow worm", uis: "", category: "Formations",
             layer: CsLayers.FORMATIONS_DRIP });
     ok(again.ok, "the symbol was saved again (" + again.error + ")");
     eqs(again.replaced, true, "the second save reports a replacement");
@@ -942,13 +942,13 @@ eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
 
 // A custom symbol, on the other hand, deletes.
 (function customDeletes() {
-    var del = CsSymbolStore.deleteBlock(templatePath, "SYM_GYPSUM_FLOWER");
+    var del = CsSymbolStore.deleteBlock(templatePath, "SYM_GLOW_WORM");
     ok(del.ok, "a custom symbol deletes (" + del.error + ")");
     CsSymbolStore.invalidate();
     var listed = CsSymbolStore.list(templatePath);
     var still = false;
     for (var i = 0; i < listed.entries.length; i++) {
-        if (listed.entries[i].block === "SYM_GYPSUM_FLOWER") {
+        if (listed.entries[i].block === "SYM_GLOW_WORM") {
             still = true;
         }
     }
