@@ -295,7 +295,7 @@ function buildLegendRun() {
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
     // Core/CsModelSpace.js.
-    if (CsModelSpace.blocks(doc, "Build Legend")) {
+    if (CsModelSpace.blocksWhole(doc, "Build Legend")) {
         return;
     }
     var di = getDocumentInterface();

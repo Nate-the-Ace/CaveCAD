@@ -2116,6 +2116,26 @@ class TestSheetGuard(unittest.TestCase):
             "sheet: %s -- add CsModelSpace.blocks(doc, \"<Tool>\") to "
             "each" % missing)
 
+    # Tools that rewrite the WHOLE drawing: they refuse the inside of a
+    # viewport as well (blocksWhole). The rest of MUST_GUARD is interactive
+    # hand-drawing, which click-through exists for.
+    WHOLE_DRAWING = [
+        "AreaSync", "BuildLegend", "DrawPanel", "EntranceLocation",
+        "GenerateProfile", "ImportCaveSurvey", "LinetypeMaker", "LoopErrors",
+        "RepairDrawing", "ResetDrawing", "ScatterBreakdown", "SketchScans",
+        "SurfaceData", "SurveyNotebook",
+    ]
+
+    def test_whole_drawing_tools_refuse_the_inside_of_a_viewport(self):
+        for name in self.WHOLE_DRAWING:
+            self.assertIn(name, self.MUST_GUARD)
+            with open(os.path.join(ADDON, name, name + ".js")) as handle:
+                self.assertIn("CsModelSpace.blocksWhole", handle.read(), name)
+        for name in set(self.MUST_GUARD) - set(self.WHOLE_DRAWING):
+            with open(os.path.join(ADDON, name, name + ".js")) as handle:
+                self.assertNotIn("CsModelSpace.blocksWhole", handle.read(),
+                                 "%s is hand-drawing; click-through must work" % name)
+
     def test_the_two_lists_cover_every_tool(self):
         """A tool in neither list is a tool nobody decided about."""
         tools = sorted(

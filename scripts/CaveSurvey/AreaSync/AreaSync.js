@@ -327,7 +327,7 @@ AreaSync.prototype.beginEvent = function() {
     // header; a sheet is rebuilt from the cave's record on every Build
     // Sheet, and anything this tool wrote would go with it, silently,
     // weeks later.
-    if (CsModelSpace.blocks(doc, "Sync Areas")) {
+    if (CsModelSpace.blocksWhole(doc, "Sync Areas")) {
         this.terminate();
         return;
     }

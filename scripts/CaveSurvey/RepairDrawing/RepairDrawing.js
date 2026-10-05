@@ -33,7 +33,7 @@ function repairDrawingRun() {
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
     // Core/CsModelSpace.js.
-    if (CsModelSpace.blocks(doc, "Repair Drawing")) {
+    if (CsModelSpace.blocksWhole(doc, "Repair Drawing")) {
         return;
     }
     if (isNull(doc)) {

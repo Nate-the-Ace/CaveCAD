@@ -953,6 +953,11 @@ SheetSetup.build = function() {
     if (isNull(w)) {
         return;
     }
+    // layouts are rewritten here; not while one of them is being edited through
+    if (CsModelSpace.inViewport()) {
+        CsTell.warn(CsModelSpace.viewportRefusal("Sheet Setup"));
+        return;
+    }
     // A PANEL NOBODY HAS READ YET. The dock is built hidden at startup
     // and restoreState() can put it on screen without the menu entry
     // ever running, so its first press can arrive with no state at all.
@@ -1213,6 +1218,10 @@ SheetSetup.ensureDock = function() {
  * and scaled by the engine, nothing cut or masked here.
  */
 SheetSetup.exportPdf = function() {
+    if (CsModelSpace.inViewport()) {
+        CsTell.warn(CsModelSpace.viewportRefusal("Sheet Setup"));
+        return;
+    }
     var doc = null, di = null;
     try {
         doc = EAction.getDocument();

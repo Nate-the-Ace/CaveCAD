@@ -1096,7 +1096,7 @@ SurveyNotebook.drawSurveyInner = function(w, forceFull) {
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
     // Core/CsModelSpace.js.
-    if (CsModelSpace.blocks(doc, "Survey Notebook")) {
+    if (CsModelSpace.blocksWhole(doc, "Survey Notebook")) {
         return;
     }
     var di = getDocumentInterface();

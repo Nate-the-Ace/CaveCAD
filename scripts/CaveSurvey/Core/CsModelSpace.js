@@ -10,8 +10,14 @@
 // (the viewport shows model space, not what was just added). So the tools
 // that WRITE ask first, and say where the work belongs.
 //
-// Editing THROUGH a viewport is fine and needs no exception: that mode puts
-// the document in model space (see Widgets/LayoutTabs).
+// Editing THROUGH a viewport puts the document in model space (see
+// Widgets/LayoutTabs), so `blocks` lets it pass: tracing, symbols and the
+// other hand-drawing tools are exactly what click-through is for. The tools
+// that rebuild or rewrite the WHOLE drawing (import, redraw, regenerate,
+// repair, reset, ...) use `blocksWhole` instead, which refuses that state
+// too: the view is panned and zoomed to a viewport and its frame is
+// pinned on screen, and a whole-drawing run would refit the view and write
+// the result back into the viewport when the caver leaves.
 //
 // (This replaces CsSheetFile, which marked whole sheet FILES and refused
 // them; sheets are layouts of the cave's own drawing now, and there is no
@@ -56,4 +62,39 @@ CsModelSpace.blocks = function(doc, toolName) {
     } catch (eWarn) {
     }
     return true;
+};
+
+
+/** True when the window is "inside" a viewport: model space shown through its frame. */
+CsModelSpace.inViewport = function() {
+    try {
+        var entry = LayoutTabs.entryOfActive();
+        return !isNull(entry) && !isNull(entry.editing);
+    } catch (e) {
+        return false;
+    }
+};
+
+/** What a whole-drawing tool says when the caver is inside a viewport. */
+CsModelSpace.viewportRefusal = function(toolName) {
+    return toolName + ": you are editing through a viewport, and this " +
+        "works on the whole drawing.\n\nClick \"Back to layout\", then the " +
+        "Model tab, and run it again.";
+};
+
+/**
+ * The guard for a tool that works on the WHOLE drawing: refuses a sheet
+ * (as `blocks`) and also the inside of a viewport.
+ *
+ * \return true when the tool should STOP; warns the caver itself.
+ */
+CsModelSpace.blocksWhole = function(doc, toolName) {
+    if (CsModelSpace.inViewport()) {
+        try {
+            CsTell.warn(CsModelSpace.viewportRefusal(toolName));
+        } catch (eWarn) {
+        }
+        return true;
+    }
+    return CsModelSpace.blocks(doc, toolName);
 };

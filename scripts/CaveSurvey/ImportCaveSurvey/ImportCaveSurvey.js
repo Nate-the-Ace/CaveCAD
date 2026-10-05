@@ -43,7 +43,7 @@ function importCaveSurvey() {
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
     // Core/CsModelSpace.js.
-    if (CsModelSpace.blocks(doc, "Import Cave Survey")) {
+    if (CsModelSpace.blocksWhole(doc, "Import Cave Survey")) {
         return;
     }
     var di = getDocumentInterface();
