@@ -15,11 +15,12 @@
 //     per affected object.
 //  3. A FREED RDocument cannot be detected: the document is used
 //     synchronously and never stored.
-//  4. UNDO -- an ordinary edit's redraw JOINS its transaction group, so one
-//     Ctrl+Z takes the scale change and the bar together. When the
-//     transaction being answered is itself an undo or a redo, the redraw is
-//     made NON-undoable: a new undoable step there would throw away the
-//     redo history.
+//  4. UNDO -- an edit that has a transaction group has its redraw JOINED to
+//     it, so one Ctrl+Z takes the scale change and the bar together. An edit
+//     with NO group, and any transaction that is itself an undo or a redo,
+//     gets a NON-undoable redraw: a separate undoable step would strand the
+//     bar on undo, or throw the redo history away. Undo and redo of the
+//     scale change re-sync the bar, so it always matches.
 //
 // Not a menu tool. Installed once from CaveSurvey.js.
 
@@ -86,6 +87,14 @@ SheetScaleBarListener.onTransaction = function(document, transaction) {
         quiet = transaction.isUndoing() || transaction.isRedoing();
     } catch (eG) {
         group = -1;
+    }
+    // A change that belongs to no transaction group (a scale picked from the
+    // list, a typed value) cannot be joined: its redraw would be a separate
+    // undo step, and undoing THAT alone leaves the scale changed and the bar
+    // gone (seen live 2026-10-05). So it is made non-undoable instead, and
+    // every undo / redo of the change re-syncs the bar quietly (above).
+    if (group < 0) {
+        quiet = true;
     }
     SheetScaleBarListener.busy = true;
     try {
