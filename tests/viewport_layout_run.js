@@ -80,6 +80,11 @@ function main() {
         add(v);
     }
     vp(ps1, 5.5, 4.25, 9, 6.5, 0.05, 0.5, [idB]);
+    // lock the first viewport (display lock): must survive the file
+    var lockedId = doc.queryAllEntities(false, true, RS.EntityViewport)[0];
+    var lockedVp = doc.queryEntity(lockedId);
+    lockedVp.setStatus(lockedVp.getStatus() | 0x40000);
+    di.applyOperation(new RModifyObjectOperation(lockedVp));
     vp(ps2, 148, 105, 250, 180, 1 / 50.0, 0, null);
     doc.setCurrentBlock(ps1);
     add(new RLineEntity(doc, new RLineData(new RVector(0.5, 0.5), new RVector(10.5, 0.5))));
@@ -119,9 +124,21 @@ function main() {
             check(near(e.getViewCenter().x, ox + 5) && near(e.getViewCenter().y, oy + 5), "vp1 viewCenter absolute " + e.getViewCenter().x + "," + e.getViewCenter().y);
             var fz = e.getFrozenLayerIds();
             check(fz.length == 1 && back.getLayerName(fz[0]) == "NOTES", "vp1 frozen layer NOTES");
+            check((e.getStatus() & 0x40000) !== 0, "vp1 display lock survives the file");
+            // a locked viewport refuses to change what it shows
+            var scaleBefore = e.getScale();
+            e.setProperty(RViewportEntity.PropertyScale, 0.5);
+            check(near(e.getScale(), scaleBefore), "locked: the property editor cannot change the scale");
+            var vcBefore = e.getViewCenter().x;
+            e.setProperty(RViewportEntity.PropertyViewCenterX, 1.0);
+            check(near(e.getViewCenter().x, vcBefore), "locked: the property editor cannot move the contents");
         } else if (e.getBlockId() == pb) {
             found++;
             check(near(e.getScale(), 1 / 50.0), "vp2 scale " + e.getScale());
+            check((e.getStatus() & 0x40000) === 0, "vp2 is not locked");
+            var s2 = e.getScale();
+            e.setProperty(RViewportEntity.PropertyScale, 0.04);
+            check(near(e.getScale(), 0.04), "unlocked: the scale can be changed (" + e.getScale() + ")");
             check(e.getFrozenLayerIds().length == 0, "vp2 no frozen layers");
         }
     }

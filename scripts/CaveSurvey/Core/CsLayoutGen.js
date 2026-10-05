@@ -288,6 +288,30 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
     // ---- FURNITURE ----------------------------------------------------
     var footY = m, leftX = m;
 
+    // WHITE BACKING, where the furniture sits over the map (every tile: no
+    // band is kept clear -- Nathan, 2026-10-05, overlap is fine). A WIPEOUT,
+    // not a white fill: the engine paints a wipeout in the paper's colour and
+    // exempts it from the colour mapping that turns a white entity BLACK on
+    // a plot (the trap that sank the old white mask). Drawn after the
+    // viewport and before the furniture, so it covers the map and nothing else.
+    if (job.box.footer <= 0) {
+        var pad = 0.08;
+        for (var pk in fur.pieces) {
+            if (!fur.pieces.hasOwnProperty(pk)) { continue; }
+            var pc = fur.pieces[pk];
+            var po = off(pk);
+            var x0 = leftX + pc.x + po.x - pad, y0 = footY + pc.y + po.y - pad;
+            var x1 = leftX + pc.x + po.x + pc.w + pad, y1 = footY + pc.y + po.y + pc.h + pad;
+            var poly = new RPolyline();
+            poly.appendVertex(new RVector(P(x0), P(y0)));
+            poly.appendVertex(new RVector(P(x1), P(y0)));
+            poly.appendVertex(new RVector(P(x1), P(y1)));
+            poly.appendVertex(new RVector(P(x0), P(y1)));
+            poly.setClosed(true);
+            add(new RWipeoutEntity(doc, new RWipeoutData(poly)), CsLayers.BORDER, "backing");
+        }
+    }
+
     if (wants.title === true) {
         var lines = job.titleLines;
         var tOff = off("title");
