@@ -64,9 +64,18 @@ SheetSetup.prototype = new EAction();
  * otherwise the second run measures the first run's border and the
  * sheet grows every time it is run.
  */
+/**
+ * The entities of the cave itself: MODEL SPACE, whichever sheet or view
+ * happens to be showing. (queryAllEntities(.., false) answers for the
+ * CURRENT block, which is a layout when the panel is opened from one.)
+ */
+SheetSetup.modelIds = function(doc) {
+    return doc.queryBlockEntities(doc.getModelSpaceBlockId());
+};
+
 SheetSetup.caveBox = function(doc) {
     var box = null;
-    var ids = doc.queryAllEntities(false, false);
+    var ids = SheetSetup.modelIds(doc);
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
         if (isNull(e) || CsTags.get(e, SS_TAG) !== "") {
@@ -112,7 +121,7 @@ SheetSetup.caveBox = function(doc) {
  */
 SheetSetup.occupancy = function(doc) {
     var out = [];
-    var ids = doc.queryAllEntities(false, false);
+    var ids = SheetSetup.modelIds(doc);
     var stride = Math.max(1, Math.ceil(ids.length / 8000));
     for (var i = 0; i < ids.length; i += stride) {
         var e = doc.queryEntity(ids[i]);
@@ -169,7 +178,9 @@ SheetSetup.tileLayoutFor = function(state, sheet, scale, offsets, wants,
     }
     var drag = CsSheetSetup.offsetOf(offsets, "cave");
     var layout = CsSheetTile.layout({ caveBox: state.caveBox,
-        sheet: sheet, scale: scale,
+        sheet: sheet,
+        // drawing units per inch of paper: feet per inch times units per foot
+        scale: scale * (isNull(state.perFoot) ? 1 : state.perFoot),
         // NO BAND IS RESERVED on a tiled plan: every sheet is map right
         // out to the page margin, and the title block, bar and arrow sit
         // over it on a white backing (see clipToMap).
@@ -216,26 +227,44 @@ SheetSetup.titleValues = function(doc, filled) {
  * every re-run trim the credit list a little further.
  */
 SheetSetup.readWhole = function(doc, field) {
+    // The title block lives on a layout now. Whatever a sheet says -- the
+    // generator's words or a person's edit of them -- is read back from the
+    // sheet, so a regenerated tile never overwrites what was typed.
     try {
-        var ids = doc.queryAllEntities(false, false);
-        for (var i = 0; i < ids.length; i++) {
-            var e = doc.queryEntity(ids[i]);
-            if (isNull(e) || CsTags.get(e, CsSheet.TAG) !== field.id) {
-                continue;
-            }
-            var whole = CsTags.get(e, CsSheetSetup.TAG_FULL);
-            if (whole !== "") {
-                return whole;
+        var sheets = Layouts.list(doc);
+        for (var l = 0; l < sheets.length; l++) {
+            var ids = doc.queryBlockEntities(sheets[l].blockId);
+            for (var i = 0; i < ids.length; i++) {
+                var e = doc.queryEntity(ids[i]);
+                if (isNull(e) || e.isUndone() || CsTags.get(e, CsSheet.TAG) !== field.id) {
+                    continue;
+                }
+                var whole = CsTags.get(e, CsSheetSetup.TAG_FULL);
+                if (whole !== "") {
+                    return whole;
+                }
+                // what the sheet SHOWS, without the field's caption ("LOCATION: "):
+                // reading the caption back as part of the value is how it got
+                // printed twice on the next build
+                var shown = String(e.getPlainText());
+                // the caption is compared WITHOUT its trailing blanks: an empty field is
+                // drawn as the bare caption ("CARTOGRAPHY BY:"), and the caption itself is
+                // "Cartography by:  " -- an exact-prefix test read the bare caption back as
+                // the VALUE and printed it twice on the next build
+                var prefix = isNull(field.prefix) ? "" : String(field.prefix).replace(/\s+$/, "");
+                if (prefix !== "" && shown.toUpperCase().indexOf(prefix.toUpperCase()) === 0) {
+                    shown = shown.substring(prefix.length);
+                }
+                shown = shown.replace(/^\s+|\s+$/g, "");
+                if (shown !== "") {
+                    return shown;
+                }
             }
         }
     } catch (eWhole) {
-        // fall through to what the sheet shows
+        // fall through to nothing
     }
-    try {
-        return CsSheet.readField(doc, field);
-    } catch (eRead) {
-        return "";
-    }
+    return "";
 };
 
 /** The survey, its stats and its grade -- or nulls, for a drawing with
@@ -431,39 +460,6 @@ SheetSetup.readState = function(doc) {
     } catch (ePath) {
         state.recordPath = "";
     }
-    // A SHEET REBUILDS ITSELF (Nathan, 2026-09-10). Pressing Build
-    // Sheet while looking at a sheet is not a request for a sheet OF a
-    // sheet -- borders inside borders, a record two steps from the
-    // survey it claims to show. It is a request to build THIS sheet
-    // again: another trip has been surveyed, or the choices have
-    // changed. The record it came from is one folder up and named after
-    // the cave, so everything below measures THAT, and the build lands
-    // back in the file the caver is looking at.
-    if (CsSheetFile.isSheet(doc)) {
-        var back = CsSheetSetup.recordPathFor(state.recordPath);
-        var haveIt = false;
-        try {
-            haveIt = (back !== "") && (new QFileInfo(back)).exists();
-        } catch (eBack) {
-            haveIt = false;
-        }
-        if (!haveIt) {
-            state.why = "This is a sheet, and the cave's own drawing " +
-                "is not where a sheet is built from -- one folder up, " +
-                "named after the cave. Open that drawing to build a " +
-                "sheet from it.";
-            return state;
-        }
-        state.rebuilding = true;
-        state.recordPath = back;
-        doc = SheetSetup.readRecord(back);
-        if (isNull(doc)) {
-            state.why = "Could not read the cave's own drawing at " +
-                back + ".";
-            return state;
-        }
-        state.borrowed = true;
-    }
     state.caveBox = SheetSetup.caveBox(doc);
     if (state.caveBox === null) {
         state.why = "This drawing has nothing on it yet. Draw the cave " +
@@ -472,6 +468,7 @@ SheetSetup.readState = function(doc) {
     }
     state.occupied = SheetSetup.occupancy(doc);
     var perFoot = CsShapeLine.perFoot(doc);
+    state.perFoot = perFoot;
     state.caveW = (state.caveBox.maxX - state.caveBox.minX) / perFoot;
     state.caveH = (state.caveBox.maxY - state.caveBox.minY) / perFoot;
 
@@ -1014,61 +1011,80 @@ SheetSetup.build = function() {
             String(w.state.why), SheetSetup.WARNING);
         return;
     }
-    var doc = null;
+    var doc = null, di = null;
     try {
         doc = EAction.getDocument();
+        di = EAction.getDocumentInterface();
     } catch (eDoc) {
         doc = null;
     }
-    // Only the RECORD has to be saved. A sheet with unsaved changes in
-    // it is a caver who has drawn on a sheet, which is exactly what
-    // this rebuild is about to throw away -- and saying "save first"
-    // there would be advice to preserve the thing that cannot be kept.
-    //
-    // SAID IN A BOX, NOT BY warning(). warning() is qWarning: it goes
-    // to the process's stderr, which a caver never sees, so this refusal
-    // used to look exactly like a button that does nothing (Nathan,
-    // 2026-09-27).
-    if (w.state.rebuilding !== true && !isNull(doc) &&
-            doc.isModified() === true) {
-        SheetSetup.tell(qsTr("Save this drawing first. The sheet is " +
-            "built from the FILE on disk, so anything not yet saved " +
-            "would be missing from it."), SheetSetup.WARNING);
+    if (isNull(doc) || isNull(di)) {
+        SheetSetup.tell(qsTr("Sheet Setup needs a drawing open."), SheetSetup.WARNING);
         return;
-    }
-    if (w.state.rebuilding === true) {
-        var lost = !isNull(doc) && doc.isModified() === true;
-        if (lost && QMessageBox.question(getMainWindow(), "Sheet Setup",
-                qsTr("This sheet has unsaved changes, and rebuilding " +
-                    "replaces it from the cave's drawing -- they will " +
-                    "be gone.\n\nRebuild anyway?"),
-                QMessageBox.Yes | QMessageBox.No) !== QMessageBox.Yes) {
-            return;
-        }
     }
     var sheet = CsSheetSetup.sheetByName(String(w.sheetCombo.currentText));
     var scale = CsSheetSetup.SCALES[w.scaleCombo.currentIndex];
+    var wants = { border: w.cbBorder.checked, bar: w.cbBar.checked,
+        north: w.cbNorth.checked, title: w.cbTitle.checked };
     var fit = CsSheetSetup.fit(w.state.caveW, w.state.caveH, sheet,
         SheetSetup.footerFn(w.state, sheet, SheetSetup.wantsOf(w)),
         SheetSetup.turnedOf(w));
     var tiles = SheetSetup.tileLayoutFor(w.state, sheet, scale, w.offsets,
         SheetSetup.wantsOf(w), SheetSetup.turnedOf(w));
-    var said = SheetSetup.intoCopy(w.state.recordPath, {
-        caveBox: w.state.caveBox, sheet: sheet, scale: scale,
-        tiles: tiles,
-        turned: tiles !== null ? tiles.turned : fit.turned,
-        wants: { border: w.cbBorder.checked, bar: w.cbBar.checked,
-            north: w.cbNorth.checked, title: w.cbTitle.checked },
-        filled: w.state.filled, survey: w.state.survey,
-        resolved: w.state.resolved, chunked: w.state.chunked === true,
-        elevation: w.cbElevation.checked === true,
-        offsets: w.offsets
-    });
-    // Judged by what intoCopy WROTE, not by its words: its success
-    // sentence opens with "Sheet Setup:" too, and read as a failure the
-    // first time this was tried live.
-    SheetSetup.tell(said, SheetSetup.lastWritten.length === 0 ?
-        SheetSetup.ERROR : SheetSetup.DONE);
+    var turned = tiles !== null ? tiles.turned : fit.turned;
+    var perFoot = CsShapeLine.perFoot(doc);
+
+    var elevBox = null;
+    if (w.cbElevation.checked === true && w.state.hasElevation) {
+        elevBox = SheetSetup.frameBox(doc, "profile");
+    }
+    var caveDrag = CsSheetSetup.offsetOf(w.offsets, "cave");
+    var res;
+    try {
+        res = CsLayoutGen.generate(doc, di, {
+            caveBox: w.state.caveBox, elevBox: elevBox, sheet: sheet, turned: turned,
+            scale: scale, perFoot: perFoot, wants: wants,
+            titleValues: SheetSetup.titleValues(doc, w.state.filled),
+            reading: CsSheetSetup.latestDeclination(w.state.survey),
+            tiles: tiles, elevation: elevBox !== null,
+            shiftInches: { x: -caveDrag.x, y: -caveDrag.y },
+            extra: { offsets: w.offsets,
+                titleValues: SheetSetup.titleValues(doc, w.state.filled) } });
+    } catch (eGen) {
+        SheetSetup.tell(qsTr("Sheet Setup: building the sheets failed (") + eGen + ").",
+            SheetSetup.ERROR);
+        return;
+    }
+    var words = [];
+    if (res.made.length > 0) {
+        words.push(qsTr("made ") + res.made.join(", "));
+    }
+    if (res.rewritten.length > 0) {
+        words.push(qsTr("rewrote ") + res.rewritten.join(", "));
+    }
+    var said = qsTr("Sheet Setup: ") + words.join("; ") + qsTr(", at 1\" = ") + scale +
+        qsTr(" ft on ") + sheet.name + ".";
+    var level = SheetSetup.DONE;
+    if (res.skipped.length > 0) {
+        said += " " + qsTr("Left alone because they were edited or made by hand: ") +
+            res.skipped.join(", ") + qsTr(". Right-click a sheet's tab, Revert to automatic, to have it rebuilt.");
+        level = SheetSetup.WARNING;
+    }
+    if (res.made.length + res.rewritten.length === 0) {
+        level = SheetSetup.WARNING;
+    }
+    if (w.state.chunked === true && elevBox !== null) {
+        said += " " + qsTr("A chunked elevation is shown as drawn; its arrangement offsets are not part of sheets yet.");
+    }
+    // show the first sheet that was written
+    var first = res.made.length > 0 ? res.made[0] : (res.rewritten.length > 0 ? res.rewritten[0] : "");
+    if (first !== "") {
+        try {
+            Layouts.activate(di, first);
+        } catch (eAct) {
+        }
+    }
+    SheetSetup.tell(said, level);
 };
 
 /**
@@ -1682,58 +1698,60 @@ SheetSetup.writePageSettings = function(doc, box, sheet, turned) {
  * on screen (a sheet opened from disk is plotted just as well).
  */
 SheetSetup.exportPdf = function() {
-    var paths = SheetSetup.lastWritten.slice(0);
-    if (paths.length === 0) {
-        try {
-            var here = String(EAction.getDocument().getFileName());
-            if (here !== "" && CsSheetFile.isSheet(EAction.getDocument())) {
-                paths.push(here);
-            }
-        } catch (eHere) {
-        }
+    var doc = null, di = null;
+    try {
+        doc = EAction.getDocument();
+        di = EAction.getDocumentInterface();
+    } catch (eDoc) {
+        doc = null;
     }
-    if (paths.length === 0) {
-        SheetSetup.tell(qsTr("Nothing to plot yet. Build Sheet first, " +
-            "or open a sheet file."), SheetSetup.WARNING);
+    if (isNull(doc) || isNull(di)) {
         return;
     }
-    var done = [];
-    var made = [];
-    var problems = [];
-    // A GRID OF PLAN SHEETS IS ONE PDF, a page per sheet in grid order;
-    // a lone sheet and the profile keep their own.
-    var jobs = CsSheetSetup.pdfJobs(paths);
-    for (var i = 0; i < jobs.length; i++) {
-        var job = jobs[i];
-        var back = job.paths.length > 1 ?
-            SheetSetup.plotSet(job.paths, job.pdf) :
-            SheetSetup.plotOne(job.paths[0], job.pdf);
-        if (back.ok === true) {
-            done.push(CsShelf.basename(job.pdf) + (job.paths.length > 1 ?
-                " (" + job.paths.length + " pages)" : ""));
-            made.push(job.pdf);
-        } else {
-            problems.push(CsShelf.basename(job.pdf) + ": " + back.why);
-        }
-    }
-    // A PDF THAT WAS MADE IS SHOWN, in the system's own reader: the
-    // point of plotting is to look at the page, and a failed sheet
-    // does not stop the good ones from opening.
-    for (var m = 0; m < made.length; m++) {
-        try {
-            QDesktopServices.openUrl(QUrl.fromLocalFile(made[m]));
-        } catch (eOpen) {
-        }
-    }
-    if (problems.length > 0) {
-        SheetSetup.tell(qsTr("PDF export had problems -- ") +
-            problems.join("; ") + (done.length > 0 ?
-            qsTr(". Written: ") + done.join(", ") : ""),
-            SheetSetup.ERROR);
+    var sheets = Layouts.list(doc);
+    if (sheets.length === 0) {
+        SheetSetup.tell(qsTr("Nothing to plot yet. Build Sheet first."), SheetSetup.WARNING);
         return;
     }
-    SheetSetup.tell(qsTr("Plotted ") + done.join(" and ") +
-        qsTr(", beside the sheet file."), SheetSetup.DONE);
+    // ONE PDF, a page per sheet in tab order, beside the cave's other PDFs;
+    // a drawing with no file yet asks where.
+    var path = "";
+    var here = "";
+    try {
+        here = String(doc.getFileName());
+    } catch (eName) {
+        here = "";
+    }
+    var folder = CsCave.pdfDir(here);
+    var caveName = CsCave.nameOf(here);
+    if (folder !== null && caveName !== null) {
+        try {
+            (new QDir("/")).mkpath(folder);
+        } catch (eDir) {
+        }
+        path = folder + "/" + caveName + " Sheets.pdf";
+    } else {
+        path = CsFiles.saveFile(getMainWindow(), qsTr("Export sheets to PDF"),
+            QDir.homePath() + "/Sheets.pdf", "PDF (*.pdf)");
+        if (path === "") {
+            return;
+        }
+    }
+    var names = [];
+    for (var i = 0; i < sheets.length; i++) {
+        names.push(sheets[i].name);
+    }
+    var back = LayoutPlot.exportPdf(di, names, path);
+    if (back.ok !== true) {
+        SheetSetup.tell(qsTr("PDF export failed -- ") + back.error, SheetSetup.ERROR);
+        return;
+    }
+    try {
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path));
+    } catch (eOpen) {
+    }
+    SheetSetup.tell(qsTr("Plotted ") + CsShelf.basename(path) + " (" + back.pages +
+        (back.pages === 1 ? qsTr(" page") : qsTr(" pages")) + qsTr(", one per sheet)."), SheetSetup.DONE);
 };
 
 /**
@@ -2387,7 +2405,7 @@ SheetSetup.buildChunkedElevation = function(doc, di, survey, resolved,
 /** The extents of one frame's own content, or null. */
 SheetSetup.frameBox = function(doc, frame) {
     var box = null;
-    var ids = doc.queryAllEntities(false, false);
+    var ids = SheetSetup.modelIds(doc);
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
         if (isNull(e) || CsTags.get(e, SS_TAG) !== "") {

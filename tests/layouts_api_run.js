@@ -112,6 +112,29 @@ function main() {
     check(!isNull(Layouts.viewportAt(doc, info, c.x, c.y)), "viewportAt finds it at its centre");
     check(isNull(Layouts.viewportAt(doc, info, c.x + 100, c.y)), "viewportAt finds nothing far outside");
 
+    // ---- viewport scale, spoken as feet per inch ---------------------------------
+    var vs = Layouts.viewports(doc, Layouts.get(doc, "A1"))[0];
+    var fpi = Layouts.feetPerInch(doc, vs);
+    check(near(fpi, (1 / 12) / vs.getScale() / 1, 1e-9) || fpi > 0, "feetPerInch answers: " + fpi);
+    check(Layouts.setViewportScale(di, vs, 40) && near(Layouts.feetPerInch(doc, Layouts.viewports(doc, Layouts.get(doc, "A1"))[0]), 40, 1e-9),
+        "setViewportScale 1 in = 40 ft round-trips through the engine scale");
+    check(near(Layouts.viewports(doc, Layouts.get(doc, "A1"))[0].getScale(), (1 / 12) / 40, 1e-12), "in a feet drawing 1 in = 40 ft is (1/12)/40");
+    var vLock = Layouts.viewports(doc, Layouts.get(doc, "A1"))[0];
+    Layouts.setLocked(di, vLock, true);
+    check(!Layouts.setViewportScale(di, Layouts.viewports(doc, Layouts.get(doc, "A1"))[0], 20), "a locked viewport refuses a scale change");
+    Layouts.setLocked(di, Layouts.viewports(doc, Layouts.get(doc, "A1"))[0], false);
+    check(Layouts.scaleLabel(40) === "1\" = 40 ft" && Layouts.scaleLabel(500 / 12) === "1:500", "standard scale labels");
+    check(Layouts.scaleLabel(37.5) === "1\" = 37.5 ft", "a non-standard scale is labelled as it is");
+    Layouts.removeCustomScale(37.5);
+    check(Layouts.scales().length === Layouts.STANDARD_SCALES.length, "no custom scales to begin with");
+    check(Layouts.addCustomScale(37.5) && !Layouts.addCustomScale(37.5), "a custom scale is added once");
+    check(!Layouts.addCustomScale(40), "a standard scale cannot be added again");
+    var all = Layouts.scales();
+    var idx37 = -1, idx40 = -1;
+    for (var sc = 0; sc < all.length; sc++) { if (near(all[sc].feetPerInch, 37.5)) idx37 = sc; if (near(all[sc].feetPerInch, 40)) idx40 = sc; }
+    check(idx37 >= 0 && all[idx37].custom && idx37 < idx40, "the custom scale is in the list, in order, marked custom");
+    check(Layouts.removeCustomScale(37.5) && Layouts.scales().length === Layouts.STANDARD_SCALES.length, "and can be removed");
+
     if (fails === 0) print("### LAYOUTS API OK");
     QCoreApplication.exit(fails === 0 ? 0 : 1);
 }
