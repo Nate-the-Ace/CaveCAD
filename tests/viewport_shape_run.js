@@ -79,5 +79,21 @@ var sizes = withClip.map(function(v) { return Layouts.clipLoops(v)[0].length; })
 check(sizes[0] === 5 && sizes[1] === 160, "with every corner, even the 160-corner one: " + sizes);
 var withHole = withClip.filter(function(v) { return Layouts.clipLoops(v).length === 2; });
 check(withHole.length === 1 && !Layouts.shapeContains(withHole[0], 0.45, 0.33), "and the cut-out is still cut out");
+// ---- circles are shapes too (a many-sided loop) ----------------------------------------------------
+var ring = ViewportShape.circleLoop(0.45, 0.35, 0.2);
+check(ring.length === ViewportShape.CIRCLE_SIDES && near(ring[0].x, 0.65) && near(ring[0].y, 0.35), "a circle is a closed loop of " + ring.length + " points");
+check(ViewportShape.createPolygon(di, ring), "a circle makes a viewport");
+var circ = Layouts.viewports(doc, info).filter(function(v) { return Layouts.hasClip(v) && Layouts.clipLoops(v)[0].length === ViewportShape.CIRCLE_SIDES; })[0];
+check(!isNull(circ) && near(circ.getWidth(), 0.4, 1e-6) && near(circ.getHeight(), 0.4, 1e-3), "its box is the circle's bounding square");
+check(Layouts.shapeContains(circ, 0.45, 0.35) && !Layouts.shapeContains(circ, 0.45 + 0.2 * 0.9, 0.35 + 0.2 * 0.9), "inside the circle hits, the corner of its box does not");
+check(Layouts.cutOut(di, circ, ViewportShape.circleLoop(0.45, 0.35, 0.05)), "a circle can be cut out of it");
+circ = Layouts.viewports(doc, info).filter(function(v) { return Layouts.clipLoops(v).length === 2 && Layouts.clipLoops(v)[0].length === ViewportShape.CIRCLE_SIDES; })[0];
+check(!isNull(circ) && !Layouts.shapeContains(circ, 0.45, 0.35) && Layouts.shapeContains(circ, 0.45, 0.5), "the round hole is a hole, the ring around it is not");
+di.exportFile(rt, filter, false);
+var back2 = new RDocument(new RMemoryStorage(), new RSpatialIndexSimple());
+var bdi2 = new RDocumentInterface(back2);
+bdi2.importFile(rt, "", false);
+var rounds = Layouts.viewports(back2, Layouts.get(back2, "S")).filter(function(v) { return Layouts.clipLoops(v).length === 2 && Layouts.clipLoops(v)[1].length === ViewportShape.CIRCLE_SIDES; });
+check(rounds.length === 1, "a ring-shaped viewport survives the file");
 if (fails === 0) print("### VIEWPORT SHAPE OK");
 QCoreApplication.exit(fails === 0 ? 0 : 1);
