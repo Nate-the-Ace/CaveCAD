@@ -801,6 +801,17 @@
     "LayoutMatchViewport"
    ],
    "shots": []
+  },
+  {
+   "id": "layout-check",
+   "title": "Check Sheet",
+   "class": "tool",
+   "file": "layout-check.html",
+   "stage": 454,
+   "tools": [
+    "LayoutCheck"
+   ],
+   "shots": []
   }
  ]
 }

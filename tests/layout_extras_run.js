@@ -115,5 +115,26 @@ check(near(zmap.getScale(), 0.0005) && near(zmap.getRotation(), 0.5), "scale and
 check(CsLayoutFurniture.matchViewport(doc, di, zmap, zmap) === false, "a viewport is not matched to itself");
 Layouts.setLocked(di, zmap, true);
 check(CsLayoutFurniture.matchViewport(doc, di, other, doc.queryEntity(zmap.getId())) === false && CsLayoutFurniture.zoomViewport(doc, di, doc.queryEntity(zmap.getId())) === false, "a locked viewport is left alone");
+// ---- check sheet
+var good = CsLayoutCheck.findings(doc, Layouts.get(doc, "S1"));
+check(good.filter(function(f) { return f.level === "error"; }).length === 0, "a template sheet has no errors: " + good.map(function(f) { return f.level; }));
+check(good.filter(function(f) { return /north arrow|scale bar|title block/.test(f.what); }).length === 0, "and nothing missing from its furniture");
+var bad = Layouts.get(doc, "Blank");
+var bf = CsLayoutCheck.findings(doc, bad);
+// Blank got a raster-prone viewport earlier; undo the NoRaster fix by making a fresh bare layout
+var bare = Layouts.create(di, { name: "Bare", paper: "Letter" });
+var bv = new RViewportEntity(doc, new RViewportData());
+var bps = Layouts.paperSize(doc, bare);
+bv.setCenter(new RVector(bps.w / 2, bps.h / 2)); bv.setWidth(bps.w / 2); bv.setHeight(bps.h / 2); bv.setScale(0.00001);
+bv.setViewCenter(new RVector(1, 1)); bv.setBlockId(bare.blockId); bv.setLayerId(doc.getLayerId("0"));
+di.applyOperation(new RAddObjectOperation(bv, false));
+var bare2 = CsLayoutCheck.findings(doc, Layouts.get(doc, "Bare"));
+check(bare2[0].level === "error" && /images/.test(bare2[0].what), "a viewport that would print images is the first finding: " + bare2[0].what);
+check(bare2.some(function(f) { return /shows nothing/.test(f.what); }), "a viewport looking at empty ground is called out");
+check(bare2.some(function(f) { return /north arrow/.test(f.what); }) && bare2.some(function(f) { return /scale bar/.test(f.what); }) && bare2.some(function(f) { return /title block/.test(f.what); }), "missing furniture is listed");
+check(bare2.some(function(f) { return f.level === "note" && /not locked/.test(f.what); }), "an unlocked viewport is a note");
+var order = bare2.map(function(f) { return f.level; });
+check(order.join() === order.slice(0).sort(function(a, b) { return { error: 0, warning: 1, note: 2 }[a] - { error: 0, warning: 1, note: 2 }[b]; }).join(), "most serious first");
+check(CsLayoutCheck.report("Bare", []).indexOf("looks ready") >= 0 && CsLayoutCheck.report("Bare", bare2).indexOf("Bare") >= 0, "the report reads as words");
 if (fails === 0) print("### LAYOUT EXTRAS OK");
 QCoreApplication.exit(fails === 0 ? 0 : 1);

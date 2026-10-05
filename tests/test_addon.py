@@ -1841,6 +1841,7 @@ MENU = {
     "LayoutPlot/LayoutPlot.js":           (454, 67, ["plotlayout", "plot"]),
     "LayoutZoomViewport/LayoutZoomViewport.js": (454, 68, ["zoomviewport", "zvp"]),
     "LayoutMatchViewport/LayoutMatchViewport.js": (454, 69, ["matchviewport", "mvp"]),
+    "LayoutCheck/LayoutCheck.js":         (454, 70, ["checksheet", "chs"]),
     # 455 -- fix and share
     "CheckMap/CheckMap.js":               (455, 5, ["checkmap", "chk"]),
     "RepairDrawing/RepairDrawing.js":     (455, 10, ["repairdrawing", "rep"]),
@@ -2094,6 +2095,7 @@ class TestSheetGuard(unittest.TestCase):
         "CheckMap": "reads the drawing and reports; changes nothing",
         "LayoutNorthArrow": "draws on a LAYOUT only (refuses the model); never touches model space",
         "LayoutScaleBar": "draws on a LAYOUT only (refuses the model); never touches model space",
+        "LayoutCheck": "reads a layout and reports; changes nothing",
         "LayoutZoomViewport": "changes a viewport's view on a LAYOUT; never touches model space",
         "LayoutMatchViewport": "changes viewports on a LAYOUT; never touches model space",
         "LayoutBorder": "draws on a LAYOUT only (refuses the model); never touches model space",

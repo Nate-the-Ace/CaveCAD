@@ -299,6 +299,7 @@ include(includeBasePath + "/CsNorth.js");
 include(includeBasePath + "/CsLayoutFurniture.js");
 include(includeBasePath + "/CsLayoutTemplate.js");
 include(includeBasePath + "/CsLayoutPlot.js");
+include(includeBasePath + "/CsLayoutCheck.js");
 include(includeBasePath + "/CsLayoutGen.js");
 // After CsAdjust (whose per-station shifts it draws) and CsNetwork
 // (whose loops it labels): turning a closure percentage into arrows.
