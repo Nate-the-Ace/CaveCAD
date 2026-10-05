@@ -98,6 +98,61 @@ function main() {
           "profile layers frozen in the plan viewport; plan and shared sheet layers (0, BORDER) are not: " + frozen.join());
     check(String(vp.getCustomProperty("CaveCAD", "NoRaster")) === "1", "the viewport says: no raster images");
 
+    // ---- AUTO / EDITED / REVERT ------------------------------------------
+    info = Layouts.get(doc, "Plan");
+    check(CsLayoutGen.state(doc, info) === "auto", "a freshly generated sheet is AUTO");
+    check(Layouts.isLocked(vp), "the generated viewport is locked");
+    // hand edit 1: move a piece of furniture
+    var ids1 = doc.queryBlockEntities(info.blockId);
+    var victim;
+    for (var vi = 0; vi < ids1.length; vi++) {
+        var ve = doc.queryEntity(ids1[vi]);
+        if (CsTags.get(ve, CsLayoutGen.TAG) === "NORTH-ARROW" && ve.getType() === RS.EntityLine) { victim = ve; break; }
+    }
+    check(!isNull(victim), "found a north arrow line to edit");
+    var moveOp = new RModifyObjectsOperation();
+    victim.move(new RVector(0.05, 0));
+    moveOp.addObject(victim, false);
+    di.applyOperation(moveOp);
+    check(CsLayoutGen.state(doc, Layouts.get(doc, "Plan")) === "edited", "moving one line turns the sheet EDITED");
+    var skipRes = CsLayoutGen.generate(doc, di, { caveBox: base.caveBox, sheet: base.sheet, turned: false,
+        scale: 20, perFoot: 1, wants: base.wants, titleValues: base.titleValues, reading: base.reading, tiles: null });
+    check(skipRes.skipped.join() === "Plan", "an EDITED sheet is skipped by the generator, like a manual one");
+    di.undo();
+    check(CsLayoutGen.state(doc, Layouts.get(doc, "Plan")) === "auto", "undoing the edit makes it AUTO again, by itself");
+    // hand edit 2: add a note
+    var note = new RTextEntity(doc, new RTextData(new RVector(0.05, 0.05), new RVector(0.05, 0.05), 0.01, 0.5,
+        RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact, 1.0, "hand note", "standard", false, false, 0.0, false));
+    note.setBlockId(info.blockId);
+    note.setLayerId(doc.getLayerId("0"));
+    di.applyOperation(new RAddObjectOperation(note, false));
+    check(CsLayoutGen.state(doc, Layouts.get(doc, "Plan")) === "edited", "adding a note turns it EDITED");
+    check(CsLayoutGen.canRevert(doc, Layouts.get(doc, "Plan")), "a generated sheet can be reverted");
+    check(CsLayoutGen.revert(doc, di, "Plan"), "revert");
+    var afterRevert = Layouts.get(doc, "Plan");
+    check(CsLayoutGen.state(doc, afterRevert) === "auto", "revert puts the sheet back to AUTO");
+    var noteLeft = false;
+    var ids2 = doc.queryBlockEntities(afterRevert.blockId);
+    for (var ri = 0; ri < ids2.length; ri++) {
+        var re = doc.queryEntity(ids2[ri]);
+        if (!re.isUndone() && re.getType() === RS.EntityText && String(re.getPlainText()) === "HAND NOTE" || (!re.isUndone() && re.getType() === RS.EntityText && String(re.getPlainText()).toLowerCase() === "hand note")) noteLeft = true;
+    }
+    check(!noteLeft, "revert removed the hand-made note");
+    di.undo();
+    check(CsLayoutGen.state(doc, Layouts.get(doc, "Plan")) === "edited", "reverting is ONE undo step (the note is back)");
+    di.redo();
+    // hand edit 3: unlock the viewport
+    var vpNow = Layouts.viewports(doc, Layouts.get(doc, "Plan"))[0];
+    Layouts.setLocked(di, vpNow, false);
+    check(CsLayoutGen.state(doc, Layouts.get(doc, "Plan")) === "edited", "unlocking the viewport turns it EDITED");
+    check(CsLayoutGen.revert(doc, di, "Plan"), "revert again");
+    check(Layouts.isLocked(Layouts.viewports(doc, Layouts.get(doc, "Plan"))[0]) &&
+          CsLayoutGen.state(doc, Layouts.get(doc, "Plan")) === "auto", "revert re-locks the viewport and the sheet is AUTO");
+    // a hand-made layout is manual from the start and cannot be reverted
+    var mine = Layouts.create(di, { name: "Mine", paper: "A4" });
+    check(CsLayoutGen.state(doc, mine) === "manual" && !CsLayoutGen.canRevert(doc, mine), "a layout the person made is MANUAL and has nothing to revert to");
+    Layouts.remove(di, "Mine");
+
     // ---- re-run: auto layout rewritten in place, no copies -------------
     var res2 = CsLayoutGen.generate(doc, di, { caveBox: base.caveBox, sheet: base.sheet, turned: false,
         scale: 25, perFoot: 1, wants: base.wants, titleValues: base.titleValues, reading: base.reading, tiles: null });
@@ -146,6 +201,21 @@ function main() {
     check(allShow, "every tile's viewport shows exactly the tile's map rectangle");
     check(nTitle === 1, "exactly one sheet carries the title block: " + nTitle);
     check(Layouts.get(doc, "A1") !== undefined, "tiles are named by grid place (A1 exists)");
+
+    // ---- the file: generated sheets keep their state across save / reload ----
+    var filter = "";
+    var fs = RFileExporterRegistry.getFilterStrings();
+    for (var fi = 0; fi < fs.length; fi++) { if (String(fs[fi]).indexOf("dxflib") >= 0 && String(fs[fi]).indexOf("2000") >= 0) { filter = fs[fi]; break; } }
+    var rt = QDir.tempPath() + "/cs_layout_gen_rt.dxf";
+    check(di.exportFile(rt, filter, false), "saved");
+    var back = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var bdi = new RDocumentInterface(back);
+    bdi.importFile(rt, "", false);
+    check(Layouts.list(back).length === Layouts.list(doc).length, "all sheets came back: " + Layouts.list(back).length);
+    var bInfo = Layouts.get(back, "A1");
+    check(!isNull(bInfo) && CsLayoutGen.state(back, bInfo) === "auto", "a reloaded generated sheet is still AUTO (signature survives the file)");
+    check(CsLayoutGen.canRevert(back, bInfo), "and can still be reverted (the job survived: it is a long string)");
+    check(CsLayoutGen.revert(back, bdi, "A1") && CsLayoutGen.state(back, Layouts.get(back, "A1")) === "auto", "revert works on the reloaded drawing");
 
     if (fails === 0) print("### LAYOUT GEN OK");
     QCoreApplication.exit(fails === 0 ? 0 : 1);

@@ -244,6 +244,9 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
     // file made to be handed to people. The engine's viewport honours this
     // property by not drawing images, whatever layer they sit on.
     viewport.setCustomProperty("CaveCAD", "NoRaster", "1");
+    // LOCKED: an automatic sheet's scale and contents are the generator's.
+    // Unlocking, like any hand edit, is what turns the sheet manual.
+    viewport.setStatus(viewport.getStatus() | Layouts.LOCK_BIT);
     add(viewport, CsLayers.BORDER, "viewport");
     drew.push("a viewport at 1\" = " + job.scale + " ft");
 
@@ -396,6 +399,201 @@ CsLayoutGen.draw = function(doc, di, job, info, extra) {
     return drew;
 };
 
+// ---------------------------------------------------------------------
+// AUTO / MANUAL / EDITED, and REVERT
+//
+// A layout is AUTO only while it is exactly what the generator drew. That
+// is decided by a SIGNATURE -- a digest of everything on the sheet and of
+// its paper -- stored when the sheet was generated and compared on demand,
+// not by a flag a listener has to remember to flip. Consequences worth
+// having: ANY hand edit (moving a piece, unlocking or rescaling the
+// viewport, adding a note, changing the paper) makes the sheet "edited"
+// without a single line of listener code; UNDOING the edit makes it
+// automatic again by itself; and a manual layout the person created is
+// manual from its first moment because it never had a signature.
+// ---------------------------------------------------------------------
+
+/** Custom-property keys on the layout (title "CaveCAD"). */
+CsLayoutGen.PROP_SIG = "LayoutSig";
+CsLayoutGen.PROP_JOB = "LayoutJob";
+
+// 1e-5 of a drawing unit: well inside what a DXF file keeps, well under a
+// pen width on paper (a hand move of 0.05 inch is 4e-3 ft)
+CsLayoutGen.round = function(v) {
+    return Math.round(v * 1.0e5) / 1.0e5;
+};
+
+/** A digest of one layout: its paper and every live entity in its block. */
+CsLayoutGen.signatureRows = function(doc, info) {
+    var parts = [info.paperMM.w, info.paperMM.h, info.marginsMM.l, info.marginsMM.b,
+        info.marginsMM.r, info.marginsMM.t, info.name];
+    var rows = [];
+    var ids = doc.queryBlockEntities(info.blockId);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || e.isUndone()) {
+            continue;
+        }
+        // NAMES, never ids: ids are not the same in a reloaded drawing
+        var row = [e.getType(), doc.getLayerName(e.getLayerId())];
+        try {
+            var bb = e.getBoundingBox();
+            var mn = bb.getMinimum(), mx = bb.getMaximum();
+            row.push(CsLayoutGen.round(mn.x), CsLayoutGen.round(mn.y),
+                CsLayoutGen.round(mx.x), CsLayoutGen.round(mx.y));
+        } catch (eBox) {
+            row.push("nobox");
+        }
+        try {
+            row.push(String(e.getColor().name()), doc.getLinetypeName(e.getLinetypeId()), e.getLineweight());
+        } catch (eAttr) {
+        }
+        if (e.getType() === RS.EntityViewport) {
+            var vc = e.getViewCenter();
+            var frozenNames = e.getFrozenLayerIds().map(function(id) { return doc.getLayerName(id); });
+            frozenNames.sort();
+            row.push(CsLayoutGen.round(e.getScale()), CsLayoutGen.round(vc.x), CsLayoutGen.round(vc.y),
+                CsLayoutGen.round(e.getRotation()), e.getStatus(), frozenNames.join("."),
+                String(e.getCustomProperty("CaveCAD", "NoRaster")));
+        }
+        else if (typeof e.getPlainText === "function") {
+            row.push(String(e.getPlainText()));
+        }
+        rows.push(row.join("|"));
+    }
+    rows.sort();
+    rows.unshift(parts.join("~"));
+    return rows;
+};
+
+CsLayoutGen.signature = function(doc, info) {
+    var rows = CsLayoutGen.signatureRows(doc, info);
+    var text = rows.join("\n");
+    // 32-bit FNV-1a, twice over (forwards and with a salt) so a collision needs two
+    var h1 = 0x811c9dc5, h2 = 0x01000193;
+    for (var k = 0; k < text.length; k++) {
+        var c = text.charCodeAt(k);
+        h1 = ((h1 ^ c) * 16777619) >>> 0;
+        h2 = ((h2 + c * 31 + k) * 2654435761) >>> 0;
+    }
+    return h1.toString(16) + "-" + h2.toString(16) + "-" + rows.length;
+};
+
+/**
+ * "auto"   exactly what the generator drew;
+ * "edited" generated, but changed by hand since;
+ * "manual" never generated (or its owner took it over).
+ */
+CsLayoutGen.state = function(doc, info) {
+    var layout = doc.queryLayout(info.layoutId);
+    if (isNull(layout) || info.mode !== "auto") {
+        return "manual";
+    }
+    var sig = layout.getCustomProperty("CaveCAD", CsLayoutGen.PROP_SIG);
+    if (isNull(sig) || String(sig) === "") {
+        return "manual";
+    }
+    return String(sig) === CsLayoutGen.signature(doc, info) ? "auto" : "edited";
+};
+
+// The job is a few KB of JSON; a file keeps a string value only up to about
+// a thousand characters (dxflib's read buffer), so it is stored in pieces.
+CsLayoutGen.CHUNK = 700;
+
+/** Writes the job into the layout object in pieces. */
+CsLayoutGen.storeJob = function(layout, json) {
+    var keys = layout.getCustomPropertyKeys("CaveCAD");
+    for (var k = 0; k < keys.length; k++) {
+        if (String(keys[k]).indexOf(CsLayoutGen.PROP_JOB) === 0) {
+            layout.removeCustomProperty("CaveCAD", keys[k]);
+        }
+    }
+    var n = 0;
+    for (var at = 0; at < json.length; at += CsLayoutGen.CHUNK) {
+        // zero-padded so the pieces sort back into order
+        var key = CsLayoutGen.PROP_JOB + "." + ("000" + n).slice(-3);
+        layout.setCustomProperty("CaveCAD", key, json.substring(at, at + CsLayoutGen.CHUNK));
+        n++;
+    }
+};
+
+/** The job text stored on a layout object, or "". */
+CsLayoutGen.loadJob = function(layout) {
+    var keys = layout.getCustomPropertyKeys("CaveCAD");
+    var mine = [];
+    for (var k = 0; k < keys.length; k++) {
+        if (String(keys[k]).indexOf(CsLayoutGen.PROP_JOB + ".") === 0) {
+            mine.push(String(keys[k]));
+        }
+    }
+    mine.sort();
+    var text = "";
+    for (var i = 0; i < mine.length; i++) {
+        text += String(layout.getCustomProperty("CaveCAD", mine[i]));
+    }
+    return text;
+};
+
+/** True when a sheet can be put back (it was generated once). */
+CsLayoutGen.canRevert = function(doc, info) {
+    var layout = doc.queryLayout(info.layoutId);
+    return !isNull(layout) && CsLayoutGen.loadJob(layout) !== "";
+};
+
+/** Stores the signature and the job a layout was generated from. */
+CsLayoutGen.stamp = function(doc, di, job, name) {
+    var info = Layouts.get(doc, name);
+    var layout = doc.queryLayout(info.layoutId);
+    layout.setCustomProperty("CaveCAD", CsLayoutGen.PROP_SIG, CsLayoutGen.signature(doc, info));
+    CsLayoutGen.storeJob(layout, JSON.stringify(job));
+    var op = new RModifyObjectsOperation();
+    op.setText(qsTr("Generate sheet"));
+    op.addObject(layout, false);
+    di.applyOperation(op);
+};
+
+/**
+ * Discards everything done by hand to a generated sheet and draws it again
+ * from the job it was generated from; the sheet is automatic afterwards.
+ * One undoable step (a transaction group).
+ *
+ * \return true when the sheet was put back
+ */
+CsLayoutGen.revert = function(doc, di, name, extra) {
+    var info = Layouts.get(doc, name);
+    if (isNull(info) || !CsLayoutGen.canRevert(doc, info)) {
+        return false;
+    }
+    var layout = doc.queryLayout(info.layoutId);
+    var job = JSON.parse(CsLayoutGen.loadJob(layout));
+    var saved = doc.getCurrentBlockId();
+    doc.startTransactionGroup();
+    var group = doc.getTransactionGroup();
+    // paper back to the job's, and the sheet is automatic again
+    info = Layouts.setPaper(di, name, {
+        paper: { w: job.paperInches.w * 25.4, h: job.paperInches.h * 25.4 },
+        landscape: job.paperInches.w >= job.paperInches.h, margins: job.marginInches * 25.4 });
+    info = Layouts.setMode(di, name, "auto");
+    // EVERYTHING on the sheet goes, tagged or not
+    var ids = doc.queryBlockEntities(info.blockId);
+    if (ids.length > 0) {
+        var del = new RDeleteObjectsOperation();
+        del.setText(qsTr("Revert sheet"));
+        del.setTransactionGroup(group);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (!isNull(e) && !e.isUndone()) {
+                del.deleteObject(e);
+            }
+        }
+        di.applyOperation(del);
+    }
+    CsLayoutGen.draw(doc, di, job, info, extra);
+    CsLayoutGen.stamp(doc, di, job, name);
+    doc.setCurrentBlock(saved);
+    return true;
+};
+
 /** Every entity in a layout's block that the generator drew. */
 CsLayoutGen.derived = function(doc, blockId) {
     var out = [];
@@ -424,7 +622,8 @@ CsLayoutGen.generate = function(doc, di, o) {
     for (var j = 0; j < jobs.length; j++) {
         var job = jobs[j];
         var info = Layouts.get(doc, job.name);
-        if (!isNull(info) && info.mode !== "auto") {
+        if (!isNull(info) && CsLayoutGen.state(doc, info) !== "auto") {
+            // manual, or generated and edited since: the person's now
             res.skipped.push(job.name);
             continue;
         }
@@ -454,6 +653,7 @@ CsLayoutGen.generate = function(doc, di, o) {
             res.rewritten.push(job.name);
         }
         CsLayoutGen.draw(doc, di, job, info, o.extra);
+        CsLayoutGen.stamp(doc, di, job, job.name);
     }
     doc.setCurrentBlock(savedBlock);
     return res;
