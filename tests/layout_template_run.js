@@ -76,7 +76,11 @@ check(def.viewports.length === 2 && def.viewports[0].view !== def.viewports[1].v
 check(def.furniture.filter(function(f) { return f.kind === "scalebar"; }).length === 2 &&
       def.furniture.filter(function(f) { return f.kind === "north"; }).length === 1 &&
       def.furniture.filter(function(f) { return f.kind === "title"; }).length === 1, "and the furniture: " + def.furniture.map(function(f) { return f.kind; }));
+check(def.furniture.filter(function(f) { return f.kind === "border"; }).length === 1 && near(def.furniture[0].inset, 0.25, 1e-6), "a border is captured with its inset: " + JSON.stringify(def.furniture[0]));
 var again = CsLayoutTemplate.apply(doc, di, def, "Again");
+var borderLines = 0, bl = doc.queryBlockEntities(Layouts.get(doc, "Again").blockId);
+for (var q = 0; q < bl.length; q++) { var be2 = doc.queryEntity(bl[q]); if (!be2.isUndone() && CsBind.layerNameOf(doc, be2) === CsLayers.BORDER) borderLines++; }
+check(borderLines === 4, "and comes back as four lines");
 var i3 = Layouts.get(doc, again);
 var v3 = Layouts.viewports(doc, i3).filter(function(v) { return !v.isOverall(); }).sort(byHeight);
 check(v3.length === 2 && near(v3[0].getCenter().x, v2[0].getCenter().x, 1e-6) && near(v3[1].getWidth(), v2[1].getWidth(), 1e-6), "a captured template lays the same sheet out again");

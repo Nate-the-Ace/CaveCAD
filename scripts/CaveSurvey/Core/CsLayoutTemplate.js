@@ -391,6 +391,33 @@ CsLayoutTemplate.capture = function(doc, info, name) {
             def.furniture.push({ kind: "scalebar", at: { x: anchor.x * inch / ps.w, y: anchor.y * inch / ps.h }, viewport: ids[vps[s].getId()] });
         }
     }
+    // a border: axis-aligned BORDER lines running most of the paper's width / height
+    // (match lines and a sheet's own edges are not it); its inset is the nearest one's distance from the paper edge
+    var W = ps.w / inch, H = ps.h / inch, hlines = 0, vlines = 0, inset = Infinity;
+    var bids = doc.queryBlockEntities(info.blockId);
+    for (var bi = 0; bi < bids.length; bi++) {
+        var be = doc.queryEntity(bids[bi]);
+        if (isNull(be) || be.isUndone() || be.getType() !== RS.EntityLine || CsBind.layerNameOf(doc, be) !== CsLayers.BORDER) {
+            continue;
+        }
+        if (CsTags.get(be, CsLayoutGen.TAG) === "matchline") {
+            continue;
+        }
+        var sp = be.getStartPoint(), ep = be.getEndPoint();
+        var lenIn = sp.getDistanceTo(ep) / inch;
+        if (Math.abs(sp.y - ep.y) < 1e-9 && lenIn >= 0.6 * W) {
+            hlines++;
+            inset = Math.min(inset, sp.y / inch, H - sp.y / inch);
+        }
+        else if (Math.abs(sp.x - ep.x) < 1e-9 && lenIn >= 0.6 * H) {
+            vlines++;
+            inset = Math.min(inset, sp.x / inch, W - sp.x / inch);
+        }
+    }
+    if (hlines >= 2 && vlines >= 2 && isFinite(inset)) {
+        def.furniture.unshift({ kind: "border", inset: Math.round(inset * 1000) / 1000 });
+    }
+
     var tx = Infinity, ty = Infinity, ids2 = doc.queryBlockEntities(info.blockId);
     for (var e = 0; e < ids2.length; e++) {
         var ent = doc.queryEntity(ids2[e]);
