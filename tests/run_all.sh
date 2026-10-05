@@ -1193,6 +1193,22 @@ else
 fi
 
 echo
+echo "=============================================================="
+echo " 71/71 Annotative text as drawn (model, viewports, ghosts)"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/annotative_render_run.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### ANNOTATIVE RENDER OK"*) ;;
+        *) echo "Annotative render run did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found at $QCAD"
+fi
+
+echo
 if [ "$status" -eq 0 ]; then
     if [ "$engine" -eq 0 ]; then
         echo "STRUCTURAL TESTS PASSED -- the 43 engine suites were SKIPPED"
