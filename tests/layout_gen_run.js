@@ -202,6 +202,21 @@ function main() {
     check(nTitle === 1, "exactly one sheet carries the title block: " + nTitle);
     check(Layouts.get(doc, "A1") !== undefined, "tiles are named by grid place (A1 exists)");
 
+    // ---- the elevation sheet: a viewport onto the profile region ------------------
+    var profBox = { minX: ox, minY: oy - 80, maxX: ox + 100, maxY: oy - 60 };
+    var resE = CsLayoutGen.generate(doc, di, { caveBox: base.caveBox, elevBox: profBox, sheet: sheet, turned: false,
+        scale: 20, perFoot: 1, wants: { border: true, bar: true, north: true, title: false }, titleValues: {}, reading: null,
+        tiles: null, elevation: true });
+    check(resE.made.indexOf("Elevation") >= 0, "an Elevation sheet is made when there is a profile frame: " + resE.made.join());
+    var eInfo = Layouts.get(doc, "Elevation");
+    var evp = Layouts.viewports(doc, eInfo)[0];
+    var eFrozen = evp.getFrozenLayerIds().map(function(id) { return doc.getLayerName(id); });
+    check(eFrozen.indexOf("WALL-SURVEYED") >= 0 && eFrozen.indexOf("PROFILE-WALL") < 0, "the elevation viewport hides the PLAN layers and shows the profile ones: " + eFrozen.join());
+    check(evp.getViewCenter().y < oy - 50 && evp.getViewCenter().y > oy - 90, "its view is centred on the profile region, not the plan: y=" + evp.getViewCenter().y);
+    var eKinds = countBy(doc, eInfo.blockId).kinds;
+    check(!eKinds["NORTH-ARROW"], "an elevation has no north arrow");
+    check(eKinds["SCALE-BAR"] > 0, "but it has a scale bar");
+
     // ---- the file: generated sheets keep their state across save / reload ----
     var filter = "";
     var fs = RFileExporterRegistry.getFilterStrings();
