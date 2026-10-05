@@ -36,7 +36,7 @@ echo " 1/55 Structural tests (add-on layout, includes, layers)"
 echo "=============================================================="
 "$PY" -m unittest discover -s tests -v || status=1
 
-QCAD="/Applications/CaveCAD.app/Contents/MacOS/CaveCAD"
+QCAD="${CAVECAD_BIN:-/Applications/CaveCAD.app/Contents/MacOS/CaveCAD}"
 
 # 26 of the 27 suites need the real engine and print SKIP without it --
 # which used to leave "ALL TESTS PASSED" standing on a machine where
@@ -965,6 +965,22 @@ if [ -e "$QCAD" ]; then
     case "$output" in
         *"### WARP ANCHORS OK"*) ;;
         *) echo "Warp anchors run did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found at $QCAD"
+fi
+
+echo
+echo "=============================================================="
+echo " 56/56 Viewport layouts survive a DXF round trip"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/viewport_layout_run.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### VIEWPORT LAYOUT OK"*) ;;
+        *) echo "Viewport layout run did not pass."; status=1 ;;
     esac
 else
     echo "SKIP: CaveCAD not found at $QCAD"
