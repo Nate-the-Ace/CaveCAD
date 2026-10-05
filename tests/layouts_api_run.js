@@ -135,6 +135,19 @@ function main() {
     check(idx37 >= 0 && all[idx37].custom && idx37 < idx40, "the custom scale is in the list, in order, marked custom");
     check(Layouts.removeCustomScale(37.5) && Layouts.scales().length === Layouts.STANDARD_SCALES.length, "and can be removed");
 
+    // ---- Print.js sees the layout's own paper ---------------------------------------------
+    include("scripts/File/Print/Print.js");
+    var savedBlock = doc.getCurrentBlockId();
+    var pInfo = Layouts.get(doc, "A1");
+    doc.setCurrentBlock(pInfo.blockId);
+    var psz = Print.getPaperSizeMM(doc);
+    check(near(psz.width(), 215.9, 1e-6) && near(psz.height(), 279.4, 1e-6), "Print.js reads the layout block's paper (Letter): " + psz.width() + " x " + psz.height());
+    check(Print.getScale(doc) === 1, "and prints it at 1:1 (paper coordinates are drawing units)");
+    var pb = Layouts.pageSetup(di, "A1", { paper: "A3", landscape: false });
+    doc.setCurrentBlock(pb.blockId);
+    check(near(Print.getPaperSizeMM(doc).width(), 297, 1e-6), "page setup keeps the block's print settings in step: A3 = " + Print.getPaperSizeMM(doc).width());
+    doc.setCurrentBlock(savedBlock);
+
     if (fails === 0) print("### LAYOUTS API OK");
     QCoreApplication.exit(fails === 0 ? 0 : 1);
 }

@@ -578,7 +578,7 @@ CsLayoutGen.revert = function(doc, di, name, extra) {
     doc.startTransactionGroup();
     var group = doc.getTransactionGroup();
     // paper back to the job's, and the sheet is automatic again
-    info = Layouts.setPaper(di, name, {
+    info = Layouts.pageSetup(di, name, {
         paper: { w: job.paperInches.w * 25.4, h: job.paperInches.h * 25.4 },
         landscape: job.paperInches.w >= job.paperInches.h, margins: job.marginInches * 25.4 });
     info = Layouts.setMode(di, name, "auto");
@@ -645,7 +645,7 @@ CsLayoutGen.generate = function(doc, di, o) {
         }
         else {
             // paper may have changed
-            info = Layouts.setPaper(di, job.name, {
+            info = Layouts.pageSetup(di, job.name, {
                 paper: { w: job.paperInches.w * 25.4, h: job.paperInches.h * 25.4 },
                 landscape: job.paperInches.w >= job.paperInches.h,
                 margins: job.marginInches * 25.4 });
