@@ -1211,7 +1211,7 @@ CsSheetSetup.preview = function(state) {
     // (CsSheetTile). The furniture is shown once, on the first sheet --
     // every sheet gets the same arrangement, so one is the picture of all.
     var tl = state.tileLayout;
-    var tiled = !isNull(tl) && tl.tiled === true && tl.tiles.length > 0;
+    var tiled = !isNull(tl) && tl.tooMany !== true && tl.tiles.length > 0;
     // THE FURNITURE'S OWN LAYOUT (see CsSheetSetup.furniture): sized
     // boxes packed under the map, none outside the margin and none on
     // another. When the caller knows the title block's height the band
@@ -1257,7 +1257,8 @@ CsSheetSetup.preview = function(state) {
             if (tl.tiles[pk].title === true) { primary = tl.tiles[pk]; }
         }
     }
-    var box = tiled ? moved(primary.paper) :
+    // the paper drawn is the viewport's own cell, so it stands still while the cave is dragged
+    var box = tiled ? moved(isNull(tl.origin) ? primary.paper : tl.origin.paper) :
         CsSheetSetup.borderBox(state.caveBox, state.sheet, scale,
             state.turned === true, footerUsed);
 
@@ -1290,7 +1291,9 @@ CsSheetSetup.preview = function(state) {
         for (var ti = 0; ti < tl.tiles.length; ti++) {
             var mp = moved(tl.tiles[ti].map);
             add("tile", mp.minX, mp.minY, mp.maxX, mp.maxY);
-            out.items[out.items.length - 1].label = tl.tiles[ti].id;
+            if (tl.tiled === true) {
+                out.items[out.items.length - 1].label = tl.tiles[ti].id;
+            }
         }
         var ml = Math.max(scale * 0.03, 1e-6);
         for (var mi = 0; mi < tl.matchLines.length; mi++) {

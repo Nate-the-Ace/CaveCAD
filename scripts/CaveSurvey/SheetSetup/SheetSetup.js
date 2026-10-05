@@ -149,22 +149,20 @@ SheetSetup.occupancy = function(doc) {
  * up the paper is.
  */
 SheetSetup.footerFn = function(state, sheet, wants) {
-    var picked = isNull(wants) ? { title: true, bar: true, north: true } :
-        wants;
-    var reading = isNull(state.declination) ? null :
-        { declination: state.declination,
-            date: isNull(state.declinationDate) ? "" : state.declinationDate };
+    // NO BAND IS KEPT UNDER A PLAN: every plan sheet is map right out to the
+    // margin with its title block, bar and arrow over it on a white backing,
+    // whether the cave takes one sheet or twenty. (A band under the map made
+    // a single sheet and a tiled one two different pictures, so dragging the
+    // cave across the point where one becomes the other made the sheet jump.)
     return function(turned) {
-        return CsSheetSetup.footerFor({ sheet: sheet, turned: turned,
-            wants: picked, titleHeight: state.titleHeight,
-            reading: reading });
+        return 0;
     };
 };
 
 /**
- * The tile layout for the choices on the panel, or null when the cave
- * fits ONE sheet at this scale (so everything below stays exactly as it
- * always was for the ordinary case).
+ * The sheet layout for the choices on the panel: a grid of sheets when the
+ * cave overflows one (`tiled` true), else the one sheet (`tiled` false). Never
+ * null for a drawing that has a cave -- one sheet is a grid of one.
  *
  * The cave dragged by hand slides the PAPER under it the other way,
  * the same rule borderBox follows -- which is the layout's shiftInches.
@@ -187,7 +185,7 @@ SheetSetup.tileLayoutFor = function(state, sheet, scale, offsets, wants,
         turned: turned === true,
         occupied: state.occupied,
         shiftInches: { x: -drag.x, y: -drag.y } });
-    return layout.tiled === true ? layout : null;
+    return layout;
 };
 
 /** True when this drawing has an extended elevation to place. */
@@ -890,7 +888,7 @@ SheetSetup.repaint = function() {
         // a wider view -- but not WHILE a sheet is held: a neighbour
         // appearing mid-drag must not zoom the view out from under the
         // hand that is moving it. The view settles when the sheet is let go.
-        var arrangement = tiles === null ? "one" : (tiles.rows + "x" +
+        var arrangement = (tiles === null || tiles.tiled !== true) ? "one" : (tiles.rows + "x" +
             tiles.cols + "x" + tiles.tiles.length);
         if (!isNull(w.dragKind) && !isNull(w.lastArrangement)) {
             arrangement = w.lastArrangement;
@@ -941,7 +939,7 @@ SheetSetup.repaint = function() {
         qsTr("Everything sits on the paper.") :
         qsTr("Off the paper: %1. Try a smaller scale or bigger paper.")
             .arg(spill.spilling.join(", "));
-    if (tiles !== null) {
+    if (tiles !== null && tiles.tiled === true) {
         // MORE THAN ONE SHEET IS NOT A PROBLEM, it is the answer: say
         // what will be built, and what the sheets are called.
         w.fitLabel.text = qsTr("The plan measures %1 x %2 ft: too big " +
@@ -960,7 +958,7 @@ SheetSetup.repaint = function() {
     // Sheets are layouts of THIS drawing: nothing is written beside it, so
     // an unsaved drawing builds sheets as well as a saved one does.
     w.buildButton.enabled = true;
-    w.buildButton.text = (tiles !== null) ?
+    w.buildButton.text = (tiles !== null && tiles.tiled === true) ?
         qsTr("Build %1 Sheets").arg(tiles.tiles.length) : qsTr("Build Sheet");
     w.buildButton.toolTip = qsTr("Makes (or rewrites) the sheets as layouts " +
         "of this drawing. A sheet you have changed by hand is left alone.");
@@ -985,7 +983,7 @@ SheetSetup.starter = function(doc, di) {
         SheetSetup.footerFn(state, sheet, wants), false);
     var scale = fit.fits ? fit.scale : CsSheetSetup.SCALES[CsSheetSetup.SCALES.length - 1];
     var tiles = SheetSetup.tileLayoutFor(state, sheet, scale, {}, wants, fit.turned);
-    if (tiles !== null) {
+    if (tiles === null || tiles.tiled === true) {
         return "";     // a cave that needs several sheets is Sheet Setup's job
     }
     var res = CsLayoutGen.generate(doc, di, {
@@ -994,7 +992,7 @@ SheetSetup.starter = function(doc, di) {
         wants: { border: true, bar: true, north: true, title: true },
         titleValues: SheetSetup.titleValues(doc, state.filled),
         reading: CsSheetSetup.latestDeclination(state.survey),
-        tiles: null, elevation: false, shiftInches: { x: 0, y: 0 },
+        tiles: tiles, elevation: false, shiftInches: { x: 0, y: 0 },
         extra: { offsets: {}, titleValues: SheetSetup.titleValues(doc, state.filled) } });
     return res.made.length > 0 ? res.made[0] : "";
 };

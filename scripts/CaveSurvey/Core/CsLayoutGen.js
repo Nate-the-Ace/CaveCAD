@@ -97,11 +97,13 @@ CsLayoutGen.plan = function(o) {
     }
 
     var i;
-    if (!isNull(o.tiles) && o.tiles.tiled === true) {
+    if (!isNull(o.tiles) && !isNull(o.tiles.tiles) && o.tiles.tiles.length > 0 && o.tiles.tooMany !== true) {
+        // a grid of one is one sheet: no "SHEET A1" label, no match lines
+        var several = o.tiles.tiled === true;
         for (i = 0; i < o.tiles.tiles.length; i++) {
             var t = o.tiles.tiles[i];
             var titleHere = wants.title === true && t.title === true;
-            jobs.push(job(t.id, "plan", t.paper, t.map, t, titleHere, furnitureFor(titleHere, false)));
+            jobs.push(job(t.id, "plan", t.paper, t.map, several ? t : null, titleHere, furnitureFor(titleHere, false)));
         }
     }
     else {

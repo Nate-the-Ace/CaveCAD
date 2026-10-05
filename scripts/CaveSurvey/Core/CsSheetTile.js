@@ -413,7 +413,18 @@ CsSheetTile.layoutOne = function(o) {
         span.maxX = Math.max(span.maxX, kept[k].paper.maxX);
         span.maxY = Math.max(span.maxY, kept[k].paper.maxY);
     }
-    return { tiled: kept.length > 1, rows: rows, cols: cols,
+    // THE VIEWPORT'S OWN CELL (0, 0), whether or not any cave is in it. The
+    // preview draws THIS as the paper, not the first sheet that happens to
+    // be kept: when a drag moves the cave off cell (0, 0) the first kept sheet
+    // becomes another one, and a paper chosen by that jumps a whole sheet.
+    var originCore = coreOf(0, 0), originMap = mapOf(originCore);
+    var origin = { core: originCore, map: originMap, paper: {
+        minX: originMap.minX - mPx, maxX: originMap.maxX + mPx,
+        minY: originMap.minY - mPx - fPx, maxY: originMap.maxY + mPx,
+        width: (originMap.maxX - originMap.minX) + mPx * 2,
+        height: (originMap.maxY - originMap.minY) + mPx * 2 + fPx,
+        footer: fPx, margin: mPx } };
+    return { tiled: kept.length > 1, rows: rows, cols: cols, origin: origin,
         turned: turned, tiles: kept, matchLines: matchLines, span: span,
         overlap: overlap, anchor: { x: centreX, y: centreY } };
 };
