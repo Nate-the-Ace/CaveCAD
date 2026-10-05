@@ -225,6 +225,28 @@ the real layout list.
 
 1. DXF target: CaveCAD-private is fine; no AutoCAD interop (Nathan).
 2. Migration: none; old tiles are regenerated, legacy path deleted (Nathan).
-3. Tab strip under the drawing (AutoCAD style) — default, revisit only if
-   it fights the dock layout.
-4. Auto-managed tiles by default; entering a viewport is the advanced path.
+3. Layout tabs under the drawing, AutoCAD style (Nathan likes the familiar
+   workflow).
+4. **Auto sheets become manual on first hand edit, with Revert** (Nathan):
+   - Every layout carries a mode: `auto` (generated and owned by Sheet
+     Setup) or `manual` (owned by the caver). Layouts the caver creates
+     are manual from birth.
+   - An auto layout stores the generator inputs and a content signature of
+     what it generated (viewports geometry/scale/twist/frozen layers, derived
+     entity set). Re-running the generator rewrites auto layouts freely and
+     never touches manual ones.
+   - ANY edit to an auto layout by the caver (move/resize/scale a
+     viewport, add/delete/modify a paper-space entity, change its page
+     setup) flips it to manual: detected live by a transaction listener on
+     the layout block (tab shows a "manual" badge) and, as a safety net,
+     by comparing the stored signature at regenerate time.
+   - **Revert to auto** (tab context menu, and a button in Sheet Setup)
+     discards the manual edits, regenerates that layout from the generator
+     inputs, and flips it back to auto. It confirms first, because it is
+     destructive; the revert is one undoable transaction.
+   - Sheet Setup shows which layouts are auto vs manual and, when the cave
+     has grown or the scale changed, which manual layouts it left alone
+     (so the caver can revert or hand-adjust them).
+   - Furniture follows the same rule per entity: derived entities carry a
+     tag; deleting one flips the layout to manual, and revert restores it.
+5. Auto-managed tiles by default; entering a viewport is the advanced path.
