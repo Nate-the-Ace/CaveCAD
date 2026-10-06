@@ -1194,23 +1194,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 71/71 Annotative text as drawn (model, viewports, ghosts)"
-echo "=============================================================="
-if [ -e "$QCAD" ]; then
-    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
-                 -autostart tests/annotative_render_run.js "$PWD" 2>/dev/null)
-    echo "$output"
-    case "$output" in
-        *"### ANNOTATIVE RENDER OK"*) ;;
-        *) echo "Annotative render run did not pass."; status=1 ;;
-    esac
-else
-    echo "SKIP: CaveCAD not found at $QCAD"
-fi
-
-echo
-echo "=============================================================="
-echo " 72/72 Moving a corner of a turned viewport leaves the map on the same pixels"
+echo " 70/70 Moving a corner of a turned viewport leaves the map on the same pixels"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \

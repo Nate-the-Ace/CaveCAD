@@ -845,13 +845,6 @@
     "LayoutGrid"
    ],
    "shots": []
-  },
-  {
-   "id": "annotative-text",
-   "title": "Annotative text: one note, every scale",
-   "class": "task",
-   "file": "annotative-text.html",
-   "shots": []
   }
  ]
 }
