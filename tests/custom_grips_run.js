@@ -112,6 +112,26 @@ var mv2 = MoveVertex.current;
 mv2.mouseMoveEvent(ev(0.0, 0.0));
 mv2.escapeEvent();
 check(near(corners()[0].x, 0.1) && near(corners()[0].y, 0.1), "Escape puts the corner back");
+// ---- a TURNED viewport: moving a corner must not move the map either
+function forward(vp, mx, my) {     // where the engine puts a model point on the paper
+    var c = vp.getCenter(), vc = vp.getViewCenter(), s = vp.getScale(), a = vp.getRotation();
+    var dx = (mx - vc.x) * s, dy = (my - vc.y) * s;
+    return { x: c.x + dx * Math.cos(a) - dy * Math.sin(a), y: c.y + dx * Math.sin(a) + dy * Math.cos(a) };
+}
+var turned = doc2.queryEntity(pid);
+turned.setRotation(35 * Math.PI / 180);
+turned.setViewCenter(new RVector(12345, 6789));
+di2.applyOperation(new RModifyObjectOperation(turned, false));
+var probe = { x: 12350, y: 6795 };
+var p0 = forward(doc2.queryEntity(pid), probe.x, probe.y);
+MoveVertex.start(di2, pid, 0, 1);
+var mv3 = MoveVertex.current;
+mv3.mouseMoveEvent(ev(0.9, 0.05));
+var p1 = forward(doc2.queryEntity(pid), probe.x, probe.y);
+check(near(p0.x, p1.x, 1e-9) && near(p0.y, p1.y, 1e-9), "moving a corner of a TURNED viewport leaves every model point at the same place on the paper: (" + p0.x.toFixed(6) + "," + p0.y.toFixed(6) + ") vs (" + p1.x.toFixed(6) + "," + p1.y.toFixed(6) + ")");
+mv3.mouseReleaseEvent(ev(0.9, 0.05));
+var p2 = forward(doc2.queryEntity(pid), probe.x, probe.y);
+check(near(p0.x, p2.x, 1e-9) && near(p0.y, p2.y, 1e-9), "and after it is put down");
 Layouts.setLocked(di2, doc2.queryEntity(pid), true);
 check(MoveVertex.start(di2, pid, 0, 1) === false, "a locked viewport's corners do not move");
 if (fails === 0) print("### CUSTOM GRIPS OK");

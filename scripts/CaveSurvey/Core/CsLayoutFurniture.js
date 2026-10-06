@@ -409,7 +409,7 @@ CsLayoutFurniture.addDetail = function(doc, di, info, parent, from, radius, to, 
     var ps = Layouts.paperSize(doc, info), inch = Layouts.toPaper(doc, 25.4);
     var R = radius * mag;
     var cx = Math.min(Math.max(to.x, R), ps.w - R), cy = Math.min(Math.max(to.y, R), ps.h - R);
-    var model = Layouts.paperToModel(parent, from.x, from.y);
+    var model = Layouts.paperToModelTurned(parent, from.x, from.y);
 
     var vp = new RViewportEntity(doc, new RViewportData());
     vp.setCenter(new RVector(cx, cy));
