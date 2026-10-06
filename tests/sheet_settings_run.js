@@ -83,6 +83,23 @@ function main() {
     LayoutTabs.sheetApply(entry, { landscape: Layouts.get(doc, "A1").paperMM.w >= Layouts.get(doc, "A1").paperMM.h });
     check(doc.getStorage().getLastTransactionId() === last, "an edit that changes nothing adds no undo step");
 
+    // the settings sit in the Layout tab itself, always there while a sheet is showing
+    LayoutTabs.registerRibbon();
+    var panels = Ribbon.panels["layout"];
+    var group = null;
+    for (var pi = 0; pi < panels.length; pi++) { if (panels[pi].id === "sheetsettings") { group = panels[pi]; } }
+    check(group !== null && group.items.length === 4, "the Layout tab has a Sheet settings group of four columns");
+    check(isNull(Ribbon.tabById("sheet")), "and there is no separate Sheet settings tab to open");
+    var hasPageSetup = false;
+    for (var qi = 0; qi < panels.length; qi++) {
+        for (var ii = 0; ii < panels[qi].items.length; ii++) {
+            var it = panels[qi].items[ii];
+            if (it.id === "pagesetup") { hasPageSetup = true; }
+            if (it.type === "stack") { for (var si = 0; si < it.items.length; si++) { if (it.items[si].id === "pagesetup") { hasPageSetup = true; } } }
+        }
+    }
+    check(!hasPageSetup, "and no Page setup button to press");
+
     if (fails === 0) print("### SHEET SETTINGS OK");
     QCoreApplication.exit(fails === 0 ? 0 : 1);
 }
