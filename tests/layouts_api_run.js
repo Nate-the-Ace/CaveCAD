@@ -157,6 +157,17 @@ function main() {
     check(near(Print.getPaperSizeMM(doc).width(), 297, 1e-6), "page setup keeps the block's print settings in step: A3 = " + Print.getPaperSizeMM(doc).width());
     doc.setCurrentBlock(savedBlock);
 
+    // sheet settings: the print colour is the person's choice, and page setup keeps it
+    check(Layouts.getColorMode(doc, Layouts.get(doc, "A1")) === "FullColor", "print colour defaults to full colour");
+    check(Layouts.setColorMode(di, "A1", "BlackWhite") === true, "set the print colour");
+    check(Layouts.getColorMode(doc, Layouts.get(doc, "A1")) === "BlackWhite", "print colour is stored on the sheet");
+    var ss = Layouts.pageSetup(di, "A1", { paper: "A4", margins: 12.7, units: Layouts.MILLIMETERS });
+    check(Layouts.getColorMode(doc, ss) === "BlackWhite", "page setup does not reset the print colour");
+    check(near(ss.marginsMM.t, 12.7) && near(ss.marginsMM.l, 12.7) && ss.units === Layouts.MILLIMETERS, "margins and units applied together");
+    var cs = Layouts.pageSetup(di, "A1", { paper: { w: 250, h: 400 }, margins: { l: 5, b: 6, r: 7, t: 8 } });
+    check(near(Math.max(cs.paperMM.w, cs.paperMM.h), 400) && near(Math.min(cs.paperMM.w, cs.paperMM.h), 250), "a custom paper size");
+    check(near(cs.marginsMM.l, 5) && near(cs.marginsMM.b, 6) && near(cs.marginsMM.r, 7) && near(cs.marginsMM.t, 8), "four separate margins");
+
     if (fails === 0) print("### LAYOUTS API OK");
     QCoreApplication.exit(fails === 0 ? 0 : 1);
 }
