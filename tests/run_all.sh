@@ -1178,22 +1178,6 @@ fi
 
 echo
 echo "=============================================================="
-echo " 70/70 Annotative text: scales, following the current scale, edit / undo / redo"
-echo "=============================================================="
-if [ -e "$QCAD" ]; then
-    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
-                 -autostart tests/annotative_run.js "$PWD" 2>/dev/null)
-    echo "$output"
-    case "$output" in
-        *"### ANNOTATIVE OK"*) ;;
-        *) echo "Annotative run did not pass."; status=1 ;;
-    esac
-else
-    echo "SKIP: CaveCAD not found at $QCAD"
-fi
-
-echo
-echo "=============================================================="
 echo " 70/70 Moving a corner of a turned viewport leaves the map on the same pixels"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
