@@ -882,6 +882,34 @@ SymbolPalette.RECENT_SETTING = "CaveSurvey/SymbolPaletteRecent";
  * tile in its category, and two lit copies of one symbol would raise
  * the question of which one is armed.
  */
+/**
+ * The ink a tile's picture is drawn in: plain white on a dark theme, plain
+ * black on a light one.
+ *
+ * iconFor's default is near-black, which is invisible on a dark theme --
+ * every tile in the palette was a blank square with a name under it.
+ * It is deliberately NOT the theme's text or highlight colour: a symbol
+ * drawn in the accent colour reads as "this prints in that colour", and
+ * a symbol prints in its layer's colour, not the palette's. So only the
+ * button's LIGHTNESS is read, and the answer is black or white. null (the
+ * old default) when the bridge will not hand the palette over.
+ */
+SymbolPalette.tilePen = function(button) {
+    try {
+        var p = button.palette;
+        if (typeof p === "function") {
+            p = p.call(button);
+        }
+        var c = p.color(QPalette.Button);
+        var lightness = 0.299 * c.red() + 0.587 * c.green() +
+            0.114 * c.blue();
+        return lightness < 128 ? new QColor(255, 255, 255) :
+            new QColor(0, 0, 0);
+    } catch (e) {
+        return null;
+    }
+};
+
 SymbolPalette.tileFor = function(entry, shape, checkable, compact) {
     // A TOOL BUTTON, not a push button. A QPushButton lays its icon and
     // its text side by side and there is no way to stack them, so a
@@ -919,7 +947,8 @@ SymbolPalette.tileFor = function(entry, shape, checkable, compact) {
     // no more about it than it ever did.
     button.toolTip = CsPanel.tipHtml(entry.nss,
         CsHelp.forSymbol(entry.block), detail);
-    var icon = SymbolPalette.iconFor(shape, SymbolPalette.ICON, null);
+    var icon = SymbolPalette.iconFor(shape, SymbolPalette.ICON,
+        SymbolPalette.tilePen(button));
     if (icon !== null) {
         try {
             button.icon = icon;
