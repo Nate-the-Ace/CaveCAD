@@ -21,6 +21,11 @@
      "image": "start-here-panel.png",
      "depicts": "scripts/CaveSurvey/StartHere/StartHere.js",
      "hash": "8f0f17fc34e2991104025082218f7b98685cec57d1f647e2aef9a65d6b894cd9"
+    },
+    {
+     "image": "start-here-demo.gif",
+     "depicts": "scripts/CaveSurvey/StartHere/StartHere.js",
+     "hash": "8f0f17fc34e2991104025082218f7b98685cec57d1f647e2aef9a65d6b894cd9"
     }
    ]
   },
@@ -38,6 +43,11 @@
      "image": "handbook-panel.png",
      "depicts": "scripts/CaveSurvey/Handbook/Handbook.js",
      "hash": "d72e0d67fef106b4445aa3cfc96401289ddac455dec063c3bd04e5679455939e"
+    },
+    {
+     "image": "handbook-demo.gif",
+     "depicts": "scripts/CaveSurvey/Handbook/Handbook.js",
+     "hash": "d7e91ed613623a395e747ae0eb6d3437d0bbbdf547fc87e9f2cc212a1bec446b"
     }
    ]
   },
@@ -99,6 +109,11 @@
      "image": "survey-notebook-panel.png",
      "depicts": "scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js",
      "hash": "d24cf826157587ff76f06970d61166039fc9f3994d8a8398e0602e4f0c009c20"
+    },
+    {
+     "image": "survey-notebook-demo.gif",
+     "depicts": "scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js",
+     "hash": "d24cf826157587ff76f06970d61166039fc9f3994d8a8398e0602e4f0c009c20"
     }
    ]
   },
@@ -144,7 +159,13 @@
    "tools": [
     "StationTable"
    ],
-   "shots": []
+   "shots": [
+    {
+     "image": "station-table-demo.gif",
+     "depicts": "scripts/CaveSurvey/StationTable/StationTable.js",
+     "hash": "9315ba91cbb53f678fcdf23f3debf0932a4161c693c73e311c2742ba8831f328"
+    }
+   ]
   },
   {
    "id": "expedition-planner",
@@ -187,6 +208,11 @@
    "shots": [
     {
      "image": "draw-panel.png",
+     "depicts": "scripts/CaveSurvey/DrawPanel/DrawPanel.js",
+     "hash": "edb2b874898bc930f9f3225f194490784679a2c1acc292d23b2e75deee79e3dc"
+    },
+    {
+     "image": "draw-demo.gif",
      "depicts": "scripts/CaveSurvey/DrawPanel/DrawPanel.js",
      "hash": "edb2b874898bc930f9f3225f194490784679a2c1acc292d23b2e75deee79e3dc"
     }
@@ -256,7 +282,13 @@
    "tools": [
     "SymbolPalette"
    ],
-   "shots": []
+   "shots": [
+    {
+     "image": "symbol-palette-demo.gif",
+     "depicts": "scripts/CaveSurvey/SymbolPalette/SymbolPalette.js",
+     "hash": "711322a5e2c7c9bab9a1cd935bb495f5c947e498dd8c2327f01561eee96745ff"
+    }
+   ]
   },
   {
    "id": "linetype-maker",
@@ -292,6 +324,11 @@
    "shots": [
     {
      "image": "sketch-scans-panel.png",
+     "depicts": "scripts/CaveSurvey/SketchScans/SketchScans.js",
+     "hash": "f5798872c27e400112c9041ac8ae397fc654dec657ad9c42c0f88333de79bb09"
+    },
+    {
+     "image": "sketch-scans-demo.gif",
      "depicts": "scripts/CaveSurvey/SketchScans/SketchScans.js",
      "hash": "f5798872c27e400112c9041ac8ae397fc654dec657ad9c42c0f88333de79bb09"
     }
@@ -331,6 +368,11 @@
    "shots": [
     {
      "image": "sheet-setup-panel.png",
+     "depicts": "scripts/CaveSurvey/SheetSetup/SheetSetup.js",
+     "hash": "f4568e1e16122e43aff2104f6d6a3083548261b98641df83668cd6e62a4bdca6"
+    },
+    {
+     "image": "sheet-setup-demo.gif",
      "depicts": "scripts/CaveSurvey/SheetSetup/SheetSetup.js",
      "hash": "f4568e1e16122e43aff2104f6d6a3083548261b98641df83668cd6e62a4bdca6"
     }
@@ -392,6 +434,11 @@
    "shots": [
     {
      "image": "check-map-panel.png",
+     "depicts": "scripts/CaveSurvey/CheckMap/CheckMap.js",
+     "hash": "823dd6c703b4d4e8d793447ab313f52b55b3391b0466363bf5f1cbfffc5d53b6"
+    },
+    {
+     "image": "check-map-demo.gif",
      "depicts": "scripts/CaveSurvey/CheckMap/CheckMap.js",
      "hash": "823dd6c703b4d4e8d793447ab313f52b55b3391b0466363bf5f1cbfffc5d53b6"
     }
