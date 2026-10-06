@@ -387,3 +387,24 @@ CsHandbook.shots = function() {
     }
     return out;
 };
+
+/**
+ * The animated images a page asks for: each distinct <img src="x.gif">,
+ * in the order they appear, as bare file names.
+ *
+ * A page names a clip exactly as it names a screenshot -- a plain
+ * <img> -- so a build that cannot animate still shows the clip's first
+ * frame. Only the panel knows how to play one; this is the part of
+ * "which images move" that needs no widget.
+ */
+CsHandbook.clipNames = function(html) {
+    var out = [];
+    var re = /<img\b[^>]*\bsrc\s*=\s*"([^"]+\.gif)"/gi;
+    var m;
+    while ((m = re.exec(String(html))) !== null) {
+        if (out.indexOf(m[1]) < 0) {
+            out.push(m[1]);
+        }
+    }
+    return out;
+};

@@ -1194,6 +1194,22 @@ fi
 
 echo
 echo "=============================================================="
+echo " Theme engine (palettes, custom colour, application style sheet)"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/theme_run.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### THEME OK"*) ;;
+        *) echo "Theme run did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found at $QCAD"
+fi
+
+echo
+echo "=============================================================="
 echo " Sheet settings tab (paper, margins, print colour)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then

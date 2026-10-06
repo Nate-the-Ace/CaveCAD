@@ -8,6 +8,17 @@ include("scripts/Layouts/Layouts.js");
 include("scripts/Widgets/LayoutTabs/LayoutTabs.js");
 
 var fails = 0;
+/** Ends the run without letting the application tear itself down: after any widget has been made, a normal
+ *  exit crashes in Qt's GL thread cleanup, and macOS shows its crash dialog. The result is already printed. */
+function hardExit() {
+    var p = new QProcess();
+    // a moment's grace first, so everything printed has been written out
+    p.setProgram("/bin/sh");
+    p.setArguments(["-c", "sleep 2; kill -9 " + String(QCoreApplication.applicationPid())]);
+    p.startDetached();
+    QCoreApplication.exit(0);
+}
+
 function check(c, m) { if (!c) { fails++; print("### SHEET SETTINGS FAILED: " + m); } else print("ok: " + m); }
 function near(a, b) { return Math.abs(a - b) < 0.01; }
 
@@ -101,6 +112,6 @@ function main() {
     check(!hasPageSetup, "and no Page setup button to press");
 
     if (fails === 0) print("### SHEET SETTINGS OK");
-    QCoreApplication.exit(fails === 0 ? 0 : 1);
+    if (fails === 0) { hardExit(); } else { QCoreApplication.exit(1); }
 }
 main();

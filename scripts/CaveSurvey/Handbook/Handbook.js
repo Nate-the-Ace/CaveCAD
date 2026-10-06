@@ -127,6 +127,18 @@ Handbook.buildDock = function(appWin) {
     // never passes through open(), so it came up blank. The first time it
     // is seen with nothing read yet, it lands on the home page.
     dock.visibilityChanged.connect(function(shown) {
+        // a hidden panel has no business redrawing frames
+        try {
+            var t = Handbook.widgets.clipTimer;
+            if (!isNull(t) && Handbook.widgets.clips.length > 0) {
+                if (shown) {
+                    t.start();
+                } else {
+                    t.stop();
+                }
+            }
+        } catch (eClipVis) {
+        }
         if (shown && Handbook.widgets.history.length === 0) {
             Handbook.open(Handbook.HOME);
         }
@@ -221,9 +233,159 @@ Handbook.render = function(page) {
     } catch (ePaths) {
     }
     Handbook.setHtml(html + Handbook.nextLink(page.id));
+    Handbook.startClips(html, root);
     w.contents = false;
     w.crumb.text = Handbook.crumbFor(page);
     w.backButton.enabled = w.at > 0;
+};
+
+/**
+ * ANIMATED IMAGES. QTextBrowser draws a GIF's first frame and stops, and
+ * this engine has neither QMovie nor a usable addResource (its QVariant
+ * argument never converts), so a clip is played by hand:
+ *
+ *   1. QImageReader decodes every frame and its delay.
+ *   2. The frames are written once to a cache folder as PNGs, because a
+ *      document can only be handed an image by a name it can resolve.
+ *   3. A QTimer rewrites the image's NAME in place -- the character
+ *      format at the image's position -- so the page never reloads and
+ *      the scroll position never moves.
+ *
+ * Every step is allowed to fail. A page whose clip cannot be played
+ * simply keeps the first frame, which is what it showed before.
+ */
+Handbook.CLIP_MAX_FRAMES = 240;
+Handbook.CLIP_TICK_MS = 20;
+// QTextFormat::ImageName; the enum is not exposed to script.
+Handbook.IMAGE_NAME = 0x5000;
+
+Handbook.stopClips = function() {
+    var w = Handbook.widgets;
+    if (isNull(w) || isNull(w.clipTimer)) {
+        return;
+    }
+    try {
+        w.clipTimer.stop();
+    } catch (eStop) {
+    }
+    w.clips = [];
+};
+
+/** Frames for one gif, as { names: [...], delays: [ms...] }, or null. */
+Handbook.decodeClip = function(gifPath) {
+    var info = new QFileInfo(gifPath);
+    if (!info.exists()) {
+        return null;
+    }
+    var key = String(info.fileName()).replace(/\.gif$/i, "") + "_" +
+        info.size();
+    var dir = QDir.tempPath() + "/cavecad-handbook-clips";
+    QDir.root().mkpath(dir);
+    var reader = new QImageReader(gifPath);
+    var names = [];
+    var delays = [];
+    while (names.length < Handbook.CLIP_MAX_FRAMES) {
+        var delay = reader.nextImageDelay();
+        var frame = reader.read();
+        if (frame.isNull()) {
+            break;
+        }
+        var name = key + "_f" + (names.length < 10 ? "00" :
+            names.length < 100 ? "0" : "") + names.length + ".png";
+        if (!new QFileInfo(dir + "/" + name).exists()) {
+            frame.save(dir + "/" + name, "PNG");
+        }
+        names.push(name);
+        delays.push(delay > 0 ? delay : 100);
+    }
+    if (names.length < 2) {
+        return null;
+    }
+    return { names: names, delays: delays, dir: dir };
+};
+
+/** Character position of the image named `name` in the view, or -1. */
+Handbook.findImage = function(doc, name) {
+    var cursor = new QTextCursor(doc);
+    var n = doc.characterCount();
+    for (var p = 0; p < n; p++) {
+        cursor.setPosition(p);
+        cursor.setPosition(p + 1, QTextCursor.KeepAnchor);
+        var f = cursor.charFormat();
+        if (f.isImageFormat() &&
+            String(f.property(Handbook.IMAGE_NAME)) === name) {
+            return p;
+        }
+    }
+    return -1;
+};
+
+Handbook.startClips = function(html, root) {
+    var w = Handbook.widgets;
+    w.clips = [];
+    var names = CsHandbook.clipNames(html);
+    if (names.length === 0) {
+        return;
+    }
+    try {
+        var doc = w.view.document;
+        var dirs = [];
+        for (var i = 0; i < names.length; i++) {
+            var clip = Handbook.decodeClip(root + "/images/" + names[i]);
+            if (clip === null) {
+                continue;
+            }
+            var at = Handbook.findImage(doc, names[i]);
+            if (at < 0) {
+                continue;
+            }
+            clip.src = names[i];
+            clip.at = at;
+            clip.frame = 0;
+            clip.due = 0;
+            w.clips.push(clip);
+            dirs.push(clip.dir);
+        }
+        if (w.clips.length === 0) {
+            return;
+        }
+        w.view.searchPaths = [root + "/images", root + "/pages", dirs[0]];
+        if (isNull(w.clipTimer)) {
+            w.clipTimer = new QTimer(w.view);
+            w.clipTimer.interval = Handbook.CLIP_TICK_MS;
+            w.clipTimer.timeout.connect(function() {
+                Handbook.tickClips();
+            });
+        }
+        w.clipTimer.start();
+    } catch (eClips) {
+        w.clips = [];
+    }
+};
+
+Handbook.tickClips = function() {
+    var w = Handbook.widgets;
+    var now = new Date().getTime();
+    try {
+        var doc = w.view.document;
+        for (var i = 0; i < w.clips.length; i++) {
+            var c = w.clips[i];
+            if (now < c.due) {
+                continue;
+            }
+            var cursor = new QTextCursor(doc);
+            cursor.setPosition(c.at);
+            cursor.setPosition(c.at + 1, QTextCursor.KeepAnchor);
+            var fmt = cursor.charFormat();
+            fmt.setProperty(Handbook.IMAGE_NAME, c.names[c.frame]);
+            cursor.setCharFormat(fmt);
+            c.due = now + c.delays[c.frame];
+            c.frame = (c.frame + 1) % c.names.length;
+        }
+    } catch (eTick) {
+        // a frame that will not draw ends the playback, not the panel
+        Handbook.stopClips();
+    }
 };
 
 /** The "Next:" line every page ends on, or "" at the end. */
@@ -403,6 +565,8 @@ Handbook.showMissing = function() {
  */
 Handbook.setHtml = function(html) {
     var w = Handbook.widgets;
+    // Every clip holds a character position in the OLD document.
+    Handbook.stopClips();
     try {
         w.view.html = html;
     } catch (eProp) {
