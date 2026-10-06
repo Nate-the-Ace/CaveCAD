@@ -1,15 +1,16 @@
 <h1>Annotative text: one note, every scale</h1>
 <p>A note that reads right at 1" = 10 ft is a smudge at 1" = 100 ft. <b>Annotative text</b> fixes that the way AutoCAD does: the text has a <b>paper height</b> (say 0.1 inch), so it prints the same size whatever the scale of the viewport it appears in, and a <b>list of scales</b> it supports, each with its <b>own position</b>, so a label can sit in a different place on a sheet at each scale.</p>
 <h2>Making it</h2>
+<p>Everything is in the <b>Annotation</b> section of the <b>Property Editor</b>, as in AutoCAD.</p>
 <ol>
-<li>Select some text and choose <b>Annotate &gt; Make Annotative</b>. It starts with one scale, the <b>annotation scale</b> shown at the right of the strip above the drawing (1" = 1' to begin with). Its present height is read as the paper height at that scale.</li>
-<li>Change the annotation scale in the strip, select the text and choose <b>Annotate &gt; Add Current Scale</b>. The new scale starts where the nearest existing one has the text; move it where you want it <b>at this scale</b> and only this scale's position moves.</li>
-<li><b>Delete Current Scale</b> takes a scale off (a text keeps at least one). <b>Make Not Annotative</b> turns it back into ordinary text as it looks at the current scale.</li>
+<li>Select some text and tick <b>Annotative</b>. It starts with one scale, the current <b>annotation scale</b> (1" = 1' to begin with). Its present height is read as the paper height at that scale. Untick it to make the text ordinary again, as it looks at the current scale.</li>
+<li>Open the <b>Scales</b> menu next to the check box. Every scale is listed, <b>all the imperial ones first, then the metric ones</b>, with a tick on the ones the text supports. Pick a scale to add it or take it off (a text keeps at least one). A new scale starts where the nearest existing one has the text; change the annotation scale below and move the text <b>at that scale</b>, and only that scale's position moves.</li>
+<li>The second row of the section is the <b>annotation scale</b> itself and the <b>All scales</b> switch.</li>
 </ol>
 <h2>What you see</h2>
 <ul>
 <li>In the <b>model</b>, annotative text is drawn at the current annotation scale. At a scale it does not have, it is not drawn.</li>
-<li>Press <b>All scales</b> in the strip and the text's other scales appear too, <b>shaded back</b>, each at its own size and place; the current one stays normal.</li>
+<li>Press <b>All scales</b> in the Annotation section and the text's other scales appear too, <b>shaded back</b>, each at its own size and place; the current one stays normal.</li>
 <li>In a <b>viewport</b>, text follows that viewport's own scale automatically, so there is no second setting to keep in step. A viewport at a scale the text lacks does not show it.</li>
 </ul>
 <h2>Good to know</h2>
