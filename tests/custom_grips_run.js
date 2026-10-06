@@ -96,13 +96,13 @@ check(MoveVertex.start(di2, pid, 0, 2), "the tool starts on a corner of an unloc
 var mv = MoveVertex.current;
 var ev = function(x, y) { var p = new RVector(x, y); return { getModelPosition: function() { return p; }, button: function() { return Qt.LeftButton; } }; };
 mv.mouseMoveEvent(ev(0.8, 0.7));
-check(near(corners()[2].x, 0.8) && near(corners()[2].y, 0.7) && near(corners()[0].x, 0.1), "the corner follows the mouse, the others stay");
+check(near(corners()[2].x, 0.6) && near(corners()[2].y, 0.5), "while the corner moves nothing in the drawing changes (an outline only: nothing to regenerate)");
+mv.mouseReleaseEvent(ev(0.8, 0.7));
+check(near(corners()[2].x, 0.8) && near(corners()[2].y, 0.7) && near(corners()[0].x, 0.1), "a click puts the corner down, the others stay");
 var grown = doc2.queryEntity(pid);
 check(near(grown.getWidth(), 0.7, 1e-9) && near(grown.getHeight(), 0.6, 1e-9), "and the viewport's box grows with it");
 var model1 = Layouts.paperToModel(grown, 0.3, 0.3);
 check(near(model0.x, model1.x, 1e-6) && near(model0.y, model1.y, 1e-6), "what the map shows at a fixed place on the paper does not slide");
-mv.mouseReleaseEvent(ev(0.8, 0.7));
-check(near(corners()[2].x, 0.8), "a click puts the corner down");
 di2.undo();
 check(near(corners()[2].x, 0.6) && near(corners()[2].y, 0.5), "one undo puts it back where it was before the whole move");
 di2.redo();
@@ -111,7 +111,7 @@ MoveVertex.start(di2, pid, 0, 0);
 var mv2 = MoveVertex.current;
 mv2.mouseMoveEvent(ev(0.0, 0.0));
 mv2.escapeEvent();
-check(near(corners()[0].x, 0.1) && near(corners()[0].y, 0.1), "Escape puts the corner back");
+check(near(corners()[0].x, 0.1) && near(corners()[0].y, 0.1), "Escape leaves the corner where it was");
 // ---- a TURNED viewport: moving a corner must not move the map either
 function forward(vp, mx, my) {     // where the engine puts a model point on the paper
     var c = vp.getCenter(), vc = vp.getViewCenter(), s = vp.getScale(), a = vp.getRotation();
@@ -127,9 +127,9 @@ var p0 = forward(doc2.queryEntity(pid), probe.x, probe.y);
 MoveVertex.start(di2, pid, 0, 1);
 var mv3 = MoveVertex.current;
 mv3.mouseMoveEvent(ev(0.9, 0.05));
+mv3.mouseReleaseEvent(ev(0.9, 0.05));
 var p1 = forward(doc2.queryEntity(pid), probe.x, probe.y);
 check(near(p0.x, p1.x, 1e-9) && near(p0.y, p1.y, 1e-9), "moving a corner of a TURNED viewport leaves every model point at the same place on the paper: (" + p0.x.toFixed(6) + "," + p0.y.toFixed(6) + ") vs (" + p1.x.toFixed(6) + "," + p1.y.toFixed(6) + ")");
-mv3.mouseReleaseEvent(ev(0.9, 0.05));
 var p2 = forward(doc2.queryEntity(pid), probe.x, probe.y);
 check(near(p0.x, p2.x, 1e-9) && near(p0.y, p2.y, 1e-9), "and after it is put down");
 Layouts.setLocked(di2, doc2.queryEntity(pid), true);

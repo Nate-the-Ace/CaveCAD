@@ -134,6 +134,15 @@ function main() {
     for (var sc = 0; sc < all.length; sc++) { if (near(all[sc].feetPerInch, 37.5)) idx37 = sc; if (near(all[sc].feetPerInch, 40)) idx40 = sc; }
     check(idx37 >= 0 && all[idx37].custom && idx37 < idx40, "the custom scale is in the list, in order, marked custom");
     check(Layouts.removeCustomScale(37.5) && Layouts.scales().length === Layouts.STANDARD_SCALES.length, "and can be removed");
+    // imperial first, then metric
+    var order = Layouts.scales(), seenMetric = false, mixed = false;
+    for (var oi = 0; oi < order.length; oi++) {
+        if (order[oi].metric) { seenMetric = true; } else if (seenMetric) { mixed = true; }
+    }
+    check(!mixed && seenMetric && !order[0].metric && order[order.length - 1].metric, "all the imperial scales come first, then the metric ones");
+    var imp = order.filter(function(x) { return !x.metric; }), met = order.filter(function(x) { return x.metric; });
+    check(imp.every(function(x, i) { return i === 0 || x.feetPerInch >= imp[i - 1].feetPerInch; }) && met.every(function(x, i) { return i === 0 || x.feetPerInch >= met[i - 1].feetPerInch; }), "each kind ascending");
+    check(order[0].label === "1\" = 1 ft", "the list starts at the default annotation scale, 1\" = 1 ft");
 
     // ---- Print.js sees the layout's own paper ---------------------------------------------
     include("scripts/File/Print/Print.js");
