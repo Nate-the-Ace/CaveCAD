@@ -98,7 +98,7 @@
     {
      "image": "survey-notebook-panel.png",
      "depicts": "scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js",
-     "hash": "b8b1cc3a2c613940b501720df9fb75da98b659bee74fa7956c73a0454cf86fb5"
+     "hash": "d24cf826157587ff76f06970d61166039fc9f3994d8a8398e0602e4f0c009c20"
     }
    ]
   },
@@ -188,7 +188,7 @@
     {
      "image": "draw-panel.png",
      "depicts": "scripts/CaveSurvey/DrawPanel/DrawPanel.js",
-     "hash": "03d3c5c8ef27d2eb5dbe42e842d63f057067bae1a6773b4570cafc470f0c4bce"
+     "hash": "edb2b874898bc930f9f3225f194490784679a2c1acc292d23b2e75deee79e3dc"
     }
    ]
   },
@@ -293,7 +293,7 @@
     {
      "image": "sketch-scans-panel.png",
      "depicts": "scripts/CaveSurvey/SketchScans/SketchScans.js",
-     "hash": "0afeff4516856ce889495e68dbc12a82a5ad14676ff29959de4a3288d70a3cfc"
+     "hash": "f5798872c27e400112c9041ac8ae397fc654dec657ad9c42c0f88333de79bb09"
     }
    ]
   },
@@ -332,7 +332,7 @@
     {
      "image": "sheet-setup-panel.png",
      "depicts": "scripts/CaveSurvey/SheetSetup/SheetSetup.js",
-     "hash": "fb9ec0d4f13e3bda03c74dbb67d69a5c7a718754b1ccc79b13b45efda83e9ec9"
+     "hash": "f4568e1e16122e43aff2104f6d6a3083548261b98641df83668cd6e62a4bdca6"
     }
    ]
   },
