@@ -1194,6 +1194,22 @@ fi
 
 echo
 echo "=============================================================="
+echo " 71/71 Moving a corner of a rectangular viewport leaves the map on the same pixels"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/viewport_rect_vertex_run.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### VIEWPORT RECT VERTEX OK"*) ;;
+        *) echo "Viewport rect vertex run did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found at $QCAD"
+fi
+
+echo
+echo "=============================================================="
 echo " Theme engine (palettes, custom colour, application style sheet)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then

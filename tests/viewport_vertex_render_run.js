@@ -39,6 +39,8 @@ function shot(name) {
   print(name + ": n=" + n + " box=" + [x1, y1, x2, y2].join(","));
 }
 shot("before");
+// exportBitmap's throwaway view is gone but the interface still remembers it; terminate() would post to it
+di.setLastKnownViewWithFocus(undefined);
 MoveVertex.start(di, id, 0, 2);
 var mv = MoveVertex.current;
 var ev = function(x, y) { var p = new RVector(x, y); return { getModelPosition: function() { return p; }, getScreenPosition: function() { return p; }, button: function() { return Qt.LeftButton; } }; };
