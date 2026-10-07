@@ -82,7 +82,13 @@
    "tools": [
     "TeachingCave"
    ],
-   "shots": []
+   "shots": [
+    {
+     "image": "teaching-cave-demo.gif",
+     "depicts": "scripts/CaveSurvey/TeachingCave/TeachingCave.js",
+     "hash": "64d334b73da8af595a5fe395a8bda3098e51f23b1465cba55fe391d5639d9af2"
+    }
+   ]
   },
   {
    "id": "reset-drawing",
@@ -93,7 +99,13 @@
    "tools": [
     "ResetDrawing"
    ],
-   "shots": []
+   "shots": [
+    {
+     "image": "reset-drawing-demo.gif",
+     "depicts": "scripts/CaveSurvey/ResetDrawing/ResetDrawing.js",
+     "hash": "79c25e9f4c99ccbb367ac90bc405b21c85057c2bfb35017d1614c3e3f600727e"
+    }
+   ]
   },
   {
    "id": "survey-notebook",
@@ -227,7 +239,13 @@
    "tools": [
     "FeatureTrace"
    ],
-   "shots": []
+   "shots": [
+    {
+     "image": "feature-trace-demo.gif",
+     "depicts": "scripts/CaveSurvey/FeatureTrace/FeatureTrace.js",
+     "hash": "d994dc263170e124b39c9774b0aa2fef83f130e666b2dab03d9b9ca54d78e642"
+    }
+   ]
   },
   {
    "id": "shaped-lines",
@@ -238,7 +256,13 @@
    "tools": [
     "ShapedLines"
    ],
-   "shots": []
+   "shots": [
+    {
+     "image": "shaped-lines-demo.gif",
+     "depicts": "scripts/CaveSurvey/ShapedLines/ShapedLines.js",
+     "hash": "30b2c947e2face9500f35d9cb63f6022c4e881ef1f7550656268357199fa2b78"
+    }
+   ]
   },
   {
    "id": "scatter-breakdown",
@@ -299,7 +323,13 @@
    "tools": [
     "LinetypeMaker"
    ],
-   "shots": []
+   "shots": [
+    {
+     "image": "linetype-maker-demo.gif",
+     "depicts": "scripts/CaveSurvey/LinetypeMaker/LinetypeMaker.js",
+     "hash": "cb61d06b598b1d452a492bb4e4d97504c9f3b516d849e6954a59abad4e6ca3b5"
+    }
+   ]
   },
   {
    "id": "area-fill",
@@ -310,7 +340,13 @@
    "tools": [
     "AreaFill"
    ],
-   "shots": []
+   "shots": [
+    {
+     "image": "area-fill-demo.gif",
+     "depicts": "scripts/CaveSurvey/AreaFill/AreaFill.js",
+     "hash": "8ffd1618f85a4d4ccfa44251e773acb8c4e060837658c95e30a667b1b6eeafae"
+    }
+   ]
   },
   {
    "id": "sketch-scans",
@@ -420,7 +456,13 @@
    "tools": [
     "Callout"
    ],
-   "shots": []
+   "shots": [
+    {
+     "image": "callout-demo.gif",
+     "depicts": "scripts/CaveSurvey/Callout/Callout.js",
+     "hash": "1e4981a6b694002f6235b13cc7ebd2b42f43ad618769b03a7b6cbc6114f0d266"
+    }
+   ]
   },
   {
    "id": "check-map",
@@ -464,7 +506,13 @@
    "tools": [
     "PackageCave"
    ],
-   "shots": []
+   "shots": [
+    {
+     "image": "package-cave-project-demo.gif",
+     "depicts": "scripts/CaveSurvey/PackageCave/PackageCave.js",
+     "hash": "8ebd477e6da39e1630a512c87838f0ea0a7edd73722a087fe1d38fdb99fd4b18"
+    }
+   ]
   },
   {
    "id": "line-up-a-scan",

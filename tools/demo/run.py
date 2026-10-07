@@ -90,8 +90,15 @@ def main():
     call(open(scen).read())
     call("CsDemo.openFresh(%s); 'opened'" % json.dumps(fresh), timeout=180)
     try:
-        call("CsDemo.start(CsDemoScenario, %s); 'started'" % json.dumps(out),
-             timeout=240)
+        text = open(scen).read()
+        if re.search(r"^\s*modal: true", text, re.M):
+            starter = "startModal"
+        elif re.search(r"^\s*canvas: true", text, re.M):
+            starter = "startCanvas"
+        else:
+            starter = "start"
+        call("CsDemo.%s(CsDemoScenario, %s); 'started'" %
+             (starter, json.dumps(out)), timeout=240)
     except Exception:
         # setup refused or threw: the temp tab must not outlive the take
         call("CsDemo.closeFresh(); 'closed'")
